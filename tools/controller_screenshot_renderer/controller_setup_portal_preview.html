@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Controller Setup Preview</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #120d0a;
+      color: #f4efe7;
+      padding: 24px;
+      margin: 0;
+    }
+
+    main {
+      max-width: 560px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+
+    h2 {
+      margin: 0 0 8px;
+      font-size: 20px;
+      color: #ffc685;
+    }
+
+    p {
+      color: #d5c1ae;
+      margin: 0 0 12px;
+    }
+
+    form {
+      background: #261a13;
+      border: 1px solid #926333;
+      border-radius: 20px;
+      padding: 18px;
+      margin-top: 18px;
+    }
+
+    label {
+      display: block;
+      margin: 14px 0 6px;
+      color: #ffc685;
+      font-weight: 600;
+    }
+
+    input,
+    select {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid #5d4128;
+      background: #1a120d;
+      color: #f4efe7;
+    }
+
+    button {
+      margin-top: 18px;
+      padding: 12px 18px;
+      border: none;
+      border-radius: 14px;
+      background: #ffc685;
+      color: #120d0a;
+      font-weight: 700;
+      cursor: default;
+    }
+
+    pre {
+      white-space: pre-wrap;
+      background: #1a120d;
+      padding: 16px;
+      border-radius: 16px;
+      border: 1px solid #5d4128;
+      margin: 0;
+    }
+
+    .banner {
+      color: #ffc685;
+      font-weight: 700;
+      margin: 12px 0;
+    }
+
+    .section-note {
+      margin-top: 6px;
+      font-size: 14px;
+      color: #d5c1ae;
+    }
+
+    .secondary {
+      background: #3a281d;
+      color: #f4efe7;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .button-row button {
+      flex: 1 1 180px;
+    }
+
+    .topnav {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 18px 0 8px;
+    }
+
+    .topnav a {
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid #5d4128;
+      background: #261a13;
+      color: #f4efe7;
+      text-decoration: none;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Controller Setup</h1>
+    <p>Use this page to store the La Marzocco cloud account and the home Wi-Fi settings on the controller. The Wi-Fi scan fills the SSID automatically.</p>
+    <div class="banner">Setup portal active on LM-CTRL-76C1</div>
+    <pre>Portal running: yes
+Wi-Fi connected: yes
+Cloud credentials stored: yes
+Selected machine: Linea Mini R · LM012345
+Live updates: connected
+Header logo: default text</pre>
+    <p class="section-note">Use <strong>http://lamarzocco.local/</strong> in your home network. The router IP can change after reconnects or flashes.</p>
+    <nav class="topnav">
+      <a href="#controller-section">Controller</a>
+      <a href="#network-section">Network</a>
+      <a href="#cloud-section">Cloud</a>
+      <a href="#presets-section">Presets</a>
+      <a href="#advanced-section">Advanced</a>
+    </nav>
+
+    <form id="controller-section">
+      <h2>Controller</h2>
+      <label for="hostname">Controller Hostname</label>
+      <input id="hostname" value="lamarzocco">
+      <label for="language">Controller Language</label>
+      <select id="language">
+        <option selected>English</option>
+        <option>Deutsch</option>
+      </select>
+      <div class="section-note">Language only affects the on-device controller UI. English stays the default.</div>
+      <button type="button">Save Controller Settings</button>
+    </form>
+
+    <form>
+      <h2>Header Logo</h2>
+      <div class="section-note">Current header: <strong>Default text</strong></div>
+      <label for="logo-file">Local SVG File</label>
+      <input id="logo-file" value="">
+      <div class="section-note">Optional controller setting. The project does not ship official La Marzocco logos. Uploaded SVGs are rasterized in your browser, stored locally on this controller, and shown only on the device display.</div>
+      <div class="button-row">
+        <button type="button">Upload Logo</button>
+        <button class="secondary" type="button">Remove Logo</button>
+      </div>
+      <div class="section-note">SVG upload stays local to the device and is not bundled with the project.</div>
+    </form>
+
+    <form id="network-section">
+      <h2>Network</h2>
+      <button type="button">Scan Nearby Networks</button>
+      <label for="network-list">Nearby Networks</label>
+      <select id="network-list">
+        <option selected>Select from scan results</option>
+        <option>MeinWLAN</option>
+      </select>
+      <label for="ssid">Home Wi-Fi SSID</label>
+      <input id="ssid" value="MeinWLAN">
+      <label for="password">Wi-Fi Password</label>
+      <input id="password" type="password" value="">
+      <div class="section-note">Saving Wi-Fi starts a reconnect attempt immediately. Leave the password blank to keep the stored password for the same SSID.</div>
+      <button type="button">Save Wi-Fi And Connect</button>
+    </form>
+  </main>
+</body>
+</html>

@@ -1,0 +1,16 @@
+__pycache__
+.DS_Store
+pythonenv*
+venv
+.venv
+.coverage
+.idea
+.lm_installation_key.json
+JC3636K718_knob_EN/
+
+# ESP-IDF firmware build artifacts
+firmware/esp32/build/
+firmware/esp32/managed_components/
+firmware/esp32/dependencies.lock
+firmware/esp32/sdkconfig
+firmware/esp32/sdkconfig.old

@@ -1,0 +1,12 @@
+La Marzocco Round Controller
+Copyright 2026 kaspizzo and contributors
+
+This repository builds on community work and protocol research, especially:
+
+- zweckj/pylamarzocco
+- early public community reverse engineering around La Marzocco connectivity
+
+Vendor hardware bundles and recovery assets for the JC3636K718 hardware family
+are not distributed as part of this repository and are not covered by the Apache-2.0
+license for this project source tree. See docs/controller/VENDOR_ASSETS.md for the
+expected local-only setup.

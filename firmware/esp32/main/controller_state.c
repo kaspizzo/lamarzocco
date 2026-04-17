@@ -1,0 +1,944 @@
+/**
+ * Controller state machine and recipe persistence helpers.
+ *
+ * The state layer stays intentionally small: it owns editable values, overlay
+ * navigation, presets, and the NVS-backed recipe snapshot used across reboots.
+ */
+#include "controller_state.h"
+
+#include <stdio.h>
+#include <stddef.h>
+#include <string.h>
+
+#include "esp_log.h"
+#include "nvs.h"
+
+static const char *TAG = "ctrl_state";
+static const char *CTRL_STATE_NAMESPACE = "ctrl_state";
+static const char *CTRL_STATE_KEY_SCHEMA = "schema";
+static const char *CTRL_STATE_KEY_CURRENT = "current";
+static const char *CTRL_STATE_KEY_PERSISTED = "persisted";
+static const uint8_t CTRL_STATE_SCHEMA_VERSION = 3;
+static const uint8_t CTRL_RESET_ARM_STEPS = 24;
+static volatile uint32_t s_preset_version = 1;
+
+typedef struct {
+  float temperature_c;
+  float infuse_s;
+  float pause_s;
+} ctrl_recipe_values_v1_t;
+
+typedef struct {
+  float temperature_c;
+  float infuse_s;
+  float pause_s;
+  uint8_t bbw_mode;
+  float bbw_dose_1_g;
+  float bbw_dose_2_g;
+} ctrl_recipe_values_t;
+
+typedef struct {
+  ctrl_recipe_values_t values;
+  ctrl_recipe_values_t presets[CTRL_PRESET_COUNT];
+} ctrl_persisted_state_t;
+
+typedef struct {
+  char name[CTRL_PRESET_NAME_LEN];
+  ctrl_recipe_values_t values;
+} ctrl_persisted_preset_t;
+
+static void copy_text(char *dst, size_t dst_size, const char *src) {
+  size_t len;
+
+  if (dst == NULL || dst_size == 0) {
+    return;
+  }
+
+  if (src == NULL) {
+    dst[0] = '\0';
+    return;
+  }
+
+  len = strnlen(src, dst_size - 1);
+  memcpy(dst, src, len);
+  dst[len] = '\0';
+}
+
+static uint32_t bump_preset_version(void) {
+  return __atomic_add_fetch(&s_preset_version, 1U, __ATOMIC_RELAXED);
+}
+
+static void format_preset_key(int preset_index, char *buffer, size_t buffer_size) {
+  if (buffer == NULL || buffer_size == 0) {
+    return;
+  }
+
+  snprintf(buffer, buffer_size, "preset%d", preset_index);
+}
+
+void ctrl_preset_default_name(int preset_index, char *buffer, size_t buffer_size) {
+  if (buffer == NULL || buffer_size == 0) {
+    return;
+  }
+
+  snprintf(buffer, buffer_size, "Preset %d", preset_index + 1);
+}
+
+void ctrl_preset_display_name(const ctrl_preset_t *preset, int preset_index, char *buffer, size_t buffer_size) {
+  if (buffer == NULL || buffer_size == 0) {
+    return;
+  }
+
+  if (preset != NULL && preset->name[0] != '\0') {
+    copy_text(buffer, buffer_size, preset->name);
+    return;
+  }
+
+  ctrl_preset_default_name(preset_index, buffer, buffer_size);
+}
+
+static float clampf(float v, float lo, float hi) {
+  if (v < lo) return lo;
+  if (v > hi) return hi;
+  return v;
+}
+
+static int wrap_index(int value, int count) {
+  if (count <= 0) {
+    return 0;
+  }
+
+  int wrapped = value % count;
+  if (wrapped < 0) {
+    wrapped += count;
+  }
+  return wrapped;
+}
+
+static void copy_values(ctrl_values_t *dst, const ctrl_values_t *src) {
+  if (dst == NULL || src == NULL) {
+    return;
+  }
+
+  dst->temperature_c = src->temperature_c;
+  dst->infuse_s = src->infuse_s;
+  dst->pause_s = src->pause_s;
+  dst->bbw_mode = src->bbw_mode;
+  dst->bbw_dose_1_g = src->bbw_dose_1_g;
+  dst->bbw_dose_2_g = src->bbw_dose_2_g;
+}
+
+static void copy_preset(ctrl_preset_t *dst, const ctrl_preset_t *src) {
+  if (dst == NULL || src == NULL) {
+    return;
+  }
+
+  copy_text(dst->name, sizeof(dst->name), src->name);
+  copy_values(&dst->values, &src->values);
+}
+
+static ctrl_bbw_mode_t normalize_bbw_mode(ctrl_bbw_mode_t mode) {
+  switch (mode) {
+    case CTRL_BBW_MODE_DOSE_1:
+    case CTRL_BBW_MODE_DOSE_2:
+    case CTRL_BBW_MODE_CONTINUOUS:
+      return mode;
+    default:
+      return CTRL_BBW_MODE_DOSE_1;
+  }
+}
+
+static void copy_recipe_values_from_persisted_v1(ctrl_values_t *dst, const ctrl_recipe_values_v1_t *src) {
+  if (dst == NULL || src == NULL) {
+    return;
+  }
+
+  dst->temperature_c = src->temperature_c;
+  dst->infuse_s = src->infuse_s;
+  dst->pause_s = src->pause_s;
+}
+
+static void copy_recipe_values_from_persisted(ctrl_values_t *dst, const ctrl_recipe_values_t *src) {
+  if (dst == NULL || src == NULL) {
+    return;
+  }
+
+  copy_recipe_values_from_persisted_v1(dst, (const ctrl_recipe_values_v1_t *)src);
+  dst->bbw_mode = normalize_bbw_mode((ctrl_bbw_mode_t)src->bbw_mode);
+  dst->bbw_dose_1_g = src->bbw_dose_1_g;
+  dst->bbw_dose_2_g = src->bbw_dose_2_g;
+}
+
+static void copy_persisted_from_values(ctrl_recipe_values_t *dst, const ctrl_values_t *src) {
+  if (dst == NULL || src == NULL) {
+    return;
+  }
+
+  dst->temperature_c = src->temperature_c;
+  dst->infuse_s = src->infuse_s;
+  dst->pause_s = src->pause_s;
+  dst->bbw_mode = (uint8_t)normalize_bbw_mode(src->bbw_mode);
+  dst->bbw_dose_1_g = src->bbw_dose_1_g;
+  dst->bbw_dose_2_g = src->bbw_dose_2_g;
+}
+
+static void copy_persisted_preset_from_preset(ctrl_persisted_preset_t *dst, const ctrl_preset_t *src) {
+  if (dst == NULL || src == NULL) {
+    return;
+  }
+
+  memset(dst, 0, sizeof(*dst));
+  copy_text(dst->name, sizeof(dst->name), src->name);
+  copy_persisted_from_values(&dst->values, &src->values);
+}
+
+static void normalize_recipe_values(ctrl_values_t *values) {
+  if (values == NULL) {
+    return;
+  }
+
+  values->temperature_c = clampf(values->temperature_c, 80.0f, 103.0f);
+  values->infuse_s = clampf(values->infuse_s, 0.0f, 9.0f);
+  values->pause_s = clampf(values->pause_s, 0.0f, 9.0f);
+  values->bbw_mode = normalize_bbw_mode(values->bbw_mode);
+  values->bbw_dose_1_g = clampf(values->bbw_dose_1_g, 5.0f, 100.0f);
+  values->bbw_dose_2_g = clampf(values->bbw_dose_2_g, 5.0f, 100.0f);
+}
+
+static void normalize_preset(ctrl_preset_t *preset) {
+  if (preset == NULL) {
+    return;
+  }
+
+  normalize_recipe_values(&preset->values);
+  preset->name[CTRL_PRESET_NAME_LEN - 1] = '\0';
+}
+
+static esp_err_t load_recipe_blob(nvs_handle_t handle, const char *key, ctrl_values_t *dst, uint8_t schema_version) {
+  ctrl_recipe_values_t stored = {0};
+  ctrl_recipe_values_v1_t stored_v1 = {0};
+  size_t size = schema_version >= 2 ? sizeof(stored) : sizeof(stored_v1);
+  esp_err_t ret;
+
+  if (key == NULL || dst == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  if (schema_version >= 2) {
+    ret = nvs_get_blob(handle, key, &stored, &size);
+  } else {
+    ret = nvs_get_blob(handle, key, &stored_v1, &size);
+  }
+  if (ret != ESP_OK) {
+    return ret;
+  }
+  if ((schema_version >= 2 && size != sizeof(stored)) ||
+      (schema_version < 2 && size != sizeof(stored_v1))) {
+    return ESP_ERR_INVALID_SIZE;
+  }
+
+  if (schema_version >= 2) {
+    copy_recipe_values_from_persisted(dst, &stored);
+  } else {
+    copy_recipe_values_from_persisted_v1(dst, &stored_v1);
+  }
+  normalize_recipe_values(dst);
+  return ESP_OK;
+}
+
+static esp_err_t store_recipe_blob(nvs_handle_t handle, const char *key, const ctrl_values_t *src) {
+  ctrl_recipe_values_t stored = {0};
+
+  if (key == NULL || src == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  copy_persisted_from_values(&stored, src);
+  return nvs_set_blob(handle, key, &stored, sizeof(stored));
+}
+
+static esp_err_t load_preset_blob(nvs_handle_t handle, const char *key, ctrl_preset_t *dst, uint8_t schema_version, int preset_index) {
+  ctrl_persisted_preset_t stored = {0};
+  size_t size = sizeof(stored);
+  esp_err_t ret;
+
+  if (key == NULL || dst == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  if (schema_version >= 3) {
+    ret = nvs_get_blob(handle, key, &stored, &size);
+    if (ret != ESP_OK) {
+      return ret;
+    }
+    if (size != sizeof(stored)) {
+      return ESP_ERR_INVALID_SIZE;
+    }
+
+    copy_text(dst->name, sizeof(dst->name), stored.name);
+    copy_recipe_values_from_persisted(&dst->values, &stored.values);
+    normalize_preset(dst);
+    return ESP_OK;
+  }
+
+  ret = load_recipe_blob(handle, key, &dst->values, schema_version);
+  if (ret != ESP_OK) {
+    return ret;
+  }
+
+  ctrl_preset_default_name(preset_index, dst->name, sizeof(dst->name));
+  normalize_preset(dst);
+  return ESP_OK;
+}
+
+static esp_err_t store_preset_blob(nvs_handle_t handle, const char *key, const ctrl_preset_t *src) {
+  ctrl_persisted_preset_t stored = {0};
+
+  if (key == NULL || src == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  copy_persisted_preset_from_preset(&stored, src);
+  return nvs_set_blob(handle, key, &stored, sizeof(stored));
+}
+
+static esp_err_t load_versioned_state(nvs_handle_t handle, ctrl_state_t *state, bool *used_versioned_format) {
+  uint8_t schema = 0;
+  bool loaded_any = false;
+  esp_err_t ret;
+  int preset_index;
+
+  if (state == NULL || used_versioned_format == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  *used_versioned_format = false;
+
+  ret = nvs_get_u8(handle, CTRL_STATE_KEY_SCHEMA, &schema);
+  if (ret != ESP_OK) {
+    return ret;
+  }
+  if (schema != 1 && schema != 2 && schema != CTRL_STATE_SCHEMA_VERSION) {
+    return ESP_ERR_INVALID_VERSION;
+  }
+
+  *used_versioned_format = true;
+
+  ret = load_recipe_blob(handle, CTRL_STATE_KEY_CURRENT, &state->values, schema);
+  if (ret == ESP_OK) {
+    loaded_any = true;
+  } else if (ret != ESP_ERR_NVS_NOT_FOUND) {
+    ESP_LOGW(TAG, "Could not load current recipe: %s", esp_err_to_name(ret));
+  }
+
+  for (preset_index = 0; preset_index < CTRL_PRESET_COUNT; ++preset_index) {
+    char preset_key[16];
+
+    format_preset_key(preset_index, preset_key, sizeof(preset_key));
+    ret = load_preset_blob(handle, preset_key, &state->presets[preset_index], schema, preset_index);
+    if (ret == ESP_OK) {
+      loaded_any = true;
+    } else if (ret != ESP_ERR_NVS_NOT_FOUND) {
+      ESP_LOGW(TAG, "Could not load %s: %s", preset_key, esp_err_to_name(ret));
+    }
+  }
+
+  return loaded_any ? ESP_OK : ESP_ERR_NVS_NOT_FOUND;
+}
+
+static esp_err_t load_legacy_blob_state(nvs_handle_t handle, ctrl_state_t *state, bool *used_legacy_format) {
+  ctrl_persisted_state_t persisted = {0};
+  size_t size = sizeof(persisted);
+  esp_err_t ret;
+  int preset_index;
+
+  if (state == NULL || used_legacy_format == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  *used_legacy_format = false;
+
+  ret = nvs_get_blob(handle, CTRL_STATE_KEY_PERSISTED, &persisted, &size);
+  if (ret != ESP_OK) {
+    return ret;
+  }
+  if (size != sizeof(persisted)) {
+    return ESP_ERR_INVALID_SIZE;
+  }
+
+  *used_legacy_format = true;
+  copy_recipe_values_from_persisted(&state->values, &persisted.values);
+  normalize_recipe_values(&state->values);
+  for (preset_index = 0; preset_index < CTRL_PRESET_COUNT; ++preset_index) {
+    copy_recipe_values_from_persisted(&state->presets[preset_index].values, &persisted.presets[preset_index]);
+    ctrl_preset_default_name(preset_index, state->presets[preset_index].name, sizeof(state->presets[preset_index].name));
+    normalize_preset(&state->presets[preset_index]);
+  }
+
+  return ESP_OK;
+}
+
+static bool *focus_bool_ptr(ctrl_state_t *state, ctrl_focus_t focus) {
+  if (state == NULL) {
+    return NULL;
+  }
+
+  switch (focus) {
+    case CTRL_FOCUS_STEAM:
+      return &state->values.steam_on;
+    case CTRL_FOCUS_STANDBY:
+      return &state->values.standby_on;
+    default:
+      return NULL;
+  }
+}
+
+static ctrl_bbw_mode_t cycle_bbw_mode(ctrl_bbw_mode_t mode, int delta_steps) {
+  int mode_index = (int)normalize_bbw_mode(mode);
+
+  if (delta_steps == 0) {
+    return normalize_bbw_mode(mode);
+  }
+
+  mode_index = wrap_index(mode_index + delta_steps, 3);
+  return (ctrl_bbw_mode_t)mode_index;
+}
+
+static ctrl_action_t make_action(ctrl_action_type_t type, ctrl_focus_t focus, int preset_slot) {
+  return (ctrl_action_t){
+    .type = type,
+    .applied_focus = focus,
+    .preset_slot = preset_slot,
+  };
+}
+
+void ctrl_state_init(ctrl_state_t *state) {
+  if (state == NULL) {
+    return;
+  }
+
+  state->values.temperature_c = 93.0f;
+  state->values.infuse_s = 1.0f;
+  state->values.pause_s = 2.0f;
+  state->values.steam_on = true;
+  state->values.standby_on = false;
+  state->values.bbw_mode = CTRL_BBW_MODE_DOSE_1;
+  state->values.bbw_dose_1_g = 32.0f;
+  state->values.bbw_dose_2_g = 34.0f;
+  state->loaded_mask = 0;
+  state->feature_mask = 0;
+  state->focus = CTRL_FOCUS_TEMPERATURE;
+  state->screen = CTRL_SCREEN_MAIN;
+  state->preset_index = 0;
+  state->reset_progress = 0;
+  state->reset_confirm_yes = false;
+
+  copy_values(&state->presets[0].values, &state->values);
+  ctrl_preset_default_name(0, state->presets[0].name, sizeof(state->presets[0].name));
+  state->presets[1] = (ctrl_preset_t){
+    .name = "Preset 2",
+    .values = {
+      .temperature_c = 94.0f,
+      .infuse_s = 1.5f,
+      .pause_s = 2.5f,
+      .bbw_mode = CTRL_BBW_MODE_DOSE_1,
+      .bbw_dose_1_g = 34.0f,
+      .bbw_dose_2_g = 36.0f,
+      .steam_on = true,
+      .standby_on = false,
+    },
+  };
+  state->presets[2] = (ctrl_preset_t){
+    .name = "Preset 3",
+    .values = {
+      .temperature_c = 91.5f,
+      .infuse_s = 0.5f,
+      .pause_s = 1.0f,
+      .bbw_mode = CTRL_BBW_MODE_DOSE_2,
+      .bbw_dose_1_g = 28.0f,
+      .bbw_dose_2_g = 32.0f,
+      .steam_on = false,
+      .standby_on = false,
+    },
+  };
+  state->presets[3] = (ctrl_preset_t){
+    .name = "Preset 4",
+    .values = {
+      .temperature_c = 96.0f,
+      .infuse_s = 2.5f,
+      .pause_s = 3.0f,
+      .bbw_mode = CTRL_BBW_MODE_CONTINUOUS,
+      .bbw_dose_1_g = 30.0f,
+      .bbw_dose_2_g = 38.0f,
+      .steam_on = true,
+      .standby_on = true,
+    },
+  };
+}
+
+esp_err_t ctrl_state_load(ctrl_state_t *state) {
+  nvs_handle_t handle;
+  esp_err_t ret;
+  bool used_versioned_format = false;
+  bool used_legacy_format = false;
+
+  if (state == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  ret = nvs_open(CTRL_STATE_NAMESPACE, NVS_READONLY, &handle);
+  if (ret == ESP_ERR_NVS_NOT_FOUND) {
+    return ESP_OK;
+  }
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "Could not open persisted controller state: %s", esp_err_to_name(ret));
+    return ret;
+  }
+
+  ret = load_versioned_state(handle, state, &used_versioned_format);
+  if (ret == ESP_ERR_NVS_NOT_FOUND) {
+    ret = load_legacy_blob_state(handle, state, &used_legacy_format);
+  }
+  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
+    ESP_LOGW(TAG, "Could not load persisted controller state: %s", esp_err_to_name(ret));
+  }
+
+  nvs_close(handle);
+
+  if (ret == ESP_OK && used_legacy_format) {
+    esp_err_t migrate_ret = ctrl_state_persist(state);
+    if (migrate_ret != ESP_OK) {
+      ESP_LOGW(TAG, "Could not migrate legacy presets: %s", esp_err_to_name(migrate_ret));
+    }
+  }
+
+  return (ret == ESP_ERR_NVS_NOT_FOUND) ? ESP_OK : ret;
+}
+
+esp_err_t ctrl_state_persist(const ctrl_state_t *state) {
+  nvs_handle_t handle;
+  esp_err_t ret;
+  int preset_index;
+
+  if (state == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  ret = nvs_open(CTRL_STATE_NAMESPACE, NVS_READWRITE, &handle);
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "Could not open persisted controller state for writing: %s", esp_err_to_name(ret));
+    return ret;
+  }
+
+  ret = nvs_set_u8(handle, CTRL_STATE_KEY_SCHEMA, CTRL_STATE_SCHEMA_VERSION);
+  if (ret == ESP_OK) {
+    ret = store_recipe_blob(handle, CTRL_STATE_KEY_CURRENT, &state->values);
+  }
+  for (preset_index = 0; ret == ESP_OK && preset_index < CTRL_PRESET_COUNT; ++preset_index) {
+    char preset_key[16];
+
+    format_preset_key(preset_index, preset_key, sizeof(preset_key));
+    ret = store_preset_blob(handle, preset_key, &state->presets[preset_index]);
+  }
+  if (ret == ESP_OK) {
+    ret = nvs_erase_key(handle, CTRL_STATE_KEY_PERSISTED);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+      ret = ESP_OK;
+    }
+  }
+  if (ret == ESP_OK) {
+    ret = nvs_commit(handle);
+  }
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "Could not persist controller state: %s", esp_err_to_name(ret));
+  }
+
+  nvs_close(handle);
+  return ret;
+}
+
+void ctrl_rotate(ctrl_state_t *state, int delta_steps) {
+  if (state == NULL || delta_steps == 0) {
+    return;
+  }
+
+  if (state->screen == CTRL_SCREEN_PRESETS) {
+    state->preset_index = (uint8_t)wrap_index((int)state->preset_index + delta_steps, CTRL_PRESET_COUNT);
+    return;
+  }
+
+  if (state->screen == CTRL_SCREEN_SETUP_RESET_ARM) {
+    int progress = (int)state->reset_progress + delta_steps;
+
+    if (progress < 0) {
+      progress = 0;
+    }
+    if (progress >= CTRL_RESET_ARM_STEPS) {
+      state->reset_progress = CTRL_RESET_ARM_STEPS;
+      state->reset_confirm_yes = false;
+      state->screen = CTRL_SCREEN_SETUP_RESET_CONFIRM;
+      return;
+    }
+
+    state->reset_progress = (uint8_t)progress;
+    return;
+  }
+
+  if (state->screen == CTRL_SCREEN_SETUP_RESET_CONFIRM) {
+    if (delta_steps > 0) {
+      state->reset_confirm_yes = true;
+    } else if (delta_steps < 0) {
+      state->reset_confirm_yes = false;
+    }
+    return;
+  }
+
+  if (state->screen != CTRL_SCREEN_MAIN) {
+    return;
+  }
+
+  switch (state->focus) {
+    case CTRL_FOCUS_TEMPERATURE:
+      state->values.temperature_c = clampf(state->values.temperature_c + (0.1f * delta_steps), 80.0f, 103.0f);
+      break;
+    case CTRL_FOCUS_INFUSE:
+      state->values.infuse_s = clampf(state->values.infuse_s + (0.1f * delta_steps), 0.0f, 9.0f);
+      break;
+    case CTRL_FOCUS_PAUSE:
+      state->values.pause_s = clampf(state->values.pause_s + (0.1f * delta_steps), 0.0f, 9.0f);
+      break;
+    case CTRL_FOCUS_STEAM:
+      if (delta_steps > 0) state->values.steam_on = true;
+      if (delta_steps < 0) state->values.steam_on = false;
+      break;
+    case CTRL_FOCUS_STANDBY:
+      if (delta_steps > 0) state->values.standby_on = true;
+      if (delta_steps < 0) state->values.standby_on = false;
+      break;
+    case CTRL_FOCUS_BBW_MODE:
+      state->values.bbw_mode = cycle_bbw_mode(state->values.bbw_mode, delta_steps);
+      break;
+    case CTRL_FOCUS_BBW_DOSE_1:
+      state->values.bbw_dose_1_g = clampf(state->values.bbw_dose_1_g + (0.1f * delta_steps), 5.0f, 100.0f);
+      break;
+    case CTRL_FOCUS_BBW_DOSE_2:
+      state->values.bbw_dose_2_g = clampf(state->values.bbw_dose_2_g + (0.1f * delta_steps), 5.0f, 100.0f);
+      break;
+    default:
+      break;
+  }
+}
+
+void ctrl_set_focus(ctrl_state_t *state, ctrl_focus_t focus) {
+  if (state == NULL) {
+    return;
+  }
+
+  if (focus < CTRL_FOCUS_TEMPERATURE || focus >= CTRL_FOCUS_COUNT) {
+    return;
+  }
+
+  if ((focus == CTRL_FOCUS_BBW_MODE ||
+       focus == CTRL_FOCUS_BBW_DOSE_1 ||
+       focus == CTRL_FOCUS_BBW_DOSE_2) &&
+      (state->feature_mask & CTRL_FEATURE_BBW) == 0) {
+    return;
+  }
+
+  state->focus = focus;
+  state->screen = CTRL_SCREEN_MAIN;
+}
+
+void ctrl_toggle_focus(ctrl_state_t *state, ctrl_focus_t focus) {
+  bool *value = focus_bool_ptr(state, focus);
+  if (value == NULL) {
+    return;
+  }
+
+  state->focus = focus;
+  state->screen = CTRL_SCREEN_MAIN;
+  *value = !(*value);
+}
+
+void ctrl_open_presets(ctrl_state_t *state) {
+  if (state == NULL) {
+    return;
+  }
+
+  state->screen = CTRL_SCREEN_PRESETS;
+}
+
+void ctrl_open_setup(ctrl_state_t *state) {
+  if (state == NULL) {
+    return;
+  }
+
+  state->reset_progress = 0;
+  state->reset_confirm_yes = false;
+  state->screen = CTRL_SCREEN_SETUP;
+}
+
+void ctrl_open_setup_reset(ctrl_state_t *state) {
+  if (state == NULL) {
+    return;
+  }
+
+  state->reset_progress = 0;
+  state->reset_confirm_yes = false;
+  state->screen = CTRL_SCREEN_SETUP_RESET_ARM;
+}
+
+void ctrl_cancel_setup_reset(ctrl_state_t *state) {
+  if (state == NULL) {
+    return;
+  }
+
+  state->reset_progress = 0;
+  state->reset_confirm_yes = false;
+  state->screen = CTRL_SCREEN_SETUP;
+}
+
+void ctrl_close_overlay(ctrl_state_t *state) {
+  if (state == NULL) {
+    return;
+  }
+
+  state->reset_progress = 0;
+  state->reset_confirm_yes = false;
+  state->screen = CTRL_SCREEN_MAIN;
+}
+
+ctrl_action_t ctrl_confirm_setup_reset(ctrl_state_t *state) {
+  if (state == NULL || state->screen != CTRL_SCREEN_SETUP_RESET_CONFIRM) {
+    return make_action(CTRL_ACTION_NONE, CTRL_FOCUS_TEMPERATURE, -1);
+  }
+
+  state->reset_progress = 0;
+  if (!state->reset_confirm_yes) {
+    state->screen = CTRL_SCREEN_SETUP;
+    return make_action(CTRL_ACTION_NONE, CTRL_FOCUS_TEMPERATURE, -1);
+  }
+
+  state->reset_confirm_yes = false;
+  state->screen = CTRL_SCREEN_SETUP;
+  return make_action(CTRL_ACTION_RESET_NETWORK, CTRL_FOCUS_TEMPERATURE, -1);
+}
+
+ctrl_action_t ctrl_load_preset(ctrl_state_t *state) {
+  ctrl_action_t action = make_action(CTRL_ACTION_NONE, CTRL_FOCUS_TEMPERATURE, -1);
+
+  if (state == NULL || state->screen != CTRL_SCREEN_PRESETS) {
+    return action;
+  }
+
+  copy_values(&state->values, &state->presets[state->preset_index].values);
+  state->screen = CTRL_SCREEN_MAIN;
+  return make_action(CTRL_ACTION_LOAD_PRESET, state->focus, (int)state->preset_index);
+}
+
+ctrl_action_t ctrl_save_preset(ctrl_state_t *state) {
+  ctrl_action_t action = make_action(CTRL_ACTION_NONE, CTRL_FOCUS_TEMPERATURE, -1);
+
+  if (state == NULL || state->screen != CTRL_SCREEN_PRESETS) {
+    return action;
+  }
+
+  copy_values(&state->presets[state->preset_index].values, &state->values);
+  normalize_preset(&state->presets[state->preset_index]);
+  bump_preset_version();
+  return make_action(CTRL_ACTION_SAVE_PRESET, state->focus, (int)state->preset_index);
+}
+
+const char *ctrl_focus_name(ctrl_focus_t focus) {
+  return ctrl_focus_name_for_language(focus, CTRL_LANGUAGE_EN);
+}
+
+const char *ctrl_focus_name_for_language(ctrl_focus_t focus, ctrl_language_t language) {
+  switch (focus) {
+    case CTRL_FOCUS_TEMPERATURE:
+      return language == CTRL_LANGUAGE_DE ? "Kaffeeboiler" : "Coffee Boiler";
+    case CTRL_FOCUS_INFUSE:
+      return language == CTRL_LANGUAGE_DE ? "Prebrewing An-Zeit" : "Prebrewing On-Time";
+    case CTRL_FOCUS_PAUSE:
+      return language == CTRL_LANGUAGE_DE ? "Prebrewing Aus-Zeit" : "Prebrewing Off-Time";
+    case CTRL_FOCUS_STEAM:
+      return language == CTRL_LANGUAGE_DE ? "Dampfboiler" : "Steam Boiler";
+    case CTRL_FOCUS_STANDBY:
+      return "Standby";
+    case CTRL_FOCUS_BBW_MODE:
+      return language == CTRL_LANGUAGE_DE ? "Brew by Weight" : "Brew by Weight";
+    case CTRL_FOCUS_BBW_DOSE_1:
+      return language == CTRL_LANGUAGE_DE ? "BBW Dosis 1" : "BBW Dose 1";
+    case CTRL_FOCUS_BBW_DOSE_2:
+      return language == CTRL_LANGUAGE_DE ? "BBW Dosis 2" : "BBW Dose 2";
+    default:
+      return "Unknown";
+  }
+}
+
+const char *ctrl_bbw_mode_name(ctrl_bbw_mode_t mode, ctrl_language_t language) {
+  switch (normalize_bbw_mode(mode)) {
+    case CTRL_BBW_MODE_DOSE_1:
+      return language == CTRL_LANGUAGE_DE ? "Dosis 1" : "Dose 1";
+    case CTRL_BBW_MODE_DOSE_2:
+      return language == CTRL_LANGUAGE_DE ? "Dosis 2" : "Dose 2";
+    case CTRL_BBW_MODE_CONTINUOUS:
+    default:
+      return language == CTRL_LANGUAGE_DE ? "Kontinuierlich" : "Continuous";
+  }
+}
+
+const char *ctrl_bbw_mode_cloud_code(ctrl_bbw_mode_t mode) {
+  switch (normalize_bbw_mode(mode)) {
+    case CTRL_BBW_MODE_DOSE_2:
+      return "Dose2";
+    case CTRL_BBW_MODE_CONTINUOUS:
+      return "Continuous";
+    case CTRL_BBW_MODE_DOSE_1:
+    default:
+      return "Dose1";
+  }
+}
+
+ctrl_bbw_mode_t ctrl_bbw_mode_from_cloud_code(const char *code) {
+  if (code == NULL) {
+    return CTRL_BBW_MODE_DOSE_1;
+  }
+  if (strcmp(code, "Dose2") == 0) {
+    return CTRL_BBW_MODE_DOSE_2;
+  }
+  if (strcmp(code, "Continuous") == 0) {
+    return CTRL_BBW_MODE_CONTINUOUS;
+  }
+  return CTRL_BBW_MODE_DOSE_1;
+}
+
+const char *ctrl_screen_name(ctrl_screen_t screen) {
+  switch (screen) {
+    case CTRL_SCREEN_MAIN:
+      return "Main";
+    case CTRL_SCREEN_PRESETS:
+      return "Presets";
+    case CTRL_SCREEN_SETUP:
+      return "Setup";
+    case CTRL_SCREEN_SETUP_RESET_ARM:
+      return "Setup Reset Arm";
+    case CTRL_SCREEN_SETUP_RESET_CONFIRM:
+      return "Setup Reset Confirm";
+    default:
+      return "Unknown";
+  }
+}
+
+esp_err_t ctrl_state_reset_persisted(void) {
+  nvs_handle_t handle;
+  esp_err_t ret = nvs_open(CTRL_STATE_NAMESPACE, NVS_READWRITE, &handle);
+
+  if (ret == ESP_ERR_NVS_NOT_FOUND) {
+    return ESP_OK;
+  }
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "Could not open persisted controller state for reset: %s", esp_err_to_name(ret));
+    return ret;
+  }
+
+  ret = nvs_erase_all(handle);
+  if (ret == ESP_OK) {
+    ret = nvs_commit(handle);
+  }
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "Could not clear persisted controller state: %s", esp_err_to_name(ret));
+  }
+
+  nvs_close(handle);
+  if (ret == ESP_OK) {
+    bump_preset_version();
+  }
+  return ret;
+}
+
+esp_err_t ctrl_state_refresh_presets(ctrl_state_t *state) {
+  ctrl_state_t persisted;
+  esp_err_t ret;
+
+  if (state == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  ctrl_state_init(&persisted);
+  ret = ctrl_state_load(&persisted);
+  if (ret != ESP_OK) {
+    return ret;
+  }
+
+  for (int preset_index = 0; preset_index < CTRL_PRESET_COUNT; ++preset_index) {
+    copy_preset(&state->presets[preset_index], &persisted.presets[preset_index]);
+  }
+
+  return ESP_OK;
+}
+
+esp_err_t ctrl_state_load_preset_slot(int preset_index, ctrl_preset_t *preset) {
+  ctrl_state_t state;
+  esp_err_t ret;
+
+  if (preset == NULL || preset_index < 0 || preset_index >= CTRL_PRESET_COUNT) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  ctrl_state_init(&state);
+  ret = ctrl_state_load(&state);
+  if (ret != ESP_OK) {
+    return ret;
+  }
+
+  copy_preset(preset, &state.presets[preset_index]);
+  return ESP_OK;
+}
+
+esp_err_t ctrl_state_store_preset_slot(int preset_index, const ctrl_preset_t *preset) {
+  ctrl_state_t state;
+  ctrl_preset_t normalized_preset;
+  esp_err_t ret;
+
+  if (preset == NULL || preset_index < 0 || preset_index >= CTRL_PRESET_COUNT) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  ctrl_state_init(&state);
+  ret = ctrl_state_load(&state);
+  if (ret != ESP_OK) {
+    return ret;
+  }
+
+  copy_preset(&normalized_preset, preset);
+  normalize_preset(&normalized_preset);
+  copy_preset(&state.presets[preset_index], &normalized_preset);
+  ret = ctrl_state_persist(&state);
+  if (ret == ESP_OK) {
+    bump_preset_version();
+  }
+  return ret;
+}
+
+uint32_t ctrl_state_preset_version(void) {
+  return __atomic_load_n(&s_preset_version, __ATOMIC_RELAXED);
+}
+
+const char *ctrl_language_code(ctrl_language_t language) {
+  switch (language) {
+    case CTRL_LANGUAGE_DE:
+      return "de";
+    case CTRL_LANGUAGE_EN:
+    default:
+      return "en";
+  }
+}
+
+ctrl_language_t ctrl_language_from_code(const char *code) {
+  if (code != NULL && strcmp(code, "de") == 0) {
+    return CTRL_LANGUAGE_DE;
+  }
+
+  return CTRL_LANGUAGE_EN;
+}

@@ -1,0 +1,29 @@
+idf_component_register(
+  SRCS
+    "app_main.c"
+    "board_backlight.c"
+    "board_display.c"
+    "board_haptic.c"
+    "board_leds.c"
+    "cloud_api.c"
+    "controller_state.c"
+    "controller_ui.c"
+    "input.c"
+    "machine_link.c"
+    "wifi_setup.c"
+  INCLUDE_DIRS
+    "."
+  REQUIRES
+    bt
+    mdns
+    led_strip
+    esp_http_client
+    esp_driver_ledc
+    esp_driver_rmt
+    esp_event
+    esp_http_server
+    esp_netif
+    esp_wifi
+    mbedtls
+    nvs_flash
+)

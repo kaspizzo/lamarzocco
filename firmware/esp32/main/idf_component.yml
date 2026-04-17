@@ -1,0 +1,13 @@
+## IDF Component Manager Manifest File
+dependencies:
+  idf:
+    version: ">=5.5.0"
+  espressif/esp_lcd_st77916: ^2.0.2
+  espressif/esp_lcd_touch_cst816s: ^1.1.1
+  lvgl/lvgl: ^8.4.0
+  espressif/esp_lvgl_adapter: ^0.3.0
+  espressif/knob: ^1.0.0
+  espressif/cjson: ^1.7.19~1
+  espressif/mdns: ^1.10.1
+  espressif/led_strip: ^3.0.1
+  espressif/esp_websocket_client: ^1.2.2
