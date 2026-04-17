@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability report
+    url: https://github.com/kaspizzo/lamarzocco/security
+    about: Please report security issues privately and do not open a public issue.
+  - name: Project documentation
+    url: https://github.com/kaspizzo/lamarzocco/blob/main/README.md
+    about: Check the README and controller docs before opening a new issue.

@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest a new capability or an improvement to the controller, docs, or tooling.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement.
+        Please keep the request concrete and explain the user value.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or missing capability
+      description: What is the current limitation?
+      placeholder: I cannot currently...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like to see instead?
+      placeholder: The controller should...
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe any workaround or alternative approach you already considered.
+      placeholder: Today I work around this by...
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add screenshots, references, machine details, or related links if useful.
