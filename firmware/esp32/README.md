@@ -114,6 +114,10 @@ The firmware does not ship an official vendor logo asset. By default, the displa
 
 ## Build & flash quickstart
 
+`dev.sh` is the local Bash helper for macOS/Linux. Native Windows flashing is documented through the standard ESP-IDF terminal flow in `docs/controller/FLASHING_CONTROLLER.md`.
+
+### macOS / Linux
+
 ```bash
 cd firmware/esp32
 ./dev.sh full
@@ -126,7 +130,7 @@ cd firmware/esp32
 ./dev.sh quick
 ```
 
-Useful commands:
+Useful macOS/Linux helper commands:
 
 ```bash
 ./dev.sh build
@@ -136,6 +140,18 @@ ESPPORT=/dev/cu.usbmodemXXXX ./dev.sh quick
 ```
 
 The `quick` command uses `idf.py app-flash monitor`, so only the app partition is reflashed after the initial full flash.
+
+### Windows
+
+Use the native ESP-IDF Windows environment and flash with:
+
+```powershell
+cd C:\dev\lamarzocco\firmware\esp32
+idf.py set-target esp32s3
+idf.py -p COM5 flash monitor
+```
+
+Use an ESP-IDF-managed terminal such as `ESP-IDF PowerShell` or `ESP-IDF Command Prompt`, and keep the project path free of spaces. See the flashing guide below for the full Windows setup flow.
 
 Detailed flashing guide and setup notes:
 

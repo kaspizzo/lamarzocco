@@ -4,6 +4,11 @@ This is the shortest working path for building and flashing the round controller
 
 No vendor package is required.
 
+This repository currently supports two documented flashing paths:
+
+- `macOS/Linux`: use the local Bash helper `./dev.sh`
+- `Windows (native)`: use the official ESP-IDF Windows environment with `idf.py`
+
 ## 1. Requirements
 
 - a USB data cable
@@ -12,9 +17,11 @@ No vendor package is required.
 - an installed ESP-IDF toolchain
 - the controller board connected over USB
 
-## 2. Install ESP-IDF Once
+## 2. macOS / Linux
 
-If ESP-IDF is not installed yet:
+### Install ESP-IDF once
+
+If ESP-IDF is not installed yet on macOS or Linux:
 
 ```bash
 git clone --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf
@@ -28,7 +35,7 @@ In every new shell session, load the environment first:
 source ~/esp/esp-idf/export.sh
 ```
 
-## 3. First Flash
+### First flash
 
 ```bash
 cd firmware/esp32
@@ -43,7 +50,7 @@ cd firmware/esp32
 - flashes bootloader, partition table, and app
 - opens the serial monitor
 
-## 4. Later Updates
+### Later updates
 
 For normal firmware updates after the first flash:
 
@@ -54,7 +61,7 @@ cd firmware/esp32
 
 `quick` uses `idf.py app-flash monitor`, so only the app partition is reflashed.
 
-## 5. If Port Detection Fails
+### If port detection fails
 
 List available serial ports:
 
@@ -70,7 +77,9 @@ ESPPORT=/dev/cu.usbmodemXXXX ./dev.sh quick
 
 Exit the serial monitor with `Ctrl+]`.
 
-## 6. Useful Commands
+`dev.sh` is Bash-based and currently auto-detects `/dev/cu.*`-style serial ports. It is therefore the documented helper path for macOS/Linux, not for native Windows flashing.
+
+### Useful commands
 
 ```bash
 ./dev.sh build
@@ -81,18 +90,61 @@ Exit the serial monitor with `Ctrl+]`.
 ./dev.sh menuconfig
 ```
 
-## 7. Common Problems
+## 3. Windows (native)
+
+### Install ESP-IDF once
+
+On Windows, use Espressif's official installer and ESP-IDF terminal instead of `dev.sh`:
+
+- [ESP-IDF Windows setup](https://docs.espressif.com/projects/esp-idf/en/release-v5.4/esp32s3/get-started/windows-setup.html)
+- [ESP-IDF start project on Windows](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/windows-start-project.html)
+
+Use a project path without spaces, for example:
+
+```text
+C:\dev\lamarzocco
+```
+
+### First flash
+
+1. Open `ESP-IDF PowerShell` or `ESP-IDF Command Prompt`.
+2. Change into the firmware directory:
+
+```powershell
+cd C:\dev\lamarzocco\firmware\esp32
+```
+
+3. Set the target once for this project:
+
+```powershell
+idf.py set-target esp32s3
+```
+
+4. Find the board's serial port in Windows Device Manager, for example `COM5`.
+5. Build, flash, and open the serial monitor:
+
+```powershell
+idf.py -p COM5 flash monitor
+```
+
+6. Exit the serial monitor with `Ctrl+]`.
+
+This is the standard Windows path for this repository. Windows uses `COMx` serial ports, so this repository does not document native Windows flashing through `./dev.sh`.
+
+## 4. Common Problems
 
 - **Permission denied / port busy**
   Close Arduino IDE, another serial monitor, or any other tool that may still hold the port.
 - **No serial data received**
   Check that the USB cable supports data, not only charging.
 - **Wrong target selected**
-  Rebuild with `./dev.sh clean && ./dev.sh full`.
+  On macOS/Linux, rebuild with `./dev.sh clean && ./dev.sh full`.
+  On Windows, run `idf.py fullclean`, then `idf.py set-target esp32s3`, then `idf.py -p COM5 flash monitor`.
 - **ESP-IDF not found**
-  Run `source ~/esp/esp-idf/export.sh` or make sure `IDF_PATH` points to your ESP-IDF install.
+  On macOS/Linux, run `source ~/esp/esp-idf/export.sh` or make sure `IDF_PATH` points to your ESP-IDF install.
+  On Windows, use the ESP-IDF PowerShell or ESP-IDF Command Prompt created by the official installer.
 
-## 8. See Also
+## 5. See Also
 
 - [`firmware/esp32/README.md`](../../firmware/esp32/README.md)
 - [`SETUP_GUIDE.md`](./SETUP_GUIDE.md)
