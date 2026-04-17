@@ -1,0 +1,60 @@
+name: Bug report
+description: Report a reproducible bug in the firmware, docs, tooling, or setup flow.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+        Please do not use this form for security vulnerabilities. Use the private security reporting path instead.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken?
+      placeholder: A short description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Please provide the smallest reliable sequence that reproduces the issue.
+      placeholder: |
+        1. Flash firmware
+        2. Open setup
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: What should have happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: What actually happened?
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware
+      description: Controller board, machine model, and any other relevant hardware details.
+      placeholder: JC3636K718-style ESP32-S3 controller, Linea Micra, ...
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version or commit
+      description: Tag, branch, or commit SHA if known.
+      placeholder: main @ 44b287a
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste relevant serial logs, screenshots, or links here.
+      render: shell
