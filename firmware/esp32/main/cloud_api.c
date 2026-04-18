@@ -21,7 +21,7 @@
 #include "mbedtls/base64.h"
 #include "mbedtls/pk.h"
 #include "mbedtls/private/sha256.h"
-#include "machine_link.h"
+#include "machine_link_types.h"
 
 static const char *TAG = "lm_cloud_api";
 

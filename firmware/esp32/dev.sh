@@ -9,6 +9,17 @@ if [[ $# -gt 0 ]]; then
   shift
 fi
 
+run_host_tests() {
+  local test_script="${ROOT_DIR}/tests/host/run.sh"
+
+  if [[ ! -x "${test_script}" ]]; then
+    echo "Host-Testscript nicht gefunden oder nicht ausführbar: ${test_script}" >&2
+    exit 1
+  fi
+
+  (cd "${ROOT_DIR}" && "${test_script}" "$@")
+}
+
 ensure_idf() {
   local export_script=""
 
@@ -77,10 +88,15 @@ run_idf() {
   (cd "${ROOT_DIR}" && idf.py "$@")
 }
 
-ensure_idf
-ensure_target
+if [[ "${COMMAND}" != "test" ]]; then
+  ensure_idf
+  ensure_target
+fi
 
 case "${COMMAND}" in
+  test)
+    run_host_tests "$@"
+    ;;
   build)
     run_idf build "$@"
     ;;
@@ -120,8 +136,9 @@ case "${COMMAND}" in
     ;;
   *)
     cat <<'EOF'
-Usage: ./dev.sh [build|flash|quick|full|monitor|erase|clean|menuconfig|ports]
+Usage: ./dev.sh [test|build|flash|quick|full|monitor|erase|clean|menuconfig|ports]
 
+  test        Run host-side unit tests for pure/controller modules
   build       Build only
   flash       Full flash without monitor
   quick       Fast loop: app-flash + monitor
