@@ -172,7 +172,7 @@ void ble_store_config_init(void);
 static int ble_gap_event(struct ble_gap_event *event, void *arg);
 static esp_err_t ensure_connected_and_authenticated(const lm_ctrl_machine_binding_t *binding);
 static lm_ctrl_cloud_send_result_t send_power_command_cloud(bool enabled);
-static lm_ctrl_cloud_send_result_t send_steam_command_cloud(bool enabled);
+static lm_ctrl_cloud_send_result_t send_steam_command_cloud(ctrl_steam_level_t level);
 static lm_ctrl_cloud_send_result_t send_temperature_command_cloud(float temperature_c);
 static esp_err_t send_prebrewing_mode_cloud(const char *mode);
 static lm_ctrl_cloud_send_result_t send_prebrewing_times_cloud(float infuse_s, float pause_s);
@@ -195,6 +195,26 @@ static void copy_text(char *dst, size_t dst_size, const char *src) {
 
 static bool approx_equal(float a, float b) {
   return fabsf(a - b) < 0.05f;
+}
+
+static ctrl_steam_level_t preferred_non_off_steam_level_locked(void) {
+  if (ctrl_steam_level_enabled(s_link.reported_values.steam_level)) {
+    return ctrl_steam_level_normalize(s_link.reported_values.steam_level);
+  }
+  if (ctrl_steam_level_enabled(s_link.desired_values.steam_level)) {
+    return ctrl_steam_level_normalize(s_link.desired_values.steam_level);
+  }
+  return CTRL_STEAM_LEVEL_2;
+}
+
+static ctrl_steam_level_t snapshot_preferred_steam_level(void) {
+  ctrl_steam_level_t level;
+
+  portENTER_CRITICAL(&s_link_lock);
+  level = preferred_non_off_steam_level_locked();
+  portEXIT_CRITICAL(&s_link_lock);
+
+  return level;
 }
 
 static bool addr_equal(const ble_addr_t *left, const ble_addr_t *right) {
@@ -269,7 +289,7 @@ static void mark_field_complete(uint32_t field_mask, const ctrl_values_t *sent_v
     s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_TEMPERATURE;
   }
   if ((field_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0 &&
-      s_link.desired_values.steam_on == sent_values->steam_on) {
+      s_link.desired_values.steam_level == sent_values->steam_level) {
     s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_STEAM;
   }
   if ((field_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0 &&
@@ -331,8 +351,8 @@ static void apply_values_to_reported_locked(const ctrl_values_t *values, uint32_
     *changed = true;
   }
   if ((field_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0 &&
-      s_link.reported_values.steam_on != values->steam_on) {
-    s_link.reported_values.steam_on = values->steam_on;
+      s_link.reported_values.steam_level != values->steam_level) {
+    s_link.reported_values.steam_level = values->steam_level;
     *changed = true;
   }
   if ((field_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0 &&
@@ -392,13 +412,21 @@ static bool should_accept_remote_bool_locked(uint32_t field_mask, bool incoming_
   }
 
   switch (field_mask) {
-    case LM_CTRL_MACHINE_FIELD_STEAM:
-      return s_link.desired_values.steam_on == incoming_value;
     case LM_CTRL_MACHINE_FIELD_STANDBY:
       return s_link.desired_values.standby_on == incoming_value;
     default:
       return true;
   }
+}
+
+static bool should_accept_remote_steam_locked(ctrl_steam_level_t incoming_level) {
+  const uint32_t protected_mask = s_link.pending_mask | s_link.inflight_cloud_mask;
+
+  if ((protected_mask & LM_CTRL_MACHINE_FIELD_STEAM) == 0) {
+    return true;
+  }
+
+  return s_link.desired_values.steam_level == incoming_level;
 }
 
 static bool should_accept_remote_int_locked(uint32_t field_mask, int incoming_value) {
@@ -431,7 +459,7 @@ static void mark_fields_inflight(uint32_t field_mask, const ctrl_values_t *sent_
   }
   if ((field_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0 &&
       (s_link.pending_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0 &&
-      s_link.desired_values.steam_on == sent_values->steam_on) {
+      s_link.desired_values.steam_level == sent_values->steam_level) {
     s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_STEAM;
     s_link.inflight_cloud_mask |= LM_CTRL_MACHINE_FIELD_STEAM;
     changed = true;
@@ -583,9 +611,9 @@ static void update_reported_values(const ctrl_values_t *values, uint32_t loaded_
     changed = true;
   }
   if ((loaded_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0 &&
-      should_accept_remote_bool_locked(LM_CTRL_MACHINE_FIELD_STEAM, values->steam_on) &&
-      s_link.reported_values.steam_on != values->steam_on) {
-    s_link.reported_values.steam_on = values->steam_on;
+      should_accept_remote_steam_locked(values->steam_level) &&
+      s_link.reported_values.steam_level != values->steam_level) {
+    s_link.reported_values.steam_level = values->steam_level;
     changed = true;
   }
   if ((loaded_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0 &&
@@ -1352,7 +1380,8 @@ static bool parse_boiler_details(
   const char *response,
   const char *boiler_id,
   bool *out_enabled,
-  float *out_target
+  float *out_target,
+  bool *out_has_target
 ) {
   cJSON *root = NULL;
   cJSON *entry = NULL;
@@ -1386,6 +1415,9 @@ static bool parse_boiler_details(
     target_item = cJSON_GetObjectItemCaseSensitive(entry, "target");
     if (out_enabled != NULL && cJSON_IsBool(enabled_item)) {
       *out_enabled = cJSON_IsTrue(enabled_item);
+    }
+    if (out_has_target != NULL) {
+      *out_has_target = cJSON_IsNumber(target_item);
     }
     if (out_target != NULL && cJSON_IsNumber(target_item)) {
       *out_target = (float)target_item->valuedouble;
@@ -1436,7 +1468,7 @@ static esp_err_t verify_boiler_enabled_via_ble(const char *boiler_id, bool expec
     }
 
     BLE_VERBOSE_LOGI("BLE boilers response: %s", response);
-    if (parse_boiler_details(response, boiler_id, &actual_enabled, NULL) && actual_enabled == expected_enabled) {
+    if (parse_boiler_details(response, boiler_id, &actual_enabled, NULL, NULL) && actual_enabled == expected_enabled) {
       return ESP_OK;
     }
   }
@@ -1460,7 +1492,7 @@ static esp_err_t verify_boiler_target_via_ble(const char *boiler_id, float expec
     }
 
     BLE_VERBOSE_LOGI("BLE boilers response: %s", response);
-    if (parse_boiler_details(response, boiler_id, NULL, &actual_target) &&
+    if (parse_boiler_details(response, boiler_id, NULL, &actual_target, NULL) &&
         fabsf(actual_target - expected_target) < 0.15f) {
       return ESP_OK;
     }
@@ -1494,12 +1526,21 @@ static esp_err_t read_machine_mode_via_ble(bool *out_standby_on) {
   return ret;
 }
 
-static esp_err_t read_boilers_via_ble(float *out_temperature_c, bool *out_steam_on) {
+static esp_err_t read_boilers_via_ble(
+  float *out_temperature_c,
+  ctrl_steam_level_t *out_steam_level,
+  ctrl_steam_level_t fallback_level
+) {
   char response[LM_CTRL_MACHINE_RESPONSE_MAX];
-  bool steam_on = false;
+  bool steam_enabled = false;
+  bool steam_target_available = false;
+  ctrl_steam_level_t steam_level = ctrl_steam_level_enabled(fallback_level)
+    ? ctrl_steam_level_normalize(fallback_level)
+    : CTRL_STEAM_LEVEL_2;
+  float steam_target_c = 0.0f;
   float temperature_c = 0.0f;
 
-  if (out_temperature_c == NULL || out_steam_on == NULL) {
+  if (out_temperature_c == NULL || out_steam_level == NULL) {
     return ESP_ERR_INVALID_ARG;
   }
 
@@ -1509,13 +1550,29 @@ static esp_err_t read_boilers_via_ble(float *out_temperature_c, bool *out_steam_
     "boilers read failed"
   );
 
-  if (!parse_boiler_details(response, LM_CTRL_MACHINE_BOILER_COFFEE, NULL, &temperature_c) ||
-      !parse_boiler_details(response, LM_CTRL_MACHINE_BOILER_STEAM, &steam_on, NULL)) {
+  if (!parse_boiler_details(response, LM_CTRL_MACHINE_BOILER_COFFEE, NULL, &temperature_c, NULL) ||
+      !parse_boiler_details(
+        response,
+        LM_CTRL_MACHINE_BOILER_STEAM,
+        &steam_enabled,
+        &steam_target_c,
+        &steam_target_available
+      )) {
     return ESP_FAIL;
   }
 
+  if (!steam_enabled) {
+    steam_level = CTRL_STEAM_LEVEL_OFF;
+  } else if (steam_target_available) {
+    ctrl_steam_level_t parsed_level = CTRL_STEAM_LEVEL_OFF;
+
+    if (ctrl_steam_level_from_temperature(steam_target_c, &parsed_level)) {
+      steam_level = parsed_level;
+    }
+  }
+
   *out_temperature_c = temperature_c;
-  *out_steam_on = steam_on;
+  *out_steam_level = steam_level;
   return ESP_OK;
 }
 
@@ -1531,6 +1588,7 @@ static bool fetch_values_via_ble(
   }
 
   *values = (ctrl_values_t){0};
+  values->steam_level = snapshot_preferred_steam_level();
   *loaded_mask = 0;
 
   if (binding == NULL || binding->communication_key[0] == '\0') {
@@ -1547,7 +1605,7 @@ static bool fetch_values_via_ble(
   if (read_machine_mode_via_ble(&values->standby_on) == ESP_OK) {
     local_loaded_mask |= LM_CTRL_MACHINE_FIELD_STANDBY;
   }
-  if (read_boilers_via_ble(&values->temperature_c, &values->steam_on) == ESP_OK) {
+  if (read_boilers_via_ble(&values->temperature_c, &values->steam_level, values->steam_level) == ESP_OK) {
     local_loaded_mask |= LM_CTRL_MACHINE_FIELD_TEMPERATURE | LM_CTRL_MACHINE_FIELD_STEAM;
   }
 
@@ -1574,6 +1632,7 @@ static bool fetch_values_via_cloud(
   }
 
   *values = (ctrl_values_t){0};
+  values->steam_level = snapshot_preferred_steam_level();
   *loaded_mask = 0;
   *feature_mask = 0;
 
@@ -1642,7 +1701,25 @@ static esp_err_t send_power_command(bool enabled) {
   return ESP_OK;
 }
 
-static esp_err_t send_steam_command(bool enabled) {
+static esp_err_t steam_cloud_result_to_esp_err(lm_ctrl_cloud_send_result_t result) {
+  return result == LM_CTRL_CLOUD_SEND_FAILED ? ESP_FAIL : ESP_OK;
+}
+
+static const char *steam_level_cloud_code(ctrl_steam_level_t level) {
+  switch (ctrl_steam_level_normalize(level)) {
+    case CTRL_STEAM_LEVEL_1:
+      return "Level1";
+    case CTRL_STEAM_LEVEL_2:
+      return "Level2";
+    case CTRL_STEAM_LEVEL_3:
+      return "Level3";
+    case CTRL_STEAM_LEVEL_OFF:
+    default:
+      return NULL;
+  }
+}
+
+static esp_err_t send_steam_enable_command(bool enabled, ctrl_steam_level_t desired_level) {
   uint16_t write_handle;
   char response[LM_CTRL_MACHINE_RESPONSE_MAX];
   char message[96];
@@ -1674,7 +1751,9 @@ static esp_err_t send_steam_command(bool enabled) {
       }
       if (LM_CTRL_MACHINE_ENABLE_CLOUD_FALLBACK) {
         ESP_LOGW(TAG, "BLE steam verification failed, using cloud fallback.");
-        return send_steam_command_cloud(enabled);
+        return steam_cloud_result_to_esp_err(send_steam_command_cloud(
+          enabled ? desired_level : CTRL_STEAM_LEVEL_OFF
+        ));
       }
       set_statusf("BLE steam verification failed; cloud fallback disabled.");
       return ESP_FAIL;
@@ -1685,6 +1764,63 @@ static esp_err_t send_steam_command(bool enabled) {
 
   set_statusf("BLE steam command applied: %s", message[0] != '\0' ? message : (enabled ? "on" : "off"));
   return ESP_OK;
+}
+
+static esp_err_t send_steam_level_command(ctrl_steam_level_t level) {
+  const float target_temperature_c = ctrl_steam_level_target_temperature_c(level);
+  uint16_t write_handle;
+  char response[LM_CTRL_MACHINE_RESPONSE_MAX];
+  char message[96];
+  char payload[160];
+
+  if (!ctrl_steam_level_enabled(level)) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  portENTER_CRITICAL(&s_link_lock);
+  write_handle = s_link.write_handle;
+  portEXIT_CRITICAL(&s_link_lock);
+
+  snprintf(
+    payload,
+    sizeof(payload),
+    "{\"name\":\"SettingBoilerTarget\",\"parameter\":{\"identifier\":\"SteamBoiler\",\"value\":%.1f}}",
+    (double)target_temperature_c
+  );
+
+  ESP_RETURN_ON_ERROR(
+    run_write_operation(write_handle, payload, strlen(payload) + 1U, true, write_handle, response, sizeof(response)),
+    TAG,
+    "Steam level command failed"
+  );
+
+  if (!response_is_success(response, message, sizeof(message))) {
+    if (response_missing_or_empty(response, message)) {
+      ESP_LOGW(TAG, "BLE steam target response missing, verifying via boilers.");
+      if (verify_boiler_target_via_ble(LM_CTRL_MACHINE_BOILER_STEAM, target_temperature_c) == ESP_OK) {
+        set_statusf("BLE steam level verified via boilers: %s", ctrl_steam_level_label(level));
+        return ESP_OK;
+      }
+      set_statusf("BLE steam level verification failed; cloud fallback disabled.");
+      return ESP_FAIL;
+    }
+    set_statusf("BLE steam level command rejected: %s", message[0] != '\0' ? message : response);
+    return ESP_FAIL;
+  }
+
+  set_statusf("BLE steam level applied: %s", ctrl_steam_level_label(level));
+  return ESP_OK;
+}
+
+static esp_err_t send_steam_command(ctrl_steam_level_t level) {
+  ctrl_steam_level_t normalized_level = ctrl_steam_level_normalize(level);
+
+  if (!ctrl_steam_level_enabled(normalized_level)) {
+    return send_steam_enable_command(false, CTRL_STEAM_LEVEL_OFF);
+  }
+
+  ESP_RETURN_ON_ERROR(send_steam_level_command(normalized_level), TAG, "Steam level update failed");
+  return send_steam_enable_command(true, normalized_level);
 }
 
 static esp_err_t send_temperature_command(float temperature_c) {
@@ -1788,7 +1924,7 @@ static lm_ctrl_cloud_send_result_t send_power_command_cloud(bool enabled) {
   );
 }
 
-static lm_ctrl_cloud_send_result_t send_steam_command_cloud(bool enabled) {
+static lm_ctrl_cloud_send_result_t send_steam_enable_command_cloud(bool enabled, ctrl_steam_level_t level) {
   char payload[80];
   ctrl_values_t sent_values = {0};
 
@@ -1798,7 +1934,7 @@ static lm_ctrl_cloud_send_result_t send_steam_command_cloud(bool enabled) {
     "{\"boilerIndex\":1,\"enabled\":%s}",
     enabled ? "true" : "false"
   );
-  sent_values.steam_on = enabled;
+  sent_values.steam_level = enabled ? ctrl_steam_level_normalize(level) : CTRL_STEAM_LEVEL_OFF;
 
   return send_cloud_command(
     "CoffeeMachineSettingSteamBoilerEnabled",
@@ -1811,6 +1947,51 @@ static lm_ctrl_cloud_send_result_t send_steam_command_cloud(bool enabled) {
     NULL,
     0
   );
+}
+
+static lm_ctrl_cloud_send_result_t send_steam_level_command_cloud(ctrl_steam_level_t level) {
+  const char *target_level = steam_level_cloud_code(level);
+  char payload[96];
+  char success_message[64];
+  ctrl_values_t sent_values = {0};
+
+  if (target_level == NULL) {
+    return LM_CTRL_CLOUD_SEND_FAILED;
+  }
+
+  snprintf(
+    payload,
+    sizeof(payload),
+    "{\"boilerIndex\":1,\"targetLevel\":\"%s\"}",
+    target_level
+  );
+  snprintf(success_message, sizeof(success_message), "Cloud steam level applied: %s", ctrl_steam_level_label(level));
+  sent_values.steam_level = ctrl_steam_level_normalize(level);
+
+  return send_cloud_command(
+    "CoffeeMachineSettingSteamBoilerTargetLevel",
+    payload,
+    LM_CTRL_MACHINE_FIELD_NONE,
+    &sent_values,
+    success_message,
+    NULL,
+    NULL,
+    0
+  );
+}
+
+static lm_ctrl_cloud_send_result_t send_steam_command_cloud(ctrl_steam_level_t level) {
+  ctrl_steam_level_t normalized_level = ctrl_steam_level_normalize(level);
+
+  if (!ctrl_steam_level_enabled(normalized_level)) {
+    return send_steam_enable_command_cloud(false, CTRL_STEAM_LEVEL_OFF);
+  }
+
+  if (send_steam_level_command_cloud(normalized_level) == LM_CTRL_CLOUD_SEND_FAILED) {
+    return LM_CTRL_CLOUD_SEND_FAILED;
+  }
+
+  return send_steam_enable_command_cloud(true, normalized_level);
 }
 
 static lm_ctrl_cloud_send_result_t send_temperature_command_cloud(float temperature_c) {
@@ -2365,12 +2546,22 @@ static bool apply_pending_via_cloud(const ctrl_values_t *desired_values, uint32_
     return false;
   }
 
-  if (!LM_CTRL_MACHINE_ENABLE_CLOUD_FALLBACK) {
-    return false;
-  }
-
   current_values = *desired_values;
   snapshot_desired_values(&current_values);
+
+  if (!current_values.standby_on && (pending_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0) {
+    lm_ctrl_cloud_send_result_t result = send_steam_command_cloud(current_values.steam_level);
+    if (result != LM_CTRL_CLOUD_SEND_FAILED) {
+      if (result == LM_CTRL_CLOUD_SEND_APPLIED) {
+        mark_field_complete(LM_CTRL_MACHINE_FIELD_STEAM, &current_values);
+      }
+      progress = true;
+    }
+  }
+
+  if (!LM_CTRL_MACHINE_ENABLE_CLOUD_FALLBACK) {
+    return progress;
+  }
 
   if ((pending_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0) {
     lm_ctrl_cloud_send_result_t result = send_power_command_cloud(!current_values.standby_on);
@@ -2388,17 +2579,6 @@ static bool apply_pending_via_cloud(const ctrl_values_t *desired_values, uint32_
     if (result != LM_CTRL_CLOUD_SEND_FAILED) {
       if (result == LM_CTRL_CLOUD_SEND_APPLIED) {
         mark_field_complete(LM_CTRL_MACHINE_FIELD_TEMPERATURE, &current_values);
-      }
-      progress = true;
-    }
-  }
-
-  if (!current_values.standby_on && (pending_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0) {
-    snapshot_desired_values(&current_values);
-    lm_ctrl_cloud_send_result_t result = send_steam_command_cloud(current_values.steam_on);
-    if (result != LM_CTRL_CLOUD_SEND_FAILED) {
-      if (result == LM_CTRL_CLOUD_SEND_APPLIED) {
-        mark_field_complete(LM_CTRL_MACHINE_FIELD_STEAM, &current_values);
       }
       progress = true;
     }
@@ -2473,7 +2653,7 @@ static void machine_link_worker(void *arg) {
             merged_values.temperature_c = ble_values.temperature_c;
           }
           if ((ble_loaded_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0) {
-            merged_values.steam_on = ble_values.steam_on;
+            merged_values.steam_level = ble_values.steam_level;
           }
           merged_mask |= ble_loaded_mask;
           synced = true;
@@ -2525,9 +2705,17 @@ static void machine_link_worker(void *arg) {
       }
 
       if (binding.communication_key[0] == '\0') {
-        clear_pending_mask(pending_mask & LM_CTRL_MACHINE_FIELD_BLE_MASK);
-        set_statusf("No BLE machine token configured.");
-        break;
+        progress = apply_pending_via_cloud(&desired_values, pending_mask);
+        snapshot_desired_values(&desired_values);
+        pending_mask = snapshot_pending_mask();
+        if ((pending_mask & LM_CTRL_MACHINE_FIELD_BLE_MASK) != 0) {
+          clear_pending_mask(pending_mask & LM_CTRL_MACHINE_FIELD_BLE_MASK);
+          set_statusf("No BLE machine token configured.");
+        }
+        if (!progress) {
+          break;
+        }
+        continue;
       }
 
       if (should_skip_ble_attempt()) {
@@ -2573,7 +2761,7 @@ static void machine_link_worker(void *arg) {
       }
 
       if (!desired_values.standby_on && (pending_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0) {
-        if (send_steam_command(desired_values.steam_on) == ESP_OK) {
+        if (send_steam_command(desired_values.steam_level) == ESP_OK) {
           mark_field_complete(LM_CTRL_MACHINE_FIELD_STEAM, &desired_values);
           progress = true;
         }
@@ -2905,7 +3093,7 @@ esp_err_t lm_ctrl_machine_link_queue_values(const ctrl_values_t *values, uint32_
     values->temperature_c,
     values->infuse_s,
     values->pause_s,
-    values->steam_on,
+    (int)values->steam_level,
     values->standby_on,
     ctrl_bbw_mode_cloud_code(values->bbw_mode),
     values->bbw_dose_1_g,

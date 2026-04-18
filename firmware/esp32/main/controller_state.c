@@ -20,6 +20,9 @@ static const char *CTRL_STATE_KEY_CURRENT = "current";
 static const char *CTRL_STATE_KEY_PERSISTED = "persisted";
 static const uint8_t CTRL_STATE_SCHEMA_VERSION = 3;
 static const uint8_t CTRL_RESET_ARM_STEPS = 24;
+static const float CTRL_STEAM_LEVEL_1_TEMPERATURE_C = 126.0f;
+static const float CTRL_STEAM_LEVEL_2_TEMPERATURE_C = 128.0f;
+static const float CTRL_STEAM_LEVEL_3_TEMPERATURE_C = 131.0f;
 static volatile uint32_t s_preset_version = 1;
 
 typedef struct {
@@ -103,6 +106,15 @@ static float clampf(float v, float lo, float hi) {
   return v;
 }
 
+static bool approx_equal(float a, float b, float epsilon) {
+  float delta = a - b;
+
+  if (delta < 0.0f) {
+    delta = -delta;
+  }
+  return delta < epsilon;
+}
+
 static int wrap_index(int value, int count) {
   if (count <= 0) {
     return 0;
@@ -113,6 +125,16 @@ static int wrap_index(int value, int count) {
     wrapped += count;
   }
   return wrapped;
+}
+
+static ctrl_steam_level_t clamp_steam_level_index(int value) {
+  if (value <= (int)CTRL_STEAM_LEVEL_OFF) {
+    return CTRL_STEAM_LEVEL_OFF;
+  }
+  if (value >= (int)CTRL_STEAM_LEVEL_3) {
+    return CTRL_STEAM_LEVEL_3;
+  }
+  return (ctrl_steam_level_t)value;
 }
 
 static void copy_values(ctrl_values_t *dst, const ctrl_values_t *src) {
@@ -145,6 +167,92 @@ static ctrl_bbw_mode_t normalize_bbw_mode(ctrl_bbw_mode_t mode) {
       return mode;
     default:
       return CTRL_BBW_MODE_DOSE_1;
+  }
+}
+
+ctrl_steam_level_t ctrl_steam_level_normalize(ctrl_steam_level_t level) {
+  switch (level) {
+    case CTRL_STEAM_LEVEL_OFF:
+    case CTRL_STEAM_LEVEL_1:
+    case CTRL_STEAM_LEVEL_2:
+    case CTRL_STEAM_LEVEL_3:
+      return level;
+    default:
+      return CTRL_STEAM_LEVEL_OFF;
+  }
+}
+
+bool ctrl_steam_level_enabled(ctrl_steam_level_t level) {
+  return ctrl_steam_level_normalize(level) != CTRL_STEAM_LEVEL_OFF;
+}
+
+float ctrl_steam_level_target_temperature_c(ctrl_steam_level_t level) {
+  switch (ctrl_steam_level_normalize(level)) {
+    case CTRL_STEAM_LEVEL_1:
+      return CTRL_STEAM_LEVEL_1_TEMPERATURE_C;
+    case CTRL_STEAM_LEVEL_2:
+      return CTRL_STEAM_LEVEL_2_TEMPERATURE_C;
+    case CTRL_STEAM_LEVEL_3:
+      return CTRL_STEAM_LEVEL_3_TEMPERATURE_C;
+    case CTRL_STEAM_LEVEL_OFF:
+    default:
+      return 0.0f;
+  }
+}
+
+bool ctrl_steam_level_from_temperature(float temperature_c, ctrl_steam_level_t *level) {
+  ctrl_steam_level_t parsed_level = CTRL_STEAM_LEVEL_OFF;
+
+  if (level == NULL) {
+    return false;
+  }
+
+  if (approx_equal(temperature_c, CTRL_STEAM_LEVEL_1_TEMPERATURE_C, 0.25f)) {
+    parsed_level = CTRL_STEAM_LEVEL_1;
+  } else if (approx_equal(temperature_c, CTRL_STEAM_LEVEL_2_TEMPERATURE_C, 0.25f)) {
+    parsed_level = CTRL_STEAM_LEVEL_2;
+  } else if (approx_equal(temperature_c, CTRL_STEAM_LEVEL_3_TEMPERATURE_C, 0.25f)) {
+    parsed_level = CTRL_STEAM_LEVEL_3;
+  } else {
+    return false;
+  }
+
+  *level = parsed_level;
+  return true;
+}
+
+bool ctrl_steam_level_from_cloud_code(const char *code, ctrl_steam_level_t *level) {
+  ctrl_steam_level_t parsed_level = CTRL_STEAM_LEVEL_OFF;
+
+  if (code == NULL || level == NULL) {
+    return false;
+  }
+
+  if (strcmp(code, "Level1") == 0) {
+    parsed_level = CTRL_STEAM_LEVEL_1;
+  } else if (strcmp(code, "Level2") == 0) {
+    parsed_level = CTRL_STEAM_LEVEL_2;
+  } else if (strcmp(code, "Level3") == 0) {
+    parsed_level = CTRL_STEAM_LEVEL_3;
+  } else {
+    return false;
+  }
+
+  *level = parsed_level;
+  return true;
+}
+
+const char *ctrl_steam_level_label(ctrl_steam_level_t level) {
+  switch (ctrl_steam_level_normalize(level)) {
+    case CTRL_STEAM_LEVEL_1:
+      return "1";
+    case CTRL_STEAM_LEVEL_2:
+      return "2";
+    case CTRL_STEAM_LEVEL_3:
+      return "3";
+    case CTRL_STEAM_LEVEL_OFF:
+    default:
+      return "Off";
   }
 }
 
@@ -200,6 +308,7 @@ static void normalize_recipe_values(ctrl_values_t *values) {
   values->temperature_c = clampf(values->temperature_c, 80.0f, 103.0f);
   values->infuse_s = clampf(values->infuse_s, 0.0f, 9.0f);
   values->pause_s = clampf(values->pause_s, 0.0f, 9.0f);
+  values->steam_level = ctrl_steam_level_normalize(values->steam_level);
   values->bbw_mode = normalize_bbw_mode(values->bbw_mode);
   values->bbw_dose_1_g = clampf(values->bbw_dose_1_g, 5.0f, 100.0f);
   values->bbw_dose_2_g = clampf(values->bbw_dose_2_g, 5.0f, 100.0f);
@@ -384,8 +493,6 @@ static bool *focus_bool_ptr(ctrl_state_t *state, ctrl_focus_t focus) {
   }
 
   switch (focus) {
-    case CTRL_FOCUS_STEAM:
-      return &state->values.steam_on;
     case CTRL_FOCUS_STANDBY:
       return &state->values.standby_on;
     default:
@@ -417,10 +524,11 @@ void ctrl_state_init(ctrl_state_t *state) {
     return;
   }
 
+  *state = (ctrl_state_t){0};
   state->values.temperature_c = 93.0f;
   state->values.infuse_s = 1.0f;
   state->values.pause_s = 2.0f;
-  state->values.steam_on = true;
+  state->values.steam_level = CTRL_STEAM_LEVEL_2;
   state->values.standby_on = false;
   state->values.bbw_mode = CTRL_BBW_MODE_DOSE_1;
   state->values.bbw_dose_1_g = 32.0f;
@@ -434,6 +542,8 @@ void ctrl_state_init(ctrl_state_t *state) {
   state->reset_confirm_yes = false;
 
   copy_values(&state->presets[0].values, &state->values);
+  state->presets[0].values.steam_level = CTRL_STEAM_LEVEL_2;
+  state->presets[0].values.standby_on = false;
   ctrl_preset_default_name(0, state->presets[0].name, sizeof(state->presets[0].name));
   state->presets[1] = (ctrl_preset_t){
     .name = "Preset 2",
@@ -444,7 +554,7 @@ void ctrl_state_init(ctrl_state_t *state) {
       .bbw_mode = CTRL_BBW_MODE_DOSE_1,
       .bbw_dose_1_g = 34.0f,
       .bbw_dose_2_g = 36.0f,
-      .steam_on = true,
+      .steam_level = CTRL_STEAM_LEVEL_2,
       .standby_on = false,
     },
   };
@@ -457,7 +567,7 @@ void ctrl_state_init(ctrl_state_t *state) {
       .bbw_mode = CTRL_BBW_MODE_DOSE_2,
       .bbw_dose_1_g = 28.0f,
       .bbw_dose_2_g = 32.0f,
-      .steam_on = false,
+      .steam_level = CTRL_STEAM_LEVEL_OFF,
       .standby_on = false,
     },
   };
@@ -470,7 +580,7 @@ void ctrl_state_init(ctrl_state_t *state) {
       .bbw_mode = CTRL_BBW_MODE_CONTINUOUS,
       .bbw_dose_1_g = 30.0f,
       .bbw_dose_2_g = 38.0f,
-      .steam_on = true,
+      .steam_level = CTRL_STEAM_LEVEL_2,
       .standby_on = true,
     },
   };
@@ -608,8 +718,7 @@ void ctrl_rotate(ctrl_state_t *state, int delta_steps) {
       state->values.pause_s = clampf(state->values.pause_s + (0.1f * delta_steps), 0.0f, 9.0f);
       break;
     case CTRL_FOCUS_STEAM:
-      if (delta_steps > 0) state->values.steam_on = true;
-      if (delta_steps < 0) state->values.steam_on = false;
+      state->values.steam_level = clamp_steam_level_index((int)state->values.steam_level + delta_steps);
       break;
     case CTRL_FOCUS_STANDBY:
       if (delta_steps > 0) state->values.standby_on = true;
@@ -651,12 +760,24 @@ void ctrl_set_focus(ctrl_state_t *state, ctrl_focus_t focus) {
 
 void ctrl_toggle_focus(ctrl_state_t *state, ctrl_focus_t focus) {
   bool *value = focus_bool_ptr(state, focus);
-  if (value == NULL) {
+  if (state == NULL) {
     return;
   }
 
   state->focus = focus;
   state->screen = CTRL_SCREEN_MAIN;
+
+  if (focus == CTRL_FOCUS_STEAM) {
+    state->values.steam_level = ctrl_steam_level_enabled(state->values.steam_level)
+      ? CTRL_STEAM_LEVEL_OFF
+      : CTRL_STEAM_LEVEL_2;
+    return;
+  }
+
+  if (value == NULL) {
+    return;
+  }
+
   *value = !(*value);
 }
 

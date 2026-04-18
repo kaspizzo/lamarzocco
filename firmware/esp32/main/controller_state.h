@@ -37,6 +37,14 @@ typedef enum {
   CTRL_BBW_MODE_CONTINUOUS,
 } ctrl_bbw_mode_t;
 
+/** Discrete steam boiler levels surfaced by the controller. */
+typedef enum {
+  CTRL_STEAM_LEVEL_OFF = 0,
+  CTRL_STEAM_LEVEL_1,
+  CTRL_STEAM_LEVEL_2,
+  CTRL_STEAM_LEVEL_3,
+} ctrl_steam_level_t;
+
 /** Supported on-device controller languages. */
 typedef enum {
   CTRL_LANGUAGE_EN = 0,
@@ -57,7 +65,7 @@ typedef struct {
   float temperature_c;
   float infuse_s;
   float pause_s;
-  bool steam_on;
+  ctrl_steam_level_t steam_level;
   bool standby_on;
   ctrl_bbw_mode_t bbw_mode;
   float bbw_dose_1_g;
@@ -110,7 +118,7 @@ esp_err_t ctrl_state_persist(const ctrl_state_t *state);
 void ctrl_rotate(ctrl_state_t *state, int delta_steps);
 /** Select a focus field on the main screen. */
 void ctrl_set_focus(ctrl_state_t *state, ctrl_focus_t focus);
-/** Toggle a boolean field on the main screen. */
+/** Toggle or switch a discrete field on the main screen. */
 void ctrl_toggle_focus(ctrl_state_t *state, ctrl_focus_t focus);
 /** Enter the presets overlay. */
 void ctrl_open_presets(ctrl_state_t *state);
@@ -144,6 +152,18 @@ const char *ctrl_focus_name(ctrl_focus_t focus);
 const char *ctrl_focus_name_for_language(ctrl_focus_t focus, ctrl_language_t language);
 /** Human-readable name for a brew by weight mode in the selected controller language. */
 const char *ctrl_bbw_mode_name(ctrl_bbw_mode_t mode, ctrl_language_t language);
+/** Clamp a raw steam level into the supported controller range. */
+ctrl_steam_level_t ctrl_steam_level_normalize(ctrl_steam_level_t level);
+/** Report whether the steam boiler should be enabled for the given level. */
+bool ctrl_steam_level_enabled(ctrl_steam_level_t level);
+/** Return the target temperature mapped to the given steam level. */
+float ctrl_steam_level_target_temperature_c(ctrl_steam_level_t level);
+/** Parse a known steam target temperature into the matching controller level. */
+bool ctrl_steam_level_from_temperature(float temperature_c, ctrl_steam_level_t *level);
+/** Parse a cloud steam target code such as `Level1` into the matching controller level. */
+bool ctrl_steam_level_from_cloud_code(const char *code, ctrl_steam_level_t *level);
+/** Compact label shown on the steam controller page. */
+const char *ctrl_steam_level_label(ctrl_steam_level_t level);
 /** Stable La Marzocco cloud code for a brew by weight mode. */
 const char *ctrl_bbw_mode_cloud_code(ctrl_bbw_mode_t mode);
 /** Parse a La Marzocco cloud code into a controller brew by weight mode. */

@@ -315,17 +315,15 @@ static void format_main_value(
         value,
         value_size,
         "%s",
-        state->values.steam_on
-          ? (language == CTRL_LANGUAGE_DE ? "AN" : "ON")
-          : (language == CTRL_LANGUAGE_DE ? "AUS" : "OFF")
+        ctrl_steam_level_label(state->values.steam_level)
       );
       snprintf(
         hint,
         hint_size,
         "%s",
         language == CTRL_LANGUAGE_DE
-          ? "Dampfboiler direkt\nam Controller umschalten."
-          : "Toggle the steam boiler\ndirectly on the controller."
+          ? "Dampflevel direkt\nam Controller einstellen."
+          : "Adjust the steam level\ndirectly on the controller."
       );
       break;
     case CTRL_FOCUS_STANDBY:

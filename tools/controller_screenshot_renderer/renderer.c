@@ -173,7 +173,7 @@ static ctrl_state_t base_state(void) {
   state.values.temperature_c = 94.0f;
   state.values.infuse_s = 2.0f;
   state.values.pause_s = 9.0f;
-  state.values.steam_on = true;
+  state.values.steam_level = CTRL_STEAM_LEVEL_2;
   state.values.standby_on = false;
   state.loaded_mask =
     LM_CTRL_MACHINE_FIELD_TEMPERATURE |
