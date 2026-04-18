@@ -636,9 +636,19 @@ static bool parse_dashboard_widget_values(
   if (strcmp(code_item->valuestring, "CMSteamBoilerLevel") == 0 ||
       strcmp(code_item->valuestring, "CMSteamBoilerTemperature") == 0) {
     cJSON *enabled = cJSON_GetObjectItemCaseSensitive(output, "enabled");
+    cJSON *target_level = cJSON_GetObjectItemCaseSensitive(output, "targetLevel");
+    ctrl_steam_level_t steam_level = values->steam_level;
 
     if (cJSON_IsBool(enabled)) {
-      values->steam_on = cJSON_IsTrue(enabled);
+      if (!cJSON_IsTrue(enabled)) {
+        values->steam_level = CTRL_STEAM_LEVEL_OFF;
+      } else if (cJSON_IsString(target_level) &&
+                 target_level->valuestring != NULL &&
+                 ctrl_steam_level_from_cloud_code(target_level->valuestring, &steam_level)) {
+        values->steam_level = steam_level;
+      } else if (!ctrl_steam_level_enabled(steam_level)) {
+        values->steam_level = CTRL_STEAM_LEVEL_2;
+      }
       *loaded_mask |= LM_CTRL_MACHINE_FIELD_STEAM;
       return true;
     }
@@ -671,6 +681,8 @@ esp_err_t lm_ctrl_cloud_parse_dashboard_root_values(
   if (root == NULL || values == NULL || loaded_mask == NULL || feature_mask == NULL) {
     return ESP_ERR_INVALID_ARG;
   }
+
+  local_values = *values;
 
   widgets = cJSON_GetObjectItemCaseSensitive(root, "widgets");
   if (!cJSON_IsArray(widgets)) {

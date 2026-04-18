@@ -178,7 +178,7 @@ static void log_state(const ctrl_state_t *state) {
     state->values.temperature_c,
     state->values.infuse_s,
     state->values.pause_s,
-    state->values.steam_on,
+    (int)state->values.steam_level,
     state->values.standby_on,
     (unsigned)state->preset_index + 1U
   );
@@ -362,7 +362,7 @@ static void reconcile_local_value_hold(local_value_hold_t *hold, const ctrl_valu
   }
   if ((hold->mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0 &&
       (loaded_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0 &&
-      values->steam_on == hold->values.steam_on) {
+      values->steam_level == hold->values.steam_level) {
     hold->mask &= ~LM_CTRL_MACHINE_FIELD_STEAM;
   }
   if ((hold->mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0 &&
@@ -412,8 +412,8 @@ static void merge_loaded_values(ctrl_state_t *state, local_value_hold_t *hold) {
     state->values.pause_s = values.pause_s;
   }
   if ((loaded_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0 &&
-      !should_keep_local_bool(values.steam_on, state->values.steam_on, LM_CTRL_MACHINE_FIELD_STEAM, hold, now_us)) {
-    state->values.steam_on = values.steam_on;
+      !should_keep_local_int((int)values.steam_level, (int)state->values.steam_level, LM_CTRL_MACHINE_FIELD_STEAM, hold, now_us)) {
+    state->values.steam_level = values.steam_level;
   }
   if ((loaded_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0 &&
       !should_keep_local_bool(values.standby_on, state->values.standby_on, LM_CTRL_MACHINE_FIELD_STANDBY, hold, now_us)) {
