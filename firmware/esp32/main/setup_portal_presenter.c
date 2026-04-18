@@ -23,10 +23,10 @@ typedef struct {
   char local_url_html[160];
   char selected_machine_text[160];
   char selected_machine_html[224];
+  ctrl_state_t controller_state;
   ctrl_values_t dashboard_values;
   uint32_t dashboard_loaded_mask;
   uint32_t dashboard_feature_mask;
-  ctrl_preset_t presets[CTRL_PRESET_COUNT];
   lm_ctrl_wifi_info_t info;
   lm_ctrl_machine_link_info_t machine_info;
   lm_ctrl_cloud_machine_t fleet[LM_CTRL_CLOUD_MAX_FLEET];
@@ -186,6 +186,7 @@ esp_err_t lm_ctrl_setup_portal_send_response(httpd_req_t *req, const char *banne
   }
 
   ctrl_state_init(&preset_defaults);
+  ctrl_state_init(&ctx->controller_state);
   lm_ctrl_wifi_get_info(&ctx->info);
   lock_state();
   ctx->fleet_count = s_state.fleet_count;
@@ -236,10 +237,8 @@ esp_err_t lm_ctrl_setup_portal_send_response(httpd_req_t *req, const char *banne
       &ctx->dashboard_feature_mask
     );
   }
-  for (int preset_index = 0; preset_index < CTRL_PRESET_COUNT; ++preset_index) {
-    if (ctrl_state_load_preset_slot(preset_index, &ctx->presets[preset_index]) != ESP_OK) {
-      ctx->presets[preset_index] = preset_defaults.presets[preset_index];
-    }
+  if (ctrl_state_load(&ctx->controller_state) != ESP_OK) {
+    ctx->controller_state = preset_defaults;
   }
 
   memcpy(page_view.status_html, ctx->status_html, sizeof(page_view.status_html));
@@ -254,7 +253,10 @@ esp_err_t lm_ctrl_setup_portal_send_response(httpd_req_t *req, const char *banne
   page_view.dashboard_values = ctx->dashboard_values;
   page_view.dashboard_loaded_mask = ctx->dashboard_loaded_mask;
   page_view.dashboard_feature_mask = ctx->dashboard_feature_mask;
-  memcpy(page_view.presets, ctx->presets, sizeof(page_view.presets));
+  memcpy(page_view.presets, ctx->controller_state.presets, sizeof(page_view.presets));
+  page_view.preset_count = ctx->controller_state.preset_count;
+  page_view.temperature_step_c = ctx->controller_state.temperature_step_c;
+  page_view.time_step_s = ctx->controller_state.time_step_s;
   page_view.info = ctx->info;
   page_view.machine_info = ctx->machine_info;
   memcpy(page_view.fleet, ctx->fleet, sizeof(page_view.fleet));

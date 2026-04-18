@@ -4,6 +4,7 @@
 #include <string.h>
 
 struct httpd_req {
+  char *status;
   char *type;
   char *body;
   size_t body_len;
@@ -52,6 +53,7 @@ void test_httpd_request_destroy(httpd_req_t *req) {
     return;
   }
 
+  free(req->status);
   free(req->type);
   free(req->body);
   free(req);
@@ -63,6 +65,23 @@ const char *test_httpd_request_body(const httpd_req_t *req) {
 
 const char *test_httpd_request_type(const httpd_req_t *req) {
   return (req != NULL && req->type != NULL) ? req->type : "";
+}
+
+esp_err_t httpd_resp_set_status(httpd_req_t *req, const char *status) {
+  char *copy;
+
+  if (req == NULL || status == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  copy = strdup(status);
+  if (copy == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  free(req->status);
+  req->status = copy;
+  return ESP_OK;
 }
 
 esp_err_t httpd_resp_set_type(httpd_req_t *req, const char *type) {

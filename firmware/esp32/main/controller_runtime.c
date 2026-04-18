@@ -259,7 +259,7 @@ static void maybe_flush_delayed_machine_send(
 static void log_state(const ctrl_state_t *state) {
   ESP_LOGI(
     TAG,
-    "screen=%s focus=%s temp=%.1f inf=%.1f pause=%.1f steam=%d standby=%d preset=%u",
+    "screen=%s focus=%s temp=%.1f inf=%.1f pause=%.1f steam=%d standby=%d preset=%u/%u steps=%.1f/%.1f",
     ctrl_screen_name(state->screen),
     ctrl_focus_name(state->focus),
     state->values.temperature_c,
@@ -267,7 +267,10 @@ static void log_state(const ctrl_state_t *state) {
     state->values.pause_s,
     (int)state->values.steam_level,
     state->values.standby_on,
-    (unsigned)state->preset_index + 1U
+    (unsigned)state->preset_index + 1U,
+    (unsigned)state->preset_count,
+    (double)state->temperature_step_c,
+    (double)state->time_step_s
   );
 }
 
@@ -725,7 +728,7 @@ void lm_ctrl_runtime_handle_preset_change(lm_ctrl_runtime_t *runtime, bool *need
   runtime->last_preset_version = preset_version;
   if (ctrl_state_refresh_presets(&runtime->state) != ESP_OK) {
     ESP_LOGW(TAG, "Failed to refresh preset definitions");
-  } else if (runtime->state.screen == CTRL_SCREEN_PRESETS && needs_render != NULL) {
+  } else if (needs_render != NULL) {
     *needs_render = true;
   }
 }

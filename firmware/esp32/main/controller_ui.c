@@ -646,7 +646,7 @@ static void render_presets_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, c
   }
 
   set_hidden(ui->page_label, true);
-  snprintf(title, sizeof(title), "Preset %u/%u", (unsigned int)(state->preset_index + 1U), (unsigned int)CTRL_PRESET_COUNT);
+  snprintf(title, sizeof(title), "Preset %u/%u", (unsigned int)(state->preset_index + 1U), (unsigned int)state->preset_count);
   set_label_text(ui->presets_title, title, COLOR_ACTIVE);
   ctrl_preset_display_name(preset, (int)state->preset_index, preset_name, sizeof(preset_name));
   set_label_text(ui->presets_name, preset_name, COLOR_MUTED);

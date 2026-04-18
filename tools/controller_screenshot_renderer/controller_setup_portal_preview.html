@@ -15,32 +15,30 @@
     }
 
     main {
-      max-width: 560px;
+      max-width: 760px;
       margin: 0 auto;
     }
 
     h1 {
       margin: 0 0 8px;
-      font-size: 28px;
+      font-size: 32px;
     }
 
     h2 {
+      margin: 0;
+      font-size: 22px;
+      color: #ffc685;
+    }
+
+    h3 {
       margin: 0 0 8px;
-      font-size: 20px;
+      font-size: 18px;
       color: #ffc685;
     }
 
     p {
       color: #d5c1ae;
-      margin: 0 0 12px;
-    }
-
-    form {
-      background: #261a13;
-      border: 1px solid #926333;
-      border-radius: 20px;
-      padding: 18px;
-      margin-top: 18px;
+      margin: 0;
     }
 
     label {
@@ -91,11 +89,17 @@
       margin-top: 6px;
       font-size: 14px;
       color: #d5c1ae;
+      line-height: 1.45;
     }
 
     .secondary {
       background: #3a281d;
       color: #f4efe7;
+    }
+
+    .danger {
+      background: #7f3328;
+      color: #fff7f2;
     }
 
     .button-row {
@@ -112,7 +116,7 @@
       display: flex;
       gap: 10px;
       flex-wrap: wrap;
-      margin: 18px 0 8px;
+      margin: 20px 0 18px;
     }
 
     .topnav a {
@@ -124,69 +128,269 @@
       text-decoration: none;
       font-weight: 600;
     }
+
+    .stack {
+      display: grid;
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .section-head {
+      display: grid;
+      gap: 6px;
+    }
+
+    .section-card {
+      background: #261a13;
+      border: 1px solid #926333;
+      border-radius: 22px;
+      padding: 18px;
+    }
+
+    .field-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+
+    .preset-list {
+      display: grid;
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    details {
+      background: #1d140f;
+      border: 1px solid #5d4128;
+      border-radius: 18px;
+      overflow: hidden;
+    }
+
+    summary {
+      list-style: none;
+      cursor: default;
+      padding: 16px 18px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    details[open] summary {
+      border-bottom: 1px solid #5d4128;
+      background: #211710;
+    }
+
+    .summary-name {
+      margin-top: 4px;
+      color: #d5c1ae;
+      font-size: 14px;
+    }
+
+    .summary-meta {
+      color: #b7a08b;
+      font-size: 14px;
+      text-align: right;
+      max-width: 320px;
+    }
+
+    .preset-form {
+      padding: 0 18px 18px;
+    }
   </style>
 </head>
 <body>
   <main>
     <h1>Controller Setup</h1>
-    <p>Use this page to store the La Marzocco cloud account and the home Wi-Fi settings on the controller. The Wi-Fi scan fills the SSID automatically.</p>
+    <p>Use this page to store the La Marzocco cloud account, home Wi-Fi settings, and optional advanced controller editing behavior.</p>
     <div class="banner">Setup portal active on LM-CTRL-76C1</div>
-    <pre>Portal running: yes
-Wi-Fi connected: yes
-Cloud credentials stored: yes
-Selected machine: Linea Mini R · LM012345
-Live updates: connected
-Header logo: default text</pre>
-    <p class="section-note">Use <strong>http://lamarzocco.local/</strong> in your home network. The router IP can change after reconnects or flashes.</p>
+
     <nav class="topnav">
+      <a href="#overview-section">Overview</a>
       <a href="#controller-section">Controller</a>
       <a href="#network-section">Network</a>
       <a href="#cloud-section">Cloud</a>
-      <a href="#presets-section">Presets</a>
+      <a href="#recipes-section">Recipes</a>
       <a href="#advanced-section">Advanced</a>
+      <a href="#diagnostics-section">Diagnostics</a>
     </nav>
 
-    <form id="controller-section">
-      <h2>Controller</h2>
-      <label for="hostname">Controller Hostname</label>
-      <input id="hostname" value="lamarzocco">
-      <label for="language">Controller Language</label>
-      <select id="language">
-        <option selected>English</option>
-        <option>Deutsch</option>
-      </select>
-      <div class="section-note">Language only affects the on-device controller UI. English stays the default.</div>
-      <button type="button">Save Controller Settings</button>
-    </form>
-
-    <form>
-      <h2>Header Logo</h2>
-      <div class="section-note">Current header: <strong>Default text</strong></div>
-      <label for="logo-file">Local SVG File</label>
-      <input id="logo-file" value="">
-      <div class="section-note">Optional controller setting. The project does not ship official La Marzocco logos. Uploaded SVGs are rasterized in your browser, stored locally on this controller, and shown only on the device display.</div>
-      <div class="button-row">
-        <button type="button">Upload Logo</button>
-        <button class="secondary" type="button">Remove Logo</button>
+    <section id="overview-section" class="section-card">
+      <div class="section-head">
+        <h2>Overview</h2>
+        <p>Current portal reachability and controller summary.</p>
       </div>
-      <div class="section-note">SVG upload stays local to the device and is not bundled with the project.</div>
-    </form>
+      <pre>Home Wi-Fi: MeinWLAN
+State: connected
+Current IP: 192.168.1.46
+Stable URL: http://lamarzocco.local/
+Cloud: connected
+Header logo: default text</pre>
+      <p class="section-note">Use <strong>http://lamarzocco.local/</strong> in your home network. The router IP can change after reconnects or flashes.</p>
+    </section>
 
-    <form id="network-section">
-      <h2>Network</h2>
-      <button type="button">Scan Nearby Networks</button>
-      <label for="network-list">Nearby Networks</label>
-      <select id="network-list">
-        <option selected>Select from scan results</option>
-        <option>MeinWLAN</option>
-      </select>
-      <label for="ssid">Home Wi-Fi SSID</label>
-      <input id="ssid" value="MeinWLAN">
-      <label for="password">Wi-Fi Password</label>
-      <input id="password" type="password" value="">
-      <div class="section-note">Saving Wi-Fi starts a reconnect attempt immediately. Leave the password blank to keep the stored password for the same SSID.</div>
-      <button type="button">Save Wi-Fi And Connect</button>
-    </form>
+    <section id="controller-section" class="stack">
+      <div class="section-head">
+        <h2>Controller</h2>
+        <p>Local controller identity, language, and optional header branding.</p>
+      </div>
+      <form class="section-card">
+        <label for="hostname">Controller Hostname</label>
+        <input id="hostname" value="lamarzocco">
+        <label for="language">Controller Language</label>
+        <select id="language">
+          <option selected>English</option>
+          <option>Deutsch</option>
+        </select>
+        <div class="section-note">Language only affects the on-device controller UI. English stays the default.</div>
+        <button type="button">Save Controller Settings</button>
+      </form>
+
+      <form class="section-card">
+        <h3>Header Logo</h3>
+        <div class="section-note">Current header: <strong>Default text</strong></div>
+        <label for="logo-file">Local SVG File</label>
+        <input id="logo-file" value="">
+        <div class="section-note">Optional controller setting. Uploaded SVGs are rasterized in the browser and stored only on this controller.</div>
+        <div class="button-row">
+          <button type="button">Upload Logo</button>
+          <button class="secondary" type="button">Remove Logo</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="network-section" class="stack">
+      <div class="section-head">
+        <h2>Network</h2>
+        <p>Home Wi-Fi onboarding with scan-assisted SSID selection.</p>
+      </div>
+      <form class="section-card">
+        <button type="button">Scan Nearby Networks</button>
+        <label for="network-list">Nearby Networks</label>
+        <select id="network-list">
+          <option selected>Select from scan results</option>
+          <option>MeinWLAN</option>
+        </select>
+        <label for="ssid">Home Wi-Fi SSID</label>
+        <input id="ssid" value="MeinWLAN">
+        <label for="password">Wi-Fi Password</label>
+        <input id="password" type="password" value="">
+        <div class="section-note">Saving Wi-Fi starts a reconnect attempt immediately.</div>
+        <button type="button">Save Wi-Fi And Connect</button>
+      </form>
+    </section>
+
+    <section id="recipes-section" class="stack">
+      <div class="section-head">
+        <h2>Recipes</h2>
+        <p>Edit only the active stored preset definitions.</p>
+      </div>
+      <section class="section-card">
+        <div class="section-note">Active presets: <strong>4</strong> · Temperature step <strong>0.5 C</strong> · Time step <strong>0.5 s</strong></div>
+        <div class="preset-list">
+          <details open>
+            <summary>
+              <div>
+                <strong>Preset 1</strong>
+                <div class="summary-name">Morning Flat</div>
+              </div>
+              <div class="summary-meta">Coffee Boiler 93.5 C · On-Time 1.0 s · Off-Time 2.0 s</div>
+            </summary>
+            <div class="preset-form">
+              <div class="field-grid">
+                <div>
+                  <label>Temperature (C)</label>
+                  <input value="93.5">
+                </div>
+                <div>
+                  <label>Prebrewing In (s)</label>
+                  <input value="1.0">
+                </div>
+                <div>
+                  <label>Prebrewing Out (s)</label>
+                  <input value="2.0">
+                </div>
+              </div>
+              <button type="button">Save Preset</button>
+            </div>
+          </details>
+
+          <details>
+            <summary>
+              <div>
+                <strong>Preset 2</strong>
+                <div class="summary-name">Preset 2</div>
+              </div>
+              <div class="summary-meta">Coffee Boiler 94.0 C · On-Time 1.5 s · Off-Time 2.5 s</div>
+            </summary>
+          </details>
+        </div>
+      </section>
+    </section>
+
+    <section id="advanced-section" class="stack">
+      <div class="section-head">
+        <h2>Advanced</h2>
+        <p>Optional power-user settings that change controller editing behavior.</p>
+      </div>
+      <form class="section-card">
+        <div class="field-grid">
+          <div>
+            <label for="preset_count">Preset Count</label>
+            <select id="preset_count">
+              <option>2</option>
+              <option>3</option>
+              <option selected>4</option>
+              <option>5</option>
+              <option>6</option>
+            </select>
+          </div>
+          <div>
+            <label for="temperature_step">Temperature Step</label>
+            <select id="temperature_step">
+              <option>0.1 C</option>
+              <option selected>0.5 C</option>
+            </select>
+          </div>
+          <div>
+            <label for="time_step">Time Step</label>
+            <select id="time_step">
+              <option>0.1 s</option>
+              <option selected>0.5 s</option>
+            </select>
+          </div>
+        </div>
+        <div class="section-note">These settings apply to both this portal and the on-device rotary controls. Reducing the preset count deletes the higher-numbered presets after confirmation.</div>
+        <button type="button">Save Advanced Settings</button>
+      </form>
+
+      <form class="section-card">
+        <h3>System Actions</h3>
+        <div class="section-note">Use these actions when you want to restart the controller or wipe onboarding data.</div>
+        <div class="button-row">
+          <button class="secondary" type="button">Reboot Controller</button>
+          <button class="secondary" type="button">Reset Network Setup</button>
+          <button class="danger" type="button">Factory Reset</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="diagnostics-section" class="stack">
+      <div class="section-head">
+        <h2>Diagnostics</h2>
+        <p>Read-only controller and link state for debugging reconnect or sync issues.</p>
+      </div>
+      <section class="section-card">
+        <pre>Portal: running
+Station: connected
+IP: 192.168.1.46
+Cloud account: connected
+Machine selected: LM012345
+Header logo: default text
+BLE connected: yes
+BLE authenticated: yes</pre>
+      </section>
+    </section>
   </main>
 </body>
 </html>

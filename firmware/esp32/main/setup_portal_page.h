@@ -28,7 +28,10 @@ typedef struct {
   ctrl_values_t dashboard_values;
   uint32_t dashboard_loaded_mask;
   uint32_t dashboard_feature_mask;
-  ctrl_preset_t presets[CTRL_PRESET_COUNT];
+  ctrl_preset_t presets[CTRL_PRESET_MAX_COUNT];
+  uint8_t preset_count;
+  float temperature_step_c;
+  float time_step_s;
   lm_ctrl_wifi_info_t info;
   lm_ctrl_machine_link_info_t machine_info;
   lm_ctrl_cloud_machine_t fleet[8];

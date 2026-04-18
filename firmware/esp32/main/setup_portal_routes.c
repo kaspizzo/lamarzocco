@@ -52,6 +52,30 @@ static bool parse_form_value(const char *body, const char *key, char *dst, size_
   return lm_ctrl_setup_portal_parse_form_value(body, key, dst, dst_size);
 }
 
+static esp_err_t read_form_body(httpd_req_t *req, char *body, size_t body_size) {
+  int received = 0;
+
+  if (req == NULL || body == NULL || body_size == 0) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  if (req->content_len <= 0 || req->content_len >= (int)body_size) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid form body");
+    return ESP_FAIL;
+  }
+
+  while (received < req->content_len) {
+    int chunk = httpd_req_recv(req, body + received, req->content_len - received);
+    if (chunk <= 0) {
+      httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read form data");
+      return ESP_FAIL;
+    }
+    received += chunk;
+  }
+
+  body[received] = '\0';
+  return ESP_OK;
+}
+
 static void json_escape_text(const char *src, char *dst, size_t dst_size) {
   size_t out = 0;
 
@@ -151,22 +175,10 @@ static esp_err_t handle_controller_post(httpd_req_t *req) {
   char hostname[33];
   char language_code[8];
   ctrl_language_t language = CTRL_LANGUAGE_EN;
-  int received = 0;
 
-  if (req->content_len <= 0 || req->content_len >= (int)sizeof(body)) {
-    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid form body");
+  if (read_form_body(req, body, sizeof(body)) != ESP_OK) {
     return ESP_FAIL;
   }
-
-  while (received < req->content_len) {
-    int chunk = httpd_req_recv(req, body + received, req->content_len - received);
-    if (chunk <= 0) {
-      httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read form data");
-      return ESP_FAIL;
-    }
-    received += chunk;
-  }
-  body[received] = '\0';
 
   parse_form_value(body, "hostname", hostname, sizeof(hostname));
   parse_form_value(body, "language", language_code, sizeof(language_code));
@@ -180,6 +192,33 @@ static esp_err_t handle_controller_post(httpd_req_t *req) {
   }
 
   return lm_ctrl_setup_portal_send_response(req, "Controller settings saved.");
+}
+
+static esp_err_t handle_controller_advanced_post(httpd_req_t *req) {
+  char body[256];
+  char error_text[128];
+  lm_ctrl_setup_portal_advanced_form_t form = {0};
+  ctrl_state_t current_state;
+
+  if (read_form_body(req, body, sizeof(body)) != ESP_OK) {
+    return ESP_FAIL;
+  }
+  if (!lm_ctrl_setup_portal_parse_advanced_form(body, &form)) {
+    return lm_ctrl_setup_portal_send_response(req, "Advanced settings form is invalid.");
+  }
+
+  ctrl_state_init(&current_state);
+  if (ctrl_state_load(&current_state) != ESP_OK) {
+    return lm_ctrl_setup_portal_send_response(req, "Could not load the current controller settings.");
+  }
+  if (!lm_ctrl_setup_portal_validate_advanced_form(&form, &current_state, error_text, sizeof(error_text))) {
+    return lm_ctrl_setup_portal_send_response(req, error_text);
+  }
+  if (ctrl_state_update_advanced_settings(form.preset_count, form.temperature_step_c, form.time_step_s) != ESP_OK) {
+    return lm_ctrl_setup_portal_send_response(req, "Could not store the advanced controller settings.");
+  }
+
+  return lm_ctrl_setup_portal_send_response(req, "Advanced controller settings saved.");
 }
 
 static esp_err_t handle_controller_logo_post(httpd_req_t *req) {
@@ -561,30 +600,19 @@ static esp_err_t handle_preset_post(httpd_req_t *req) {
   char bbw_dose_1_text[24];
   char bbw_dose_2_text[24];
   char *endptr = NULL;
+  ctrl_state_t controller_state;
   ctrl_preset_t preset = {0};
   ctrl_values_t machine_values = {0};
   uint32_t loaded_mask = 0;
   uint32_t feature_mask = 0;
   float parsed_value = 0.0f;
   int preset_index = -1;
-  int received = 0;
   bool bbw_available = false;
   char banner[96];
 
-  if (req->content_len <= 0 || req->content_len >= (int)sizeof(body)) {
-    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid form body");
+  if (read_form_body(req, body, sizeof(body)) != ESP_OK) {
     return ESP_FAIL;
   }
-
-  while (received < req->content_len) {
-    int chunk = httpd_req_recv(req, body + received, req->content_len - received);
-    if (chunk <= 0) {
-      httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read form data");
-      return ESP_FAIL;
-    }
-    received += chunk;
-  }
-  body[received] = '\0';
 
   parse_form_value(body, "preset_slot", slot_text, sizeof(slot_text));
   parse_form_value(body, "preset_name", preset_name, sizeof(preset_name));
@@ -597,17 +625,25 @@ static esp_err_t handle_preset_post(httpd_req_t *req) {
   }
 
   preset_index = (int)strtol(slot_text, &endptr, 10);
-  if (endptr == slot_text || *endptr != '\0' || preset_index < 0 || preset_index >= CTRL_PRESET_COUNT) {
+  if (endptr == slot_text || *endptr != '\0' || preset_index < 0 || preset_index >= CTRL_PRESET_MAX_COUNT) {
     return lm_ctrl_setup_portal_send_response(req, "Preset slot is invalid.");
   }
 
-  if (ctrl_state_load_preset_slot(preset_index, &preset) != ESP_OK) {
-    return lm_ctrl_setup_portal_send_response(req, "Could not load the stored preset.");
+  ctrl_state_init(&controller_state);
+  if (ctrl_state_load(&controller_state) != ESP_OK) {
+    return lm_ctrl_setup_portal_send_response(req, "Could not load the controller presets.");
   }
+  if (preset_index >= controller_state.preset_count) {
+    return lm_ctrl_setup_portal_send_response(req, "Preset slot is not active.");
+  }
+  preset = controller_state.presets[preset_index];
 
   parsed_value = strtof(temperature_text, &endptr);
   if (temperature_text[0] == '\0' || endptr == temperature_text || *endptr != '\0' || parsed_value < 80.0f || parsed_value > 103.0f) {
     return lm_ctrl_setup_portal_send_response(req, "Temperature must stay between 80.0 C and 103.0 C.");
+  }
+  if (!ctrl_state_value_matches_step(parsed_value, 80.0f, 103.0f, controller_state.temperature_step_c)) {
+    return lm_ctrl_setup_portal_send_response(req, controller_state.temperature_step_c < 0.3f ? "Temperature must follow 0.1 C steps." : "Temperature must follow 0.5 C steps.");
   }
   preset.values.temperature_c = parsed_value;
 
@@ -615,11 +651,17 @@ static esp_err_t handle_preset_post(httpd_req_t *req) {
   if (infuse_text[0] == '\0' || endptr == infuse_text || *endptr != '\0' || parsed_value < 0.0f || parsed_value > 9.0f) {
     return lm_ctrl_setup_portal_send_response(req, "Prebrewing In must stay between 0.0 s and 9.0 s.");
   }
+  if (!ctrl_state_value_matches_step(parsed_value, 0.0f, 9.0f, controller_state.time_step_s)) {
+    return lm_ctrl_setup_portal_send_response(req, controller_state.time_step_s < 0.3f ? "Prebrewing In must follow 0.1 s steps." : "Prebrewing In must follow 0.5 s steps.");
+  }
   preset.values.infuse_s = parsed_value;
 
   parsed_value = strtof(pause_text, &endptr);
   if (pause_text[0] == '\0' || endptr == pause_text || *endptr != '\0' || parsed_value < 0.0f || parsed_value > 9.0f) {
     return lm_ctrl_setup_portal_send_response(req, "Prebrewing Out must stay between 0.0 s and 9.0 s.");
+  }
+  if (!ctrl_state_value_matches_step(parsed_value, 0.0f, 9.0f, controller_state.time_step_s)) {
+    return lm_ctrl_setup_portal_send_response(req, controller_state.time_step_s < 0.3f ? "Prebrewing Out must follow 0.1 s steps." : "Prebrewing Out must follow 0.5 s steps.");
   }
   preset.values.pause_s = parsed_value;
 
@@ -893,6 +935,11 @@ esp_err_t lm_ctrl_setup_portal_start_http_server(void) {
     .method = HTTP_POST,
     .handler = handle_controller_post,
   };
+  httpd_uri_t controller_advanced_uri = {
+    .uri = "/controller-advanced",
+    .method = HTTP_POST,
+    .handler = handle_controller_advanced_post,
+  };
   httpd_uri_t controller_logo_uri = {
     .uri = "/controller-logo",
     .method = HTTP_POST,
@@ -998,12 +1045,13 @@ esp_err_t lm_ctrl_setup_portal_start_http_server(void) {
     return ESP_OK;
   }
 
-  config.max_uri_handlers = 24;
+  config.max_uri_handlers = 25;
   config.stack_size = 12288;
   config.uri_match_fn = httpd_uri_match_wildcard;
   ESP_RETURN_ON_ERROR(httpd_start(&s_state.http_server, &config), TAG, "Failed to start setup web server");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &root_uri), TAG, "Failed to register root handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &controller_uri), TAG, "Failed to register controller handler");
+  ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &controller_advanced_uri), TAG, "Failed to register advanced controller handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &controller_logo_uri), TAG, "Failed to register controller logo handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &controller_logo_clear_uri), TAG, "Failed to register controller logo clear handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &wifi_uri), TAG, "Failed to register Wi-Fi handler");

@@ -23,6 +23,7 @@ idf_component_register(
     "setup_portal_page.c"
     "setup_portal_presenter.c"
     "setup_portal_routes.c"
+    "setup_portal_routes_shared.c"
     "wifi_setup.c"
   INCLUDE_DIRS
     "."
