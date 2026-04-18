@@ -220,7 +220,7 @@ esp_err_t lm_ctrl_display_init(lv_disp_t **out_display) {
   ESP_RETURN_ON_ERROR(spi_bus_initialize(LM_CTRL_LCD_HOST, &buscfg, SPI_DMA_CH_AUTO), TAG, "SPI init failed");
 
   esp_lcd_panel_io_spi_config_t io_config = ST77916_PANEL_IO_QSPI_CONFIG(LM_CTRL_LCD_CS, NULL, NULL);
-  io_config.pclk_hz = 50 * 1000 * 1000;
+  io_config.trans_queue_depth = 1;
   ESP_RETURN_ON_ERROR(
     esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LM_CTRL_LCD_HOST, &io_config, &s_panel_io),
     TAG,

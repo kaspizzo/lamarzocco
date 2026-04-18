@@ -91,7 +91,8 @@ static const char *TAG = "lm_wifi";
 #define LM_CTRL_CLOUD_WS_FRAME_MAX 8192
 #define LM_CTRL_CLOUD_WS_SUBSCRIPTION_ID "lm-dashboard"
 #define LM_CTRL_CLOUD_COMMAND_UPDATE_MAX 8
-#define LM_CTRL_CLOUD_ACCESS_TOKEN_CACHE_US (30LL * 1000LL * 1000LL)
+#define LM_CTRL_CLOUD_ACCESS_TOKEN_CACHE_FALLBACK_US (30LL * 1000LL * 1000LL)
+#define LM_CTRL_CLOUD_ACCESS_TOKEN_EXP_SAFETY_MS (60LL * 1000LL)
 #define LM_CTRL_STATIC_INSTALLATION_ID "28af7c9e-36cf-4f82-b4c6-0181adc3f59f"
 #define LM_CTRL_STATIC_INSTALLATION_SECRET_B64 "75PrFs4iu69ClXC8RcOxevWDRm7d0TnCVVfmabNZ7Uo="
 #define LM_CTRL_STATIC_PRIVATE_KEY_B64 "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg1P+Hrk0k9ttOzXVM5IDEekoX3oNCGatYkjXH/iaaMVOhRANCAASRshQpWbAJKJIVAiDpiuq3LZLVQGx9QzxZSYslckgeOPOt3ZdvMFMiv6K2AKOOjfart3sxAK229pLYTi3aGSKK"
@@ -166,7 +167,7 @@ typedef struct {
   int64_t brew_start_epoch_ms;
   int64_t brew_start_local_us;
   char cloud_access_token[LM_CTRL_CLOUD_WS_TOKEN_LEN];
-  int64_t cloud_access_token_cached_us;
+  int64_t cloud_access_token_valid_until_us;
   char cloud_ws_access_token[LM_CTRL_CLOUD_WS_TOKEN_LEN];
   char cloud_ws_frame[LM_CTRL_CLOUD_WS_FRAME_MAX];
   size_t cloud_ws_frame_len;
@@ -232,19 +233,30 @@ static int64_t current_epoch_ms(void) {
   return ((int64_t)tv.tv_sec * 1000LL) + (tv.tv_usec / 1000LL);
 }
 
+static int64_t compute_cloud_access_token_cache_until_us(const char *access_token);
+
 static void clear_cached_cloud_access_token_locked(void) {
   s_state.cloud_access_token[0] = '\0';
-  s_state.cloud_access_token_cached_us = 0;
+  s_state.cloud_access_token_valid_until_us = 0;
+}
+
+static void clear_cached_cloud_access_token(void) {
+  lock_state();
+  clear_cached_cloud_access_token_locked();
+  unlock_state();
 }
 
 static void store_cached_cloud_access_token(const char *access_token) {
+  int64_t valid_until_us;
+
   if (access_token == NULL || access_token[0] == '\0') {
     return;
   }
 
+  valid_until_us = compute_cloud_access_token_cache_until_us(access_token);
   lock_state();
   copy_text(s_state.cloud_access_token, sizeof(s_state.cloud_access_token), access_token);
-  s_state.cloud_access_token_cached_us = esp_timer_get_time();
+  s_state.cloud_access_token_valid_until_us = valid_until_us;
   unlock_state();
 }
 
@@ -258,8 +270,8 @@ static bool copy_cached_cloud_access_token(char *buffer, size_t buffer_size) {
 
   lock_state();
   valid = s_state.cloud_access_token[0] != '\0' &&
-          s_state.cloud_access_token_cached_us != 0 &&
-          (now_us - s_state.cloud_access_token_cached_us) < LM_CTRL_CLOUD_ACCESS_TOKEN_CACHE_US;
+          s_state.cloud_access_token_valid_until_us != 0 &&
+          now_us < s_state.cloud_access_token_valid_until_us;
   if (valid) {
     copy_text(buffer, buffer_size, s_state.cloud_access_token);
   }
@@ -469,6 +481,130 @@ static esp_err_t base64_decode_bytes(const char *input, uint8_t *output, size_t 
   *output_len = 0;
   ret = mbedtls_base64_decode(output, output_size, output_len, (const unsigned char *)input, strlen(input));
   return ret == 0 ? ESP_OK : ESP_FAIL;
+}
+
+static bool parse_cloud_access_token_jwt_times(
+  const char *access_token,
+  int64_t *expiry_epoch_ms,
+  int64_t *issued_epoch_ms,
+  int64_t *not_before_epoch_ms
+) {
+  const char *payload_start;
+  const char *payload_end;
+  size_t payload_len;
+  size_t normalized_len;
+  size_t decoded_len = 0;
+  char normalized[768];
+  unsigned char decoded[512];
+  cJSON *root = NULL;
+  cJSON *exp_item;
+  cJSON *iat_item;
+  cJSON *nbf_item;
+  bool parsed = false;
+
+  if (access_token == NULL || expiry_epoch_ms == NULL || issued_epoch_ms == NULL || not_before_epoch_ms == NULL) {
+    return false;
+  }
+
+  *expiry_epoch_ms = 0;
+  *issued_epoch_ms = 0;
+  *not_before_epoch_ms = 0;
+
+  payload_start = strchr(access_token, '.');
+  if (payload_start == NULL) {
+    return false;
+  }
+  payload_start++;
+  payload_end = strchr(payload_start, '.');
+  if (payload_end == NULL || payload_end <= payload_start) {
+    return false;
+  }
+
+  payload_len = (size_t)(payload_end - payload_start);
+  if (payload_len == 0 || payload_len > sizeof(normalized) - 5) {
+    return false;
+  }
+
+  for (size_t i = 0; i < payload_len; ++i) {
+    char ch = payload_start[i];
+    if (ch == '-') {
+      normalized[i] = '+';
+    } else if (ch == '_') {
+      normalized[i] = '/';
+    } else {
+      normalized[i] = ch;
+    }
+  }
+  normalized_len = payload_len;
+  while ((normalized_len % 4U) != 0U) {
+    normalized[normalized_len++] = '=';
+  }
+  normalized[normalized_len] = '\0';
+
+  if (base64_decode_bytes(normalized, decoded, sizeof(decoded) - 1, &decoded_len) != ESP_OK || decoded_len == 0) {
+    return false;
+  }
+  decoded[decoded_len] = '\0';
+
+  root = cJSON_Parse((const char *)decoded);
+  if (root == NULL) {
+    return false;
+  }
+
+  exp_item = cJSON_GetObjectItemCaseSensitive(root, "exp");
+  iat_item = cJSON_GetObjectItemCaseSensitive(root, "iat");
+  nbf_item = cJSON_GetObjectItemCaseSensitive(root, "nbf");
+  if (cJSON_IsNumber(exp_item)) {
+    *expiry_epoch_ms = ((int64_t)exp_item->valuedouble) * 1000LL;
+    parsed = true;
+  }
+  if (cJSON_IsNumber(iat_item)) {
+    *issued_epoch_ms = ((int64_t)iat_item->valuedouble) * 1000LL;
+  }
+  if (cJSON_IsNumber(nbf_item)) {
+    *not_before_epoch_ms = ((int64_t)nbf_item->valuedouble) * 1000LL;
+  }
+
+  cJSON_Delete(root);
+  return parsed;
+}
+
+static int64_t compute_cloud_access_token_cache_until_us(const char *access_token) {
+  const int64_t now_us = esp_timer_get_time();
+  int64_t valid_until_us = now_us + LM_CTRL_CLOUD_ACCESS_TOKEN_CACHE_FALLBACK_US;
+  int64_t expiry_epoch_ms = 0;
+  int64_t issued_epoch_ms = 0;
+  int64_t not_before_epoch_ms = 0;
+  int64_t now_epoch_ms = 0;
+  int64_t remaining_ms = 0;
+
+  if (!parse_cloud_access_token_jwt_times(access_token, &expiry_epoch_ms, &issued_epoch_ms, &not_before_epoch_ms)) {
+    ESP_LOGI(TAG, "Cloud access token cache fallback: 30s");
+    return valid_until_us;
+  }
+
+  now_epoch_ms = current_epoch_ms();
+  if (now_epoch_ms != 0) {
+    remaining_ms = expiry_epoch_ms - now_epoch_ms - LM_CTRL_CLOUD_ACCESS_TOKEN_EXP_SAFETY_MS;
+  } else if (issued_epoch_ms != 0 && expiry_epoch_ms > issued_epoch_ms) {
+    remaining_ms = expiry_epoch_ms - issued_epoch_ms - LM_CTRL_CLOUD_ACCESS_TOKEN_EXP_SAFETY_MS;
+    ESP_LOGI(TAG, "Cloud access token wall clock unavailable; using JWT lifetime from iat/exp");
+  } else if (not_before_epoch_ms != 0 && expiry_epoch_ms > not_before_epoch_ms) {
+    remaining_ms = expiry_epoch_ms - not_before_epoch_ms - LM_CTRL_CLOUD_ACCESS_TOKEN_EXP_SAFETY_MS;
+    ESP_LOGI(TAG, "Cloud access token wall clock unavailable; using JWT lifetime from nbf/exp");
+  } else {
+    ESP_LOGI(TAG, "Cloud access token JWT exp found, but no usable lifetime claims; using 30s fallback");
+    return valid_until_us;
+  }
+
+  if (remaining_ms <= 0) {
+    ESP_LOGW(TAG, "Cloud access token JWT exp is too close; using 30s fallback");
+    return valid_until_us;
+  }
+
+  valid_until_us = now_us + (remaining_ms * 1000LL);
+  ESP_LOGI(TAG, "Cloud access token cached for %llds from JWT exp", (long long)(remaining_ms / 1000LL));
+  return valid_until_us;
 }
 
 static esp_err_t derive_installation_material(
@@ -1632,7 +1768,15 @@ static esp_err_t http_request_capture(
   char **response_body,
   int *status_code
 ) {
-  ESP_LOGI(TAG, "HTTP request: %s%s", host, path);
+  ESP_LOGI(
+    TAG,
+    "HTTP request: %s%s heap=%u internal=%u largest_internal=%u",
+    host,
+    path,
+    (unsigned)esp_get_free_heap_size(),
+    (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)
+  );
   mark_cloud_http_request_started();
   esp_err_t ret = lm_ctrl_cloud_http_request(
     host,
@@ -1648,7 +1792,16 @@ static esp_err_t http_request_capture(
   );
   mark_cloud_http_request_finished();
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "HTTP request failed for %s%s: %s", host, path, esp_err_to_name(ret));
+    ESP_LOGE(
+      TAG,
+      "HTTP request failed for %s%s heap=%u internal=%u largest_internal=%u: %s",
+      host,
+      path,
+      (unsigned)esp_get_free_heap_size(),
+      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+      esp_err_to_name(ret)
+    );
   }
   return ret;
 }
@@ -2867,6 +3020,9 @@ static esp_err_t refresh_cloud_fleet(char *banner_text, size_t banner_text_size)
   }
 
   if (status_code < 200 || status_code >= 300) {
+    if (status_code == 401) {
+      clear_cached_cloud_access_token();
+    }
     ESP_LOGW(TAG, "Machine lookup failed with status %d: %.200s", status_code, response_body != NULL ? response_body : "");
     free(response_body);
     if (banner_text != NULL && banner_text_size > 0) {
@@ -4815,6 +4971,9 @@ esp_err_t lm_ctrl_wifi_execute_machine_command(
   }
 
   if (status_code < 200 || status_code >= 300) {
+    if (status_code == 401) {
+      clear_cached_cloud_access_token();
+    }
     ESP_LOGW(TAG, "Cloud command %s failed with status %d: %.200s", command, status_code, response_body != NULL ? response_body : "");
     if (status_text != NULL && status_text_size > 0) {
       snprintf(status_text, status_text_size, "Cloud command failed with status %d.", status_code);
@@ -4944,6 +5103,9 @@ static esp_err_t fetch_dashboard_root(cJSON **out_root, char *error_text, size_t
   }
 
   if (status_code < 200 || status_code >= 300) {
+    if (status_code == 401) {
+      clear_cached_cloud_access_token();
+    }
     ESP_LOGW(TAG, "Dashboard failed with status %d: %.200s", status_code, response_body != NULL ? response_body : "");
     if (error_text != NULL && error_text_size > 0) {
       snprintf(error_text, error_text_size, "Dashboard request failed with status %d.", status_code);

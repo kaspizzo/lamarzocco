@@ -442,7 +442,10 @@ static void merge_loaded_values(ctrl_state_t *state, local_value_hold_t *hold) {
 static void maybe_request_value_sync(const ctrl_state_t *state) {
   lm_ctrl_wifi_info_t wifi_info;
   lm_ctrl_machine_link_info_t machine_info = {0};
+  lm_ctrl_machine_binding_t binding = {0};
   uint32_t wanted_mask;
+  uint32_t sync_flags = LM_CTRL_MACHINE_SYNC_NONE;
+  bool local_ble_available = false;
 
   if (state == NULL) {
     return;
@@ -461,12 +464,25 @@ static void maybe_request_value_sync(const ctrl_state_t *state) {
 
   lm_ctrl_wifi_get_info(&wifi_info);
   lm_ctrl_machine_link_get_info(&machine_info);
+  local_ble_available = lm_ctrl_wifi_get_machine_binding(&binding) &&
+                        binding.configured &&
+                        binding.serial[0] != '\0' &&
+                        binding.communication_key[0] != '\0';
   if (machine_info.sync_pending) {
     return;
   }
 
-  if ((machine_info.authenticated || (wifi_info.cloud_connected && wifi_info.has_machine_selection)) &&
-      lm_ctrl_machine_link_request_sync_mode(LM_CTRL_MACHINE_SYNC_ALL) != ESP_OK) {
+  if (local_ble_available || machine_info.authenticated) {
+    sync_flags |= LM_CTRL_MACHINE_SYNC_BLE;
+  }
+  if (wifi_info.cloud_connected && wifi_info.has_machine_selection) {
+    sync_flags |= LM_CTRL_MACHINE_SYNC_CLOUD;
+  }
+  if (sync_flags == LM_CTRL_MACHINE_SYNC_NONE) {
+    return;
+  }
+
+  if (lm_ctrl_machine_link_request_sync_mode(sync_flags) != ESP_OK) {
     ESP_LOGW(TAG, "Failed to request machine value sync");
   }
 }
