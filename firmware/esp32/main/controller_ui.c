@@ -11,9 +11,7 @@
 
 #include "esp_log.h"
 #include "extra/libs/qrcode/lv_qrcode.h"
-
-#include "machine_link.h"
-#include "wifi_setup.h"
+#include "machine_link_types.h"
 
 static const char *TAG = "lm_ui";
 static const char *TITLE_TEXT = "la marzocco";
@@ -174,19 +172,13 @@ static void style_action_button(lv_obj_t *button, lv_obj_t *label, bool primary)
   lv_obj_set_style_text_color(label, primary ? COLOR_BG : COLOR_TEXT, 0);
 }
 
-static void render_title(lm_ctrl_ui_t *ui, const lm_ctrl_wifi_info_t *wifi_info) {
-  const lv_img_dsc_t *custom_logo = NULL;
-
-  if (ui == NULL || wifi_info == NULL) {
+static void render_title(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *view) {
+  if (ui == NULL || view == NULL) {
     return;
   }
 
-  if (wifi_info->has_custom_logo) {
-    custom_logo = lm_ctrl_wifi_get_custom_logo();
-  }
-
-  if (custom_logo != NULL) {
-    lv_img_set_src(ui->title_image, custom_logo);
+  if (view->custom_logo != NULL) {
+    lv_img_set_src(ui->title_image, view->custom_logo);
     set_hidden(ui->title_image, false);
     set_hidden(ui->title_text, true);
     return;
@@ -617,25 +609,21 @@ static void render_main_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, ctrl
 
 }
 
-static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_wifi_info_t *wifi_info) {
-  lm_ctrl_machine_link_info_t machine_info = {0};
-
-  if (ui == NULL || wifi_info == NULL) {
+static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *view) {
+  if (ui == NULL || view == NULL) {
     return;
   }
 
-  lm_ctrl_machine_link_get_info(&machine_info);
-
-  if (wifi_info->sta_connected || wifi_info->sta_connecting) {
+  if (view->wifi_visible) {
     set_hidden(ui->wifi_icon, false);
-    set_label_text(ui->wifi_icon, LV_SYMBOL_WIFI, wifi_info->sta_connected ? COLOR_ACTIVE : COLOR_MUTED);
+    set_label_text(ui->wifi_icon, LV_SYMBOL_WIFI, view->wifi_connected ? COLOR_ACTIVE : COLOR_MUTED);
   } else {
     set_hidden(ui->wifi_icon, true);
   }
 
-  if (machine_info.connected || machine_info.authenticated) {
+  if (view->ble_visible) {
     set_hidden(ui->ble_icon, false);
-    set_label_text(ui->ble_icon, LV_SYMBOL_BLUETOOTH, machine_info.authenticated ? COLOR_ACTIVE : COLOR_MUTED);
+    set_label_text(ui->ble_icon, LV_SYMBOL_BLUETOOTH, view->ble_authenticated ? COLOR_ACTIVE : COLOR_MUTED);
   } else {
     set_hidden(ui->ble_icon, true);
   }
@@ -670,10 +658,10 @@ static void render_presets_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, c
   style_action_button(ui->presets_save_button, ui->presets_save_label, false);
 }
 
-static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, ctrl_language_t language, const char *status_text) {
-  char qr_payload[192];
-  const char *body = (status_text != NULL && status_text[0] != '\0')
-    ? status_text
+static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, const lm_ctrl_ui_view_t *view) {
+  const ctrl_language_t language = view != NULL ? view->language : CTRL_LANGUAGE_EN;
+  const char *body = (view != NULL && view->setup_status_text[0] != '\0')
+    ? view->setup_status_text
     : (language == CTRL_LANGUAGE_DE ? "Setup-Portal wird gestartet." : "Setup portal is starting.");
   char reset_body[160];
   const int reset_progress = state != NULL ? (int)state->reset_progress : 0;
@@ -740,8 +728,9 @@ static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, ctr
   set_label_text(ui->setup_title, "Setup", COLOR_ACTIVE);
   set_label_text(ui->setup_body, body, COLOR_TEXT);
 
-  lm_ctrl_wifi_get_setup_qr_payload(qr_payload, sizeof(qr_payload));
-  if (qr_payload[0] != '\0' && lv_qrcode_update(ui->setup_qr, qr_payload, strlen(qr_payload)) == LV_RES_OK) {
+  if (view != NULL &&
+      view->setup_qr_payload[0] != '\0' &&
+      lv_qrcode_update(ui->setup_qr, view->setup_qr_payload, strlen(view->setup_qr_payload)) == LV_RES_OK) {
     set_hidden(ui->setup_qr, false);
   } else {
     set_hidden(ui->setup_qr, true);
@@ -751,7 +740,7 @@ static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, ctr
 esp_err_t lm_ctrl_ui_init(
   lm_ctrl_ui_t *ui,
   const ctrl_state_t *state,
-  const char *status_text,
+  const lm_ctrl_ui_view_t *view,
   lm_ctrl_ui_action_cb_t action_cb,
   void *action_user_data
 ) {
@@ -945,25 +934,22 @@ esp_err_t lm_ctrl_ui_init(
     lv_obj_align(ui->page_dots[i], LV_ALIGN_CENTER, -26 + ((int)i * 17), 106);
   }
 
-  lm_ctrl_ui_render(ui, state, status_text);
+  lm_ctrl_ui_render(ui, state, view);
   ESP_LOGI(TAG, "UI initialized");
   return ESP_OK;
 }
 
-void lm_ctrl_ui_render(lm_ctrl_ui_t *ui, const ctrl_state_t *state, const char *status_text) {
-  lm_ctrl_wifi_info_t wifi_info;
-  ctrl_language_t language;
+void lm_ctrl_ui_render(lm_ctrl_ui_t *ui, const ctrl_state_t *state, const lm_ctrl_ui_view_t *view) {
+  const ctrl_language_t language = view != NULL ? view->language : CTRL_LANGUAGE_EN;
 
   if (ui == NULL || state == NULL) {
     return;
   }
 
-  lm_ctrl_wifi_get_info(&wifi_info);
-  language = wifi_info.language;
   ui->rendered_focus = state->focus;
   ui->rendered_screen = state->screen;
   ui->rendered_feature_mask = state->feature_mask;
-  render_title(ui, &wifi_info);
+  render_title(ui, view);
 
   switch (state->screen) {
     case CTRL_SCREEN_PRESETS:
@@ -972,7 +958,7 @@ void lm_ctrl_ui_render(lm_ctrl_ui_t *ui, const ctrl_state_t *state, const char *
     case CTRL_SCREEN_SETUP:
     case CTRL_SCREEN_SETUP_RESET_ARM:
     case CTRL_SCREEN_SETUP_RESET_CONFIRM:
-      render_setup_screen(ui, state, language, status_text);
+      render_setup_screen(ui, state, view);
       break;
     case CTRL_SCREEN_MAIN:
     default:
@@ -980,5 +966,5 @@ void lm_ctrl_ui_render(lm_ctrl_ui_t *ui, const ctrl_state_t *state, const char *
       break;
   }
 
-  render_connection_icons(ui, &wifi_info);
+  render_connection_icons(ui, view);
 }

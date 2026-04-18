@@ -9,6 +9,22 @@
 #define LM_CTRL_UI_MAIN_PAGE_COUNT 8
 /** Maximum number of touch bindings stored for button-like actions. */
 #define LM_CTRL_UI_BINDING_COUNT 6
+/** Maximum setup status text length passed into the UI view model. */
+#define LM_CTRL_UI_STATUS_TEXT_LEN 256
+/** Maximum setup QR payload length passed into the UI view model. */
+#define LM_CTRL_UI_SETUP_QR_LEN 192
+
+/** Read-only UI view model built by the runtime layer. */
+typedef struct {
+  ctrl_language_t language;
+  bool wifi_visible;
+  bool wifi_connected;
+  bool ble_visible;
+  bool ble_authenticated;
+  const lv_img_dsc_t *custom_logo;
+  char setup_status_text[LM_CTRL_UI_STATUS_TEXT_LEN];
+  char setup_qr_payload[LM_CTRL_UI_SETUP_QR_LEN];
+} lm_ctrl_ui_view_t;
 
 /** UI-level actions forwarded back into the controller input queue. */
 typedef enum {
@@ -95,9 +111,9 @@ struct lm_ctrl_ui_s {
 esp_err_t lm_ctrl_ui_init(
   lm_ctrl_ui_t *ui,
   const ctrl_state_t *state,
-  const char *status_text,
+  const lm_ctrl_ui_view_t *view,
   lm_ctrl_ui_action_cb_t action_cb,
   void *action_user_data
 );
 /** Refresh the UI to reflect the latest controller state and setup status text. */
-void lm_ctrl_ui_render(lm_ctrl_ui_t *ui, const ctrl_state_t *state, const char *status_text);
+void lm_ctrl_ui_render(lm_ctrl_ui_t *ui, const ctrl_state_t *state, const lm_ctrl_ui_view_t *view);
