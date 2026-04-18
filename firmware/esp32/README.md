@@ -71,7 +71,7 @@ They currently store and load:
 
 They do not store or restore:
 
-- steam boiler enable
+- steam boiler level (`Off / 1 / 2 / 3`)
 - standby
 
 ## Setup portal

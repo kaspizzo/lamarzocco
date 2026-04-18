@@ -49,7 +49,7 @@ The current ESP32 firmware supports:
 - machine selection via La Marzocco cloud account
 - BLE control for:
   - coffee boiler temperature
-  - steam boiler enable
+  - steam boiler `Off / 1 / 2 / 3` level control from the controller screen
   - standby
 - cloud-backed prebrewing mode and timing changes
 - periodic machine value refresh while the controller stays online
