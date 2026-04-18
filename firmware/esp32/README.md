@@ -32,7 +32,7 @@ The current target is a JC3636K718-style round controller board with:
 - `board_haptic.[ch]`
   DRV2605L click feedback
 - `wifi_setup.[ch]`
-  setup portal with:
+  setup/network façade and portal orchestration with:
   - Wi-Fi scan
   - home Wi-Fi storage
   - on-device language selection (`English` default, optional `Deutsch`)
@@ -40,10 +40,55 @@ The current target is a JC3636K718-style round controller board with:
   - cloud credential storage
   - machine loading and selection
   - setup AP QR generation and captive-portal helpers
+- `controller_settings.[ch]`
+  persisted settings for:
+  - Wi-Fi credentials
+  - hostname and language
+  - custom logo blob
+  - cloud credentials
+  - selected machine binding
+- `cloud_session.[ch]`
+  public cloud REST/session API for:
+  - installation bootstrap
+  - access-token caching
+  - fleet refresh
+  - dashboard fetch
+  - machine command execution
+- `cloud_auth.c`
+  internal signed-auth helper implementation for:
+  - installation bootstrap
+  - request signing
+  - cached access-token lookup
+  - websocket upgrade headers
+- `cloud_machine_api.c`
+  internal machine/fleet REST implementation for:
+  - fleet refresh
+  - machine selection restoration
+  - cloud command execution
+- `cloud_dashboard.c`
+  internal dashboard REST implementation for:
+  - dashboard fetch
+  - prebrewing extraction
+  - dashboard summaries/logging
+- `cloud_live_updates.[ch]`
+  cloud websocket/live-update handling for:
+  - reachability probes
+  - websocket/STOMP lifecycle
+  - async dashboard updates
+  - async command status updates
+  - shot timer snapshot state
 - `machine_link.[ch]`
-  machine command transport:
-  - BLE for coffee boiler temperature, steam boiler, standby
-  - cloud for prebrewing mode/times and dashboard fallback values
+  public machine-link API and reducer surface
+- `machine_link.c`
+  machine-link core state, worker orchestration, and public API glue
+- `machine_link_ble.c`
+  BLE transport, GATT helpers, authentication, and direct machine commands
+- `machine_link_cloud.c`
+  cloud fallback fetches, async command acknowledgements, and dashboard updates
+- `machine_link_types.h`
+  type-only machine DTOs and bitmasks shared with UI and setup page rendering
+- `wifi_setup_types.h`
+  type-only Wi-Fi/setup DTOs shared with UI/runtime and portal page rendering
 - `dev.sh`
   fast build/flash/monitor loop
 
@@ -106,6 +151,53 @@ The firmware does not ship an official vendor logo asset. By default, the displa
 - The controller refreshes machine-facing values periodically while it stays online.
 - If a value has not been loaded yet, the UI shows placeholders instead of stale defaults.
 
+## Internal architecture
+
+The firmware is now split by responsibility instead of putting setup, persistence, cloud session logic, live updates, UI rendering, and runtime coordination into a few large files.
+
+- `app_main.c`
+  bootstrap and top-level wiring only
+- `controller_runtime.[ch]`
+  event loop coordination, sync cadence, and UI view-model assembly
+- `controller_ui.[ch]`
+  LVGL rendering only, driven by `ctrl_state_t` plus `lm_ctrl_ui_view_t`
+- `machine_link_types.h`
+  type-only machine status and field-mask contracts shared outside the link implementation
+- `wifi_setup_types.h`
+  type-only Wi-Fi/setup status contracts shared outside the Wi-Fi/setup implementation
+- `wifi_setup.[ch]`
+  AP/DNS/HTTP façade and setup portal orchestration
+- `controller_settings.[ch]`
+  persisted local settings
+- `cloud_session.[ch]`
+  public cloud REST/session surface
+- `cloud_auth.c`
+  internal cloud auth/signing implementation
+- `cloud_machine_api.c`
+  internal fleet/command implementation
+- `cloud_dashboard.c`
+  internal dashboard fetch/parse implementation
+- `cloud_live_updates.[ch]`
+  cloud websocket/live-update worker
+- `machine_link.[ch]`
+  public machine-link seam with injected cloud/settings dependencies
+- `machine_link.c`
+  machine-link core worker/reducer implementation
+- `machine_link_ble.c`
+  BLE transport and command implementation
+- `machine_link_cloud.c`
+  cloud fallback and websocket-ack implementation
+- `setup_portal_routes.[ch]`
+  setup portal route registration and HTTP handler implementation
+- `setup_portal_presenter.[ch]`
+  setup portal view-model assembly between route handlers and pure page rendering
+- `setup_portal_page.[ch]`
+  pure HTML rendering against DTO headers only; no direct runtime/service calls
+
+Additional module notes:
+
+- `docs/controller/FIRMWARE_ARCHITECTURE.md`
+
 ## Known limitations
 
 - The firmware currently targets a specific JC3636K718-style board family.
@@ -133,6 +225,7 @@ cd firmware/esp32
 Useful macOS/Linux helper commands:
 
 ```bash
+./dev.sh test
 ./dev.sh build
 ./dev.sh monitor
 ./dev.sh flash
@@ -140,6 +233,8 @@ ESPPORT=/dev/cu.usbmodemXXXX ./dev.sh quick
 ```
 
 The `quick` command uses `idf.py app-flash monitor`, so only the app partition is reflashed after the initial full flash.
+
+`./dev.sh test` runs the host-side unit-test harness for the pure controller state machine, cloud JSON parsing, and setup portal HTML rendering seams. It does not exercise BLE, Wi-Fi drivers, or on-device ESP-IDF runtime tasks.
 
 ### Windows
 

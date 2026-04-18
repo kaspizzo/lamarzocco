@@ -2,67 +2,13 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
 
 #include "esp_err.h"
 #include "lvgl.h"
+#include "cloud_session.h"
+#include "controller_settings.h"
 #include "controller_state.h"
-
-/** Fixed on-device header logo width used for optional custom uploads. */
-#define LM_CTRL_CUSTOM_LOGO_WIDTH 150
-/** Fixed on-device header logo height used for optional custom uploads. */
-#define LM_CTRL_CUSTOM_LOGO_HEIGHT 26
-/** Schema version for persisted controller header logo data. */
-#define LM_CTRL_CUSTOM_LOGO_SCHEMA_VERSION 1
-/** Fixed byte size for LVGL TRUE_COLOR_ALPHA data at the configured dimensions. */
-#define LM_CTRL_CUSTOM_LOGO_BLOB_SIZE (LM_CTRL_CUSTOM_LOGO_WIDTH * LM_CTRL_CUSTOM_LOGO_HEIGHT * 3)
-
-/** Snapshot of Wi-Fi, portal, and cloud selection state for the controller UI. */
-typedef struct {
-  bool has_credentials;
-  bool has_cloud_credentials;
-  bool cloud_connected;
-  bool has_machine_selection;
-  bool has_custom_logo;
-  bool portal_running;
-  bool sta_connecting;
-  bool sta_connected;
-  ctrl_language_t language;
-  char portal_ssid[33];
-  char portal_password[65];
-  char sta_ssid[33];
-  char hostname[33];
-  char sta_ip[16];
-  char cloud_username[96];
-  char machine_name[64];
-  char machine_model[32];
-  char machine_serial[32];
-} lm_ctrl_wifi_info_t;
-
-/** Live brew timer state derived from cloud dashboard websocket updates. */
-typedef struct {
-  bool websocket_connected;
-  bool brew_active;
-  bool available;
-  uint32_t seconds;
-} lm_ctrl_shot_timer_info_t;
-
-/** Accepted cloud command metadata returned from the machine command API. */
-typedef struct {
-  bool accepted;
-  char command_id[64];
-  char command_status[24];
-  char error_code[32];
-} lm_ctrl_cloud_command_result_t;
-
-/** Persisted cloud-selected machine binding used for BLE and cloud commands. */
-typedef struct {
-  bool configured;
-  char serial[32];
-  char name[64];
-  char model[32];
-  char communication_key[128];
-} lm_ctrl_machine_binding_t;
+#include "wifi_setup_types.h"
 
 /** Initialize Wi-Fi, NVS-backed settings, captive portal helpers, and cloud state. */
 esp_err_t lm_ctrl_wifi_init(void);
@@ -86,10 +32,6 @@ void lm_ctrl_wifi_get_setup_qr_payload(char *buffer, size_t buffer_size);
 esp_err_t lm_ctrl_wifi_request_cloud_probe(void);
 /** Ensure the live cloud websocket path gets a chance to start when conditions allow it. */
 esp_err_t lm_ctrl_wifi_request_live_updates(void);
-/** Report whether the live cloud websocket path is currently starting or connected. */
-bool lm_ctrl_wifi_live_updates_active(void);
-/** Report whether the live cloud websocket path is fully connected and subscribed. */
-bool lm_ctrl_wifi_live_updates_connected(void);
 /** Read the live shot timer state if the cloud websocket currently provides it. */
 bool lm_ctrl_wifi_get_shot_timer_info(lm_ctrl_shot_timer_info_t *info);
 /** Monotonic version counter that changes when Wi-Fi or portal state changes. */
@@ -108,8 +50,6 @@ esp_err_t lm_ctrl_wifi_execute_machine_command(
 esp_err_t lm_ctrl_wifi_fetch_dashboard_values(ctrl_values_t *values, uint32_t *loaded_mask, uint32_t *feature_mask);
 /** Read only the prebrewing timing values from the cloud dashboard. */
 esp_err_t lm_ctrl_wifi_fetch_prebrewing_values(float *seconds_in, float *seconds_out);
-/** Log and summarize the current prebrewing-related cloud dashboard state. */
-esp_err_t lm_ctrl_wifi_log_prebrew_dashboard_state(char *status_text, size_t status_text_size);
 /** Clear Wi-Fi, cloud, and machine binding settings, then reboot into setup mode. */
 esp_err_t lm_ctrl_wifi_reset_network(void);
 /** Clear controller, Wi-Fi, cloud, and preset state, then reboot into factory defaults. */
