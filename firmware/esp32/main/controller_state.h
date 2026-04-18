@@ -10,12 +10,18 @@
 extern "C" {
 #endif
 
-/** Number of recipe presets exposed in the on-device presets screen. */
-#define CTRL_PRESET_COUNT 4
+/** Default number of recipe presets exposed in the on-device presets screen. */
+#define CTRL_PRESET_DEFAULT_COUNT 4
+/** Maximum number of recipe presets supported by the controller and setup portal. */
+#define CTRL_PRESET_MAX_COUNT 6
 /** Maximum persisted preset name length including the terminating NUL. */
 #define CTRL_PRESET_NAME_LEN 33
 /** Optional controller features surfaced when the machine dashboard reports them. */
 #define CTRL_FEATURE_BBW (1U << 0)
+/** Default rotary increment for the coffee boiler temperature. */
+#define CTRL_TEMPERATURE_STEP_DEFAULT_C 0.1f
+/** Default rotary increment for the prebrewing timing fields. */
+#define CTRL_TIME_STEP_DEFAULT_S 0.1f
 
 /** Logical editable fields shown on the controller UI. */
 typedef enum {
@@ -85,8 +91,11 @@ typedef struct {
   uint32_t feature_mask;
   ctrl_focus_t focus;
   ctrl_screen_t screen;
-  ctrl_preset_t presets[CTRL_PRESET_COUNT];
+  ctrl_preset_t presets[CTRL_PRESET_MAX_COUNT];
+  uint8_t preset_count;
   uint8_t preset_index;
+  float temperature_step_c;
+  float time_step_s;
   uint8_t reset_progress;
   bool reset_confirm_yes;
 } ctrl_state_t;
@@ -105,7 +114,7 @@ typedef enum {
 typedef struct {
   ctrl_action_type_t type;
   ctrl_focus_t applied_focus;
-  int preset_slot;  // 0..3 if applicable
+  int preset_slot;  // 0..(preset_count - 1) if applicable
 } ctrl_action_t;
 
 /** Populate the controller state with defaults before loading persisted data. */
@@ -138,14 +147,22 @@ ctrl_action_t ctrl_load_preset(ctrl_state_t *state);
 ctrl_action_t ctrl_save_preset(ctrl_state_t *state);
 /** Erase persisted presets and current recipe values. */
 esp_err_t ctrl_state_reset_persisted(void);
-/** Refresh only the preset slots from persisted controller state into the live state. */
+/** Refresh the persisted recipe slots and advanced edit settings into the live state. */
 esp_err_t ctrl_state_refresh_presets(ctrl_state_t *state);
-/** Load one preset slot from NVS-backed controller state, falling back to defaults if needed. */
+/** Load one active preset slot from NVS-backed controller state, falling back to defaults if needed. */
 esp_err_t ctrl_state_load_preset_slot(int preset_index, ctrl_preset_t *preset);
-/** Persist one preset slot without mutating the current live controller values. */
+/** Persist one active preset slot without mutating the current live controller values. */
 esp_err_t ctrl_state_store_preset_slot(int preset_index, const ctrl_preset_t *preset);
+/** Persist advanced controller edit settings and delete hidden presets when the count shrinks. */
+esp_err_t ctrl_state_update_advanced_settings(uint8_t preset_count, float temperature_step_c, float time_step_s);
 /** Monotonic revision for stored preset definitions. */
 uint32_t ctrl_state_preset_version(void);
+/** Report whether a preset count is supported by the controller UI. */
+bool ctrl_state_is_supported_preset_count(int preset_count);
+/** Report whether a setup-portal edit step is supported by the controller. */
+bool ctrl_state_is_supported_edit_step(float step);
+/** Check whether a numeric value sits on the configured edit grid inside the allowed range. */
+bool ctrl_state_value_matches_step(float value, float min_value, float max_value, float step);
 /** Human-readable name for a focus field. */
 const char *ctrl_focus_name(ctrl_focus_t focus);
 /** Human-readable name for a focus field in the selected controller language. */

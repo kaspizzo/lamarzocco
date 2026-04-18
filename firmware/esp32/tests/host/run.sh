@@ -33,9 +33,12 @@ mkdir -p "${BUILD_DIR}"
   "${HOST_DIR}/src/test_controller_state.c" \
   "${HOST_DIR}/src/test_cloud_api.c" \
   "${HOST_DIR}/src/test_setup_portal_page.c" \
+  "${HOST_DIR}/src/test_setup_portal_routes.c" \
   "${ROOT_DIR}/main/controller_state.c" \
   "${ROOT_DIR}/main/cloud_api.c" \
+  "${ROOT_DIR}/main/setup_portal_http.c" \
   "${ROOT_DIR}/main/setup_portal_page.c" \
+  "${ROOT_DIR}/main/setup_portal_routes_shared.c" \
   "${CJSON_DIR}/cJSON.c" \
   -o "${OUTPUT}"
 
