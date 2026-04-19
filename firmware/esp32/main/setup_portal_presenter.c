@@ -16,6 +16,7 @@ typedef struct {
   char debug_status[512];
   char debug_status_html[768];
   char banner_html[256];
+  char csrf_token_html[96];
   char ssid_html[96];
   char hostname_html[96];
   char cloud_user_html[192];
@@ -46,7 +47,9 @@ static void format_portal_summary(const lm_ctrl_wifi_info_t *info, char *buffer,
       info->sta_ssid[0] != '\0' ? info->sta_ssid : "not set",
       info->sta_ip[0] != '\0' ? info->sta_ip : "--",
       info->hostname[0] != '\0' ? info->hostname : LM_CTRL_WIFI_DEFAULT_HOSTNAME,
-      info->has_cloud_credentials ? info->cloud_username : "not configured",
+      info->has_cloud_provisioning
+        ? (info->has_cloud_credentials ? info->cloud_username : "account not configured")
+        : "setup unavailable",
       info->has_custom_logo ? "custom" : "default text"
     );
   } else if (info->sta_connecting) {
@@ -56,7 +59,9 @@ static void format_portal_summary(const lm_ctrl_wifi_info_t *info, char *buffer,
       "Home Wi-Fi: %.32s\nState: connecting...\nStable URL: http://%.32s.local/\nCloud: %.47s\nHeader logo: %s",
       info->sta_ssid[0] != '\0' ? info->sta_ssid : "not set",
       info->hostname[0] != '\0' ? info->hostname : LM_CTRL_WIFI_DEFAULT_HOSTNAME,
-      info->has_cloud_credentials ? info->cloud_username : "not configured",
+      info->has_cloud_provisioning
+        ? (info->has_cloud_credentials ? info->cloud_username : "account not configured")
+        : "setup unavailable",
       info->has_custom_logo ? "custom" : "default text"
     );
   } else if (info->has_credentials) {
@@ -66,7 +71,9 @@ static void format_portal_summary(const lm_ctrl_wifi_info_t *info, char *buffer,
       "Home Wi-Fi: %.32s\nState: saved\nStable URL: http://%.32s.local/\nCloud: %.47s\nHeader logo: %s",
       info->sta_ssid[0] != '\0' ? info->sta_ssid : "not set",
       info->hostname[0] != '\0' ? info->hostname : LM_CTRL_WIFI_DEFAULT_HOSTNAME,
-      info->has_cloud_credentials ? info->cloud_username : "not configured",
+      info->has_cloud_provisioning
+        ? (info->has_cloud_credentials ? info->cloud_username : "account not configured")
+        : "setup unavailable",
       info->has_custom_logo ? "custom" : "default text"
     );
   } else {
@@ -75,7 +82,9 @@ static void format_portal_summary(const lm_ctrl_wifi_info_t *info, char *buffer,
       buffer_size,
       "Home Wi-Fi: not configured\nStable URL: http://%.32s.local/\nCloud: %.47s\nHeader logo: %s",
       info->hostname[0] != '\0' ? info->hostname : LM_CTRL_WIFI_DEFAULT_HOSTNAME,
-      info->has_cloud_credentials ? info->cloud_username : "not configured",
+      info->has_cloud_provisioning
+        ? (info->has_cloud_credentials ? info->cloud_username : "account not configured")
+        : "setup unavailable",
       info->has_custom_logo ? "custom" : "default text"
     );
   }
@@ -96,9 +105,12 @@ static void format_debug_summary(
     buffer,
     buffer_size,
     "Portal: %s\n"
+    "Portal auth: %s\n"
+    "Debug screenshot: %s\n"
     "Station: %s\n"
     "IP: %.15s\n"
     "Cloud account: %.47s\n"
+    "Cloud provisioning: %s\n"
     "Machine selected: %.31s\n"
     "Header logo: %s\n"
     "BLE connected: %s\n"
@@ -109,9 +121,13 @@ static void format_debug_summary(
     "Feature mask: 0x%02x\n"
     "Link status: %.63s",
     wifi_info->portal_running ? "running" : "off",
+    wifi_info->web_auth_mode == LM_CTRL_WEB_AUTH_ENABLED ? "protected" :
+      (wifi_info->web_auth_mode == LM_CTRL_WEB_AUTH_DISABLED ? "open" : "unset"),
+    wifi_info->debug_screenshot_enabled ? "enabled" : "disabled",
     wifi_info->sta_connected ? "connected" : (wifi_info->sta_connecting ? "connecting" : "idle"),
     wifi_info->sta_ip[0] != '\0' ? wifi_info->sta_ip : "--",
     wifi_info->cloud_connected ? "connected" : (wifi_info->has_cloud_credentials ? "configured" : "not configured"),
+    wifi_info->has_cloud_provisioning ? "ready" : "missing",
     wifi_info->has_machine_selection ? wifi_info->machine_serial : "no",
     wifi_info->has_custom_logo ? "custom" : "default text",
     machine_info->connected ? "yes" : "no",
@@ -173,7 +189,7 @@ static void html_escape_text(const char *src, char *dst, size_t dst_size) {
   dst[out] = '\0';
 }
 
-esp_err_t lm_ctrl_setup_portal_send_response(httpd_req_t *req, const char *banner) {
+esp_err_t lm_ctrl_setup_portal_send_response(httpd_req_t *req, const char *banner, const char *csrf_token) {
   lm_ctrl_setup_page_ctx_t *ctx = calloc(1, sizeof(*ctx));
   lm_ctrl_setup_portal_view_t page_view = {0};
   ctrl_state_t preset_defaults;
@@ -199,6 +215,7 @@ esp_err_t lm_ctrl_setup_portal_send_response(httpd_req_t *req, const char *banne
   format_portal_summary(&ctx->info, ctx->status, sizeof(ctx->status));
   html_escape_text(ctx->status, ctx->status_html, sizeof(ctx->status_html));
   html_escape_text(banner != NULL ? banner : "", ctx->banner_html, sizeof(ctx->banner_html));
+  html_escape_text(csrf_token != NULL ? csrf_token : "", ctx->csrf_token_html, sizeof(ctx->csrf_token_html));
   html_escape_text(ctx->info.sta_ssid, ctx->ssid_html, sizeof(ctx->ssid_html));
   html_escape_text(ctx->info.hostname, ctx->hostname_html, sizeof(ctx->hostname_html));
   html_escape_text(ctx->info.cloud_username, ctx->cloud_user_html, sizeof(ctx->cloud_user_html));
@@ -245,6 +262,7 @@ esp_err_t lm_ctrl_setup_portal_send_response(httpd_req_t *req, const char *banne
   memcpy(page_view.machine_status, ctx->machine_status, sizeof(page_view.machine_status));
   memcpy(page_view.debug_status_html, ctx->debug_status_html, sizeof(page_view.debug_status_html));
   memcpy(page_view.banner_html, ctx->banner_html, sizeof(page_view.banner_html));
+  memcpy(page_view.csrf_token_html, ctx->csrf_token_html, sizeof(page_view.csrf_token_html));
   memcpy(page_view.ssid_html, ctx->ssid_html, sizeof(page_view.ssid_html));
   memcpy(page_view.hostname_html, ctx->hostname_html, sizeof(page_view.hostname_html));
   memcpy(page_view.cloud_user_html, ctx->cloud_user_html, sizeof(page_view.cloud_user_html));

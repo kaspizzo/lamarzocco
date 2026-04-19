@@ -26,6 +26,7 @@ idf_component_register(
     "setup_portal_presenter.c"
     "setup_portal_routes.c"
     "setup_portal_routes_shared.c"
+    "storage_security.c"
     "wifi_setup.c"
   INCLUDE_DIRS
     "."
@@ -42,4 +43,5 @@ idf_component_register(
     esp_wifi
     mbedtls
     nvs_flash
+    nvs_sec_provider
 )

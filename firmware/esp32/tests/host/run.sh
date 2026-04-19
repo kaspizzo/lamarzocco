@@ -31,9 +31,11 @@ mkdir -p "${BUILD_DIR}"
   "${HOST_DIR}/src/test_nvs.c" \
   "${HOST_DIR}/src/test_httpd.c" \
   "${HOST_DIR}/src/test_controller_state.c" \
+  "${HOST_DIR}/src/test_controller_settings.c" \
   "${HOST_DIR}/src/test_cloud_api.c" \
   "${HOST_DIR}/src/test_cloud_machine_selection.c" \
   "${HOST_DIR}/src/test_machine_link_policy.c" \
+  "${HOST_DIR}/src/test_storage_security.c" \
   "${HOST_DIR}/src/test_setup_portal_page.c" \
   "${HOST_DIR}/src/test_setup_portal_routes.c" \
   "${ROOT_DIR}/main/controller_state.c" \

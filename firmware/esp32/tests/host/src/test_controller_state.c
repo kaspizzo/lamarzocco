@@ -49,7 +49,7 @@ static int test_rotate_clamps_and_updates_active_screen(void) {
   ctrl_open_setup_reset(&state);
   ctrl_rotate(&state, 24);
   ASSERT_EQ_INT(CTRL_SCREEN_SETUP_RESET_CONFIRM, state.screen);
-  ASSERT_FALSE(state.reset_confirm_yes);
+  ASSERT_EQ_INT(CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD, state.recovery_action);
 
   return 0;
 }
@@ -133,15 +133,16 @@ static int test_setup_reset_flow_requires_arm_and_confirm(void) {
 
   ctrl_rotate(&state, 24);
   ASSERT_EQ_INT(CTRL_SCREEN_SETUP_RESET_CONFIRM, state.screen);
+  ASSERT_EQ_INT(CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD, state.recovery_action);
 
   action = ctrl_confirm_setup_reset(&state);
-  ASSERT_EQ_INT(CTRL_ACTION_NONE, action.type);
+  ASSERT_EQ_INT(CTRL_ACTION_CLEAR_WEB_PASSWORD, action.type);
   ASSERT_EQ_INT(CTRL_SCREEN_SETUP, state.screen);
 
   ctrl_open_setup_reset(&state);
   ctrl_rotate(&state, 24);
   ctrl_rotate(&state, 1);
-  ASSERT_TRUE(state.reset_confirm_yes);
+  ASSERT_EQ_INT(CTRL_RECOVERY_ACTION_RESET_NETWORK, state.recovery_action);
 
   action = ctrl_confirm_setup_reset(&state);
   ASSERT_EQ_INT(CTRL_ACTION_RESET_NETWORK, action.type);

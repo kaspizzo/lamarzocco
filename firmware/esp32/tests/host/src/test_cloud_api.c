@@ -1,9 +1,53 @@
 #include "cloud_api.h"
 #include "cJSON.h"
+#include "mbedtls/base64.h"
 #include "machine_link_types.h"
 #include "test_support.h"
 
 #include <string.h>
+
+static int test_generate_installation_secret_matches_reference_vector(void) {
+  static const uint8_t public_key_der[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+  static const uint8_t expected_secret[32] = {
+    0x53, 0x1b, 0x9e, 0x0e, 0x2f, 0x25, 0x73, 0x84,
+    0x88, 0x35, 0xf4, 0x04, 0x21, 0x19, 0x1a, 0xfd,
+    0xe8, 0x79, 0x94, 0x7a, 0xe8, 0x53, 0x57, 0x49,
+    0xc7, 0xd4, 0x44, 0x3c, 0x4c, 0xc3, 0x46, 0xa1,
+  };
+  uint8_t secret[32] = {0};
+  char secret_b64[64] = {0};
+  size_t secret_b64_len = 0;
+
+  ASSERT_EQ_INT(
+    ESP_OK,
+    lm_ctrl_cloud_generate_installation_secret(
+      "28af7c9e-36cf-4f82-b4c6-0181adc3f59f",
+      public_key_der,
+      sizeof(public_key_der),
+      secret
+    )
+  );
+  ASSERT_EQ_INT(0, memcmp(expected_secret, secret, sizeof(secret)));
+  ASSERT_EQ_INT(0, mbedtls_base64_encode((unsigned char *)secret_b64, sizeof(secret_b64), &secret_b64_len, secret, sizeof(secret)));
+  secret_b64[secret_b64_len] = '\0';
+  ASSERT_STREQ("UxueDi8lc4SINfQEIRka/eh5lHroU1dJx9REPEzDRqE=", secret_b64);
+  return 0;
+}
+
+static int test_generate_installation_populates_uuid_secret_and_private_key(void) {
+  lm_ctrl_cloud_installation_t installation = {0};
+
+  ASSERT_EQ_INT(ESP_OK, lm_ctrl_cloud_generate_installation(&installation));
+  ASSERT_TRUE(strlen(installation.installation_id) == 36U);
+  ASSERT_TRUE(installation.installation_id[8] == '-');
+  ASSERT_TRUE(installation.installation_id[13] == '-');
+  ASSERT_TRUE(installation.installation_id[18] == '-');
+  ASSERT_TRUE(installation.installation_id[23] == '-');
+  ASSERT_TRUE(installation.private_key_der_len > 0U);
+  ASSERT_TRUE(installation.private_key_der_len <= sizeof(installation.private_key_der));
+  ASSERT_FALSE(installation.secret[0] == 0 && installation.secret[1] == 0 && installation.secret[2] == 0);
+  return 0;
+}
 
 static int test_parse_access_token_success_and_invalid_payload(void) {
   char access_token[64];
@@ -123,6 +167,8 @@ static int test_parse_prebrew_widget_supports_both_widget_shapes(void) {
 }
 
 int run_cloud_api_tests(void) {
+  RUN_TEST(test_generate_installation_secret_matches_reference_vector);
+  RUN_TEST(test_generate_installation_populates_uuid_secret_and_private_key);
   RUN_TEST(test_parse_access_token_success_and_invalid_payload);
   RUN_TEST(test_parse_customer_fleet_filters_invalid_entries);
   RUN_TEST(test_parse_dashboard_values_extracts_machine_and_bbw_state);

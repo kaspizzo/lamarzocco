@@ -8,6 +8,7 @@
 #include "esp_err.h"
 #include "esp_http_server.h"
 #include "esp_netif.h"
+#include "esp_system.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -35,8 +36,13 @@ extern "C" {
 #define LM_CTRL_WIFI_KEY_MACHINE_NAME "machine_name"
 #define LM_CTRL_WIFI_KEY_MACHINE_MODEL "machine_model"
 #define LM_CTRL_WIFI_KEY_MACHINE_KEY "machine_key"
-#define LM_CTRL_WIFI_KEY_INSTALL_ID "install_id"
-#define LM_CTRL_WIFI_KEY_INSTALL_KEY "install_key"
+#define LM_CTRL_WIFI_KEY_PORTAL_PASS "portal_pass"
+#define LM_CTRL_WIFI_KEY_WEB_MODE "web_mode"
+#define LM_CTRL_WIFI_KEY_WEB_SALT "web_salt"
+#define LM_CTRL_WIFI_KEY_WEB_HASH "web_hash"
+#define LM_CTRL_WIFI_KEY_WEB_ITER "web_iter"
+#define LM_CTRL_WIFI_KEY_DEBUG_SHOT "dbg_shot"
+#define LM_CTRL_WIFI_KEY_INSTALL_BLOB "install_blob"
 #define LM_CTRL_WIFI_KEY_INSTALL_REG "install_reg"
 #define LM_CTRL_WIFI_DEFAULT_HOSTNAME "lm-controller"
 #define LM_CTRL_CLOUD_HOST "lion.lamarzocco.io"
@@ -55,7 +61,6 @@ extern "C" {
 #define LM_CTRL_CLOUD_SECRET_LEN 32
 #define LM_CTRL_PORTAL_IP "192.168.4.1"
 #define LM_CTRL_PORTAL_DNS_PORT 53
-#define LM_CTRL_PORTAL_PASSWORD_FALLBACK "LMCTRL-SETUP"
 #define LM_CTRL_CLOUD_WS_HEADER_BUFFER_LEN 768
 #define LM_CTRL_CLOUD_WS_TOKEN_LEN 1024
 #define LM_CTRL_CLOUD_WS_FRAME_MAX 8192
@@ -63,9 +68,23 @@ extern "C" {
 #define LM_CTRL_CLOUD_COMMAND_UPDATE_MAX 8
 #define LM_CTRL_CLOUD_ACCESS_TOKEN_CACHE_FALLBACK_US (30LL * 1000LL * 1000LL)
 #define LM_CTRL_CLOUD_ACCESS_TOKEN_EXP_SAFETY_MS (60LL * 1000LL)
-#define LM_CTRL_STATIC_INSTALLATION_ID "28af7c9e-36cf-4f82-b4c6-0181adc3f59f"
-#define LM_CTRL_STATIC_INSTALLATION_SECRET_B64 "75PrFs4iu69ClXC8RcOxevWDRm7d0TnCVVfmabNZ7Uo="
-#define LM_CTRL_STATIC_PRIVATE_KEY_B64 "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg1P+Hrk0k9ttOzXVM5IDEekoX3oNCGatYkjXH/iaaMVOhRANCAASRshQpWbAJKJIVAiDpiuq3LZLVQGx9QzxZSYslckgeOPOt3ZdvMFMiv6K2AKOOjfart3sxAK229pLYTi3aGSKK"
+#define LM_CTRL_WEB_ADMIN_SALT_LEN 16
+#define LM_CTRL_WEB_ADMIN_HASH_LEN 32
+#define LM_CTRL_WEB_ADMIN_PBKDF2_ITERATIONS 1500U
+#define LM_CTRL_WEB_ADMIN_PBKDF2_ITERATIONS_LEGACY 120000U
+#define LM_CTRL_RANDOM_TOKEN_BYTES 16
+#define LM_CTRL_RANDOM_TOKEN_HEX_LEN ((LM_CTRL_RANDOM_TOKEN_BYTES * 2) + 1)
+#define LM_CTRL_WEB_SESSION_IDLE_TIMEOUT_US (60LL * 60LL * 1000LL * 1000LL)
+#define LM_CTRL_CLOUD_PROVISIONING_SCHEMA_VERSION 1
+
+typedef struct {
+  uint8_t schema_version;
+  uint8_t reserved0;
+  uint16_t private_key_der_len;
+  char installation_id[LM_CTRL_INSTALLATION_ID_LEN];
+  uint8_t secret[LM_CTRL_CLOUD_SECRET_LEN];
+  uint8_t private_key_der[LM_CTRL_PRIVATE_KEY_DER_MAX];
+} lm_ctrl_cloud_provisioning_blob_t;
 
 /** Shared Wi-Fi/setup/cloud runtime state used by the internal setup modules. */
 typedef struct {
@@ -76,10 +95,16 @@ typedef struct {
   bool cloud_connected;
   bool has_machine_selection;
   bool has_custom_logo;
+  bool has_cloud_provisioning;
+  bool debug_screenshot_enabled;
   bool portal_running;
   bool sta_connecting;
   bool sta_connected;
+  lm_ctrl_web_auth_mode_t web_auth_mode;
   ctrl_language_t language;
+  uint8_t web_admin_salt[LM_CTRL_WEB_ADMIN_SALT_LEN];
+  uint8_t web_admin_hash[LM_CTRL_WEB_ADMIN_HASH_LEN];
+  uint32_t web_admin_iterations;
   char sta_ssid[33];
   char sta_password[65];
   char hostname[33];
@@ -113,6 +138,9 @@ typedef struct {
   bool brew_active;
   int64_t brew_start_epoch_ms;
   int64_t brew_start_local_us;
+  char web_session_token[LM_CTRL_RANDOM_TOKEN_HEX_LEN];
+  char web_csrf_token[LM_CTRL_RANDOM_TOKEN_HEX_LEN];
+  int64_t web_session_valid_until_us;
   char cloud_access_token[LM_CTRL_CLOUD_WS_TOKEN_LEN];
   int64_t cloud_access_token_valid_until_us;
   char cloud_ws_access_token[LM_CTRL_CLOUD_WS_TOKEN_LEN];
@@ -153,6 +181,51 @@ static inline void copy_text(char *dst, size_t dst_size, const char *src) {
   }
   memcpy(dst, src, len);
   dst[len] = '\0';
+}
+
+/** Best-effort zeroization helper for secret-bearing buffers. */
+static inline void secure_zero(void *ptr, size_t len) {
+  volatile uint8_t *cursor = (volatile uint8_t *)ptr;
+
+  while (cursor != NULL && len > 0) {
+    *cursor++ = 0;
+    --len;
+  }
+}
+
+/** Constant-time equality for fixed-size secret buffers. */
+static inline bool secure_equals(const uint8_t *lhs, const uint8_t *rhs, size_t len) {
+  uint8_t diff = 0;
+
+  if (lhs == NULL || rhs == NULL) {
+    return false;
+  }
+
+  for (size_t i = 0; i < len; ++i) {
+    diff |= (uint8_t)(lhs[i] ^ rhs[i]);
+  }
+  return diff == 0;
+}
+
+/** Fill a destination string with random bytes encoded as lowercase hexadecimal. */
+static inline void fill_random_hex(char *dst, size_t dst_size, size_t byte_count) {
+  static const char HEX[] = "0123456789abcdef";
+  uint8_t random_bytes[LM_CTRL_RANDOM_TOKEN_BYTES] = {0};
+
+  if (dst == NULL || dst_size == 0 || byte_count == 0 || byte_count > sizeof(random_bytes) || dst_size <= (byte_count * 2U)) {
+    if (dst != NULL && dst_size > 0) {
+      dst[0] = '\0';
+    }
+    return;
+  }
+
+  esp_fill_random(random_bytes, byte_count);
+  for (size_t i = 0; i < byte_count; ++i) {
+    dst[i * 2U] = HEX[random_bytes[i] >> 4];
+    dst[(i * 2U) + 1U] = HEX[random_bytes[i] & 0x0fU];
+  }
+  dst[byte_count * 2U] = '\0';
+  secure_zero(random_bytes, sizeof(random_bytes));
 }
 
 /** Return the current wall clock in milliseconds, or 0 if the clock is not usable yet. */

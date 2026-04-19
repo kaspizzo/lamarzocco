@@ -43,6 +43,17 @@ esp_err_t lm_ctrl_cloud_derive_installation_material(
   size_t base_string_size
 );
 
+/** Derive the 32-byte installation secret from installation id and public key DER bytes. */
+esp_err_t lm_ctrl_cloud_generate_installation_secret(
+  const char *installation_id,
+  const uint8_t *public_key_der,
+  size_t public_key_der_len,
+  uint8_t secret[32]
+);
+
+/** Generate per-device cloud installation key material compatible with the pylamarzocco flow. */
+esp_err_t lm_ctrl_cloud_generate_installation(lm_ctrl_cloud_installation_t *installation);
+
 /** Generate the request proof text used during cloud installation registration. */
 esp_err_t lm_ctrl_cloud_generate_request_proof_text(
   const char *base_string,

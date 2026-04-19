@@ -8,7 +8,6 @@
 #include "esp_lv_adapter.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
-#include "nvs_flash.h"
 
 #include "board_backlight.h"
 #include "board_display.h"
@@ -108,14 +107,6 @@ void app_main(void) {
     .execute_cloud_command = machine_link_execute_cloud_command,
     .fetch_dashboard_values = machine_link_fetch_dashboard_values,
   };
-  esp_err_t ret = nvs_flash_init();
-
-  if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-    ESP_ERROR_CHECK(nvs_flash_erase());
-    ret = nvs_flash_init();
-  }
-  ESP_ERROR_CHECK(ret);
-
   ESP_LOGI(TAG, "La Marzocco controller firmware starting");
 
   input_queue = xQueueCreate(16, sizeof(lm_ctrl_input_event_t));

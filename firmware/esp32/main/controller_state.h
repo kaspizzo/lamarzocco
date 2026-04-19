@@ -66,6 +66,13 @@ typedef enum {
   CTRL_SCREEN_SETUP_RESET_CONFIRM,
 } ctrl_screen_t;
 
+/** Recovery actions exposed after the hidden setup reset gesture has been armed. */
+typedef enum {
+  CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD = 0,
+  CTRL_RECOVERY_ACTION_RESET_NETWORK,
+  CTRL_RECOVERY_ACTION_COUNT,
+} ctrl_recovery_action_t;
+
 /** Mutable recipe and machine-facing values used by the controller runtime. */
 typedef struct {
   float temperature_c;
@@ -97,7 +104,7 @@ typedef struct {
   float temperature_step_c;
   float time_step_s;
   uint8_t reset_progress;
-  bool reset_confirm_yes;
+  ctrl_recovery_action_t recovery_action;
 } ctrl_state_t;
 
 /** Actions emitted by the state machine for status text and side effects. */
@@ -107,6 +114,7 @@ typedef enum {
   CTRL_ACTION_LOAD_PRESET,
   CTRL_ACTION_SAVE_PRESET,
   CTRL_ACTION_OPEN_SETUP,
+  CTRL_ACTION_CLEAR_WEB_PASSWORD,
   CTRL_ACTION_RESET_NETWORK,
 } ctrl_action_type_t;
 

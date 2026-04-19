@@ -24,6 +24,7 @@ static void init_view(lm_ctrl_setup_portal_view_t *view) {
 static int test_history_target_maps_known_sections(void) {
   ASSERT_STREQ("/#controller-section", lm_ctrl_setup_portal_history_target("/controller"));
   ASSERT_STREQ("/#advanced-section", lm_ctrl_setup_portal_history_target("/controller-advanced"));
+  ASSERT_STREQ("/#advanced-section", lm_ctrl_setup_portal_history_target("/debug-screenshot-toggle"));
   ASSERT_STREQ("/#recipes-section", lm_ctrl_setup_portal_history_target("/preset"));
   ASSERT_STREQ("/#cloud-section", lm_ctrl_setup_portal_history_target("/cloud-machine"));
   ASSERT_TRUE(lm_ctrl_setup_portal_history_target("/unknown") == NULL);
@@ -118,6 +119,7 @@ static int test_rendered_page_shows_advanced_settings_and_steps(void) {
   view.preset_count = 6;
   view.temperature_step_c = 0.5f;
   view.time_step_s = 0.5f;
+  view.info.debug_screenshot_enabled = true;
 
   ASSERT_EQ_INT(ESP_OK, lm_ctrl_setup_portal_send_page(req, &view, NULL));
   body = test_httpd_request_body(req);
@@ -125,10 +127,56 @@ static int test_rendered_page_shows_advanced_settings_and_steps(void) {
   ASSERT_CONTAINS(body, "name=\"preset_count\"");
   ASSERT_CONTAINS(body, "name=\"temperature_step_c\"");
   ASSERT_CONTAINS(body, "name=\"time_step_s\"");
+  ASSERT_CONTAINS(body, "id=\"debug_screenshot_enabled\"");
+  ASSERT_CONTAINS(body, "action=\"/debug-screenshot-toggle\"");
+  ASSERT_CONTAINS(body, "name=\"enabled\"");
+  ASSERT_CONTAINS(body, "Enable Remote Screenshot");
+  ASSERT_CONTAINS(body, "href=\"/debug/screenshot.bmp\"");
   ASSERT_CONTAINS(body, "data-current-preset-count=\"6\"");
   ASSERT_CONTAINS(body, "Active presets: <strong>6</strong>");
   ASSERT_CONTAINS(body, "Reducing the preset count from ${currentCount} to ${nextCount}");
   ASSERT_CONTAINS(body, "step=\"0.5\"");
+  ASSERT_CONTAINS(body, "fetch('/wifi-scan',{headers:buildHeaders(),credentials:'same-origin'})");
+  ASSERT_CONTAINS(body, "fetch('/controller-logo',{method:'POST',headers:buildHeaders('application/json'),credentials:'same-origin'");
+
+  test_httpd_request_destroy(req);
+  return 0;
+}
+
+static int test_rendered_page_shows_normal_cloud_login_without_manual_provisioning_ui(void) {
+  lm_ctrl_setup_portal_view_t view = {0};
+  httpd_req_t *req = test_httpd_request_create();
+  const char *body;
+
+  ASSERT_TRUE(req != NULL);
+  init_view(&view);
+  view.info.has_cloud_provisioning = true;
+
+  ASSERT_EQ_INT(ESP_OK, lm_ctrl_setup_portal_send_page(req, &view, "/#cloud-section"));
+  body = test_httpd_request_body(req);
+  ASSERT_CONTAINS(body, "action=\"/cloud\"");
+  ASSERT_NOT_CONTAINS(body, "Cloud Not Provisioned");
+  ASSERT_NOT_CONTAINS(body, "Import Cloud Provisioning");
+  ASSERT_NOT_CONTAINS(body, "action=\"/cloud-provisioning\"");
+
+  test_httpd_request_destroy(req);
+  return 0;
+}
+
+static int test_rendered_page_hides_manual_provisioning_ui_when_generation_failed(void) {
+  lm_ctrl_setup_portal_view_t view = {0};
+  httpd_req_t *req = test_httpd_request_create();
+  const char *body;
+
+  ASSERT_TRUE(req != NULL);
+  init_view(&view);
+  view.info.has_cloud_provisioning = false;
+
+  ASSERT_EQ_INT(ESP_OK, lm_ctrl_setup_portal_send_page(req, &view, "/#cloud-section"));
+  body = test_httpd_request_body(req);
+  ASSERT_CONTAINS(body, "Cloud Setup Failed");
+  ASSERT_NOT_CONTAINS(body, "Import Cloud Provisioning");
+  ASSERT_NOT_CONTAINS(body, "action=\"/cloud-provisioning\"");
 
   test_httpd_request_destroy(req);
   return 0;
@@ -140,5 +188,7 @@ int run_setup_portal_page_tests(void) {
   RUN_TEST(test_rendered_page_shows_bbw_section_when_feature_is_present);
   RUN_TEST(test_rendered_page_limits_recipe_cards_to_active_preset_count);
   RUN_TEST(test_rendered_page_shows_advanced_settings_and_steps);
+  RUN_TEST(test_rendered_page_shows_normal_cloud_login_without_manual_provisioning_ui);
+  RUN_TEST(test_rendered_page_hides_manual_provisioning_ui_when_generation_failed);
   return 0;
 }
