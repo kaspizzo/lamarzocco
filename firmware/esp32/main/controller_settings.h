@@ -57,6 +57,8 @@ esp_err_t lm_ctrl_settings_save_web_admin_password(const char *password);
 esp_err_t lm_ctrl_settings_clear_web_admin_password(void);
 /** Verify a candidate LAN admin password against the persisted hash. */
 bool lm_ctrl_settings_verify_web_admin_password(const char *password);
+/** Persist whether the on-device heating status UI should be shown. */
+esp_err_t lm_ctrl_settings_set_heat_display_enabled(bool enabled);
 /** Persist whether the remote debug screenshot endpoint is enabled. */
 esp_err_t lm_ctrl_settings_set_debug_screenshot_enabled(bool enabled);
 /** Clear Wi-Fi, cloud-account, and machine-binding settings while keeping device provisioning and other controller state. */

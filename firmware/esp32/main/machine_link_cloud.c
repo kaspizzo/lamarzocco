@@ -16,7 +16,8 @@ static void rearm_ble_after_cloud_wakeup(void) {
 bool fetch_values_via_cloud(
   ctrl_values_t *values,
   uint32_t *loaded_mask,
-  uint32_t *feature_mask
+  uint32_t *feature_mask,
+  lm_ctrl_machine_heat_info_t *heat_info
 ) {
   if (values == NULL || loaded_mask == NULL || feature_mask == NULL) {
     return false;
@@ -30,13 +31,16 @@ bool fetch_values_via_cloud(
   values->steam_level = snapshot_preferred_steam_level();
   *loaded_mask = 0;
   *feature_mask = 0;
+  if (heat_info != NULL) {
+    *heat_info = (lm_ctrl_machine_heat_info_t){0};
+  }
 
   if (s_deps.fetch_dashboard_values == NULL ||
-      s_deps.fetch_dashboard_values(values, loaded_mask, feature_mask) != ESP_OK) {
+      s_deps.fetch_dashboard_values(values, loaded_mask, feature_mask, heat_info) != ESP_OK) {
     return false;
   }
 
-  return *loaded_mask != 0 || *feature_mask != 0;
+  return *loaded_mask != 0 || *feature_mask != 0 || (heat_info != NULL && heat_info->available);
 }
 
 
@@ -546,7 +550,8 @@ void expire_pending_cloud_commands(void) {
 void lm_ctrl_machine_link_apply_cloud_dashboard_values(
   const ctrl_values_t *values,
   uint32_t loaded_mask,
-  uint32_t feature_mask
+  uint32_t feature_mask,
+  const lm_ctrl_machine_heat_info_t *heat_info
 ) {
   if (!s_link.initialized) {
     return;
@@ -554,6 +559,9 @@ void lm_ctrl_machine_link_apply_cloud_dashboard_values(
 
   update_feature_mask(feature_mask);
   update_reported_values(values, loaded_mask);
+  if (heat_info != NULL && heat_info->available) {
+    update_heat_info(heat_info);
+  }
 }
 
 void lm_ctrl_machine_link_apply_cloud_command_updates(const lm_ctrl_cloud_command_update_t *updates, size_t update_count) {

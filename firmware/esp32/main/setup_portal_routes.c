@@ -840,6 +840,38 @@ static esp_err_t handle_debug_screenshot_toggle_post(httpd_req_t *req) {
   );
 }
 
+static esp_err_t handle_heat_display_toggle_post(httpd_req_t *req) {
+  char body[64];
+  char csrf_token[LM_CTRL_RANDOM_TOKEN_HEX_LEN] = {0};
+  char enabled_text[8] = {0};
+  bool enabled = false;
+
+  if (req == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  if (read_optional_form_body(req, body, sizeof(body)) != ESP_OK) {
+    return ESP_FAIL;
+  }
+  if (!ensure_portal_html_access(req, body, true, csrf_token, sizeof(csrf_token))) {
+    secure_zero(body, sizeof(body));
+    return ESP_OK;
+  }
+
+  (void)parse_form_value(body, "enabled", enabled_text, sizeof(enabled_text));
+  enabled = strcmp(enabled_text, "1") == 0;
+  secure_zero(body, sizeof(body));
+  secure_zero(enabled_text, sizeof(enabled_text));
+
+  if (lm_ctrl_wifi_set_heat_display_enabled(enabled) != ESP_OK) {
+    return lm_ctrl_setup_portal_send_response(req, "Could not store the heating display setting.", csrf_token);
+  }
+  return lm_ctrl_setup_portal_send_response(
+    req,
+    enabled ? "Heating display enabled." : "Heating display disabled.",
+    csrf_token
+  );
+}
+
 static esp_err_t handle_controller_logo_post(httpd_req_t *req) {
   char *body = NULL;
   uint8_t *logo_blob = NULL;
@@ -1460,6 +1492,33 @@ static esp_err_t handle_wifi_scan_get(httpd_req_t *req) {
   return ESP_OK;
 }
 
+static esp_err_t handle_cloud_heat_debug_get(httpd_req_t *req) {
+  char error_text[192];
+  char *json_text = NULL;
+  esp_err_t ret;
+  esp_err_t send_ret;
+
+  if (!ensure_portal_api_access(req, false)) {
+    return ESP_OK;
+  }
+
+  error_text[0] = '\0';
+  ret = lm_ctrl_cloud_session_fetch_heat_debug_json(&json_text, error_text, sizeof(error_text));
+  if (ret != ESP_OK || json_text == NULL) {
+    return send_json_result(
+      req,
+      "500 Internal Server Error",
+      false,
+      error_text[0] != '\0' ? error_text : "Could not fetch cloud warmup debug data."
+    );
+  }
+
+  httpd_resp_set_type(req, "application/json");
+  send_ret = httpd_resp_sendstr(req, json_text);
+  cJSON_free(json_text);
+  return send_ret;
+}
+
 static esp_err_t handle_debug_screenshot_get(httpd_req_t *req) {
   bool enabled = false;
 
@@ -1678,6 +1737,11 @@ esp_err_t lm_ctrl_setup_portal_start_http_server(void) {
     .method = HTTP_POST,
     .handler = handle_debug_screenshot_toggle_post,
   };
+  httpd_uri_t heat_display_toggle_uri = {
+    .uri = "/heat-display-toggle",
+    .method = HTTP_POST,
+    .handler = handle_heat_display_toggle_post,
+  };
   httpd_uri_t controller_logo_uri = {
     .uri = "/controller-logo",
     .method = HTTP_POST,
@@ -1732,6 +1796,11 @@ esp_err_t lm_ctrl_setup_portal_start_http_server(void) {
     .uri = "/wifi-scan",
     .method = HTTP_GET,
     .handler = handle_wifi_scan_get,
+  };
+  httpd_uri_t cloud_heat_debug_uri = {
+    .uri = "/debug/cloud-heat.json",
+    .method = HTTP_GET,
+    .handler = handle_cloud_heat_debug_get,
   };
   httpd_uri_t screenshot_uri = {
     .uri = "/debug/screenshot.bmp",
@@ -1793,7 +1862,7 @@ esp_err_t lm_ctrl_setup_portal_start_http_server(void) {
     return ESP_OK;
   }
 
-  config.max_uri_handlers = 34;
+  config.max_uri_handlers = 35;
   config.stack_size = 12288;
   config.uri_match_fn = httpd_uri_match_wildcard;
   ESP_RETURN_ON_ERROR(httpd_start(&s_state.http_server, &config), TAG, "Failed to start setup web server");
@@ -1805,6 +1874,7 @@ esp_err_t lm_ctrl_setup_portal_start_http_server(void) {
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &logout_get_uri), TAG, "Failed to register logout GET handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &controller_uri), TAG, "Failed to register controller handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &controller_advanced_uri), TAG, "Failed to register advanced controller handler");
+  ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &heat_display_toggle_uri), TAG, "Failed to register heat display toggle handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &debug_screenshot_toggle_uri), TAG, "Failed to register screenshot toggle handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &controller_logo_uri), TAG, "Failed to register controller logo handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &controller_logo_clear_uri), TAG, "Failed to register controller logo clear handler");
@@ -1817,6 +1887,7 @@ esp_err_t lm_ctrl_setup_portal_start_http_server(void) {
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &preset_uri), TAG, "Failed to register preset handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &admin_password_uri), TAG, "Failed to register admin-password handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &scan_uri), TAG, "Failed to register scan handler");
+  ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &cloud_heat_debug_uri), TAG, "Failed to register cloud heat debug handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &screenshot_uri), TAG, "Failed to register screenshot handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &reboot_uri), TAG, "Failed to register reboot handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &reset_network_uri), TAG, "Failed to register network reset handler");

@@ -41,6 +41,7 @@ extern "C" {
 #define LM_CTRL_WIFI_KEY_WEB_SALT "web_salt"
 #define LM_CTRL_WIFI_KEY_WEB_HASH "web_hash"
 #define LM_CTRL_WIFI_KEY_WEB_ITER "web_iter"
+#define LM_CTRL_WIFI_KEY_HEAT_DISPLAY "heat_disp"
 #define LM_CTRL_WIFI_KEY_DEBUG_SHOT "dbg_shot"
 #define LM_CTRL_WIFI_KEY_INSTALL_BLOB "install_blob"
 #define LM_CTRL_WIFI_KEY_INSTALL_REG "install_reg"
@@ -96,6 +97,7 @@ typedef struct {
   bool has_machine_selection;
   bool has_custom_logo;
   bool has_cloud_provisioning;
+  bool heat_display_enabled;
   bool debug_screenshot_enabled;
   bool portal_running;
   bool sta_connecting;

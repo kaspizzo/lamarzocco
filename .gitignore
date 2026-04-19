@@ -6,6 +6,8 @@ venv
 .coverage
 .idea
 .lm_installation_key.json
+tools/debug/.lm_cloud_installation_key.json
+tools/debug/.lm_cloud_access_token.json
 JC3636K718_knob_EN/
 
 # ESP-IDF firmware build artifacts

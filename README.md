@@ -98,7 +98,11 @@ If you want to flash the controller:
 
 ## Developer tools
 
-Desktop-side inspector tooling is maintained separately and is not part of this repository.
+Most desktop-side inspector tooling is maintained separately and is not part of this repository.
+A small cloud-dashboard debug helper lives here for controller reverse-engineering:
+
+- [`tools/debug/run_cloud_dashboard_debug.sh`](tools/debug/run_cloud_dashboard_debug.sh)
+- [`docs/controller/CLOUD_DASHBOARD_DEBUG.md`](docs/controller/CLOUD_DASHBOARD_DEBUG.md)
 
 These tools are useful if you want to:
 

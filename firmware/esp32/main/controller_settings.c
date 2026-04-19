@@ -147,6 +147,7 @@ esp_err_t lm_ctrl_settings_load(void) {
   bool has_web_salt = false;
   bool has_web_hash = false;
   uint8_t web_auth_mode = (uint8_t)LM_CTRL_WEB_AUTH_UNSET;
+  uint8_t heat_display_enabled = 1;
   uint8_t debug_screenshot_enabled = 0;
   uint8_t install_reg = 0;
   uint32_t web_admin_iterations = 0;
@@ -166,6 +167,7 @@ esp_err_t lm_ctrl_settings_load(void) {
   clear_web_session_locked();
   clear_web_admin_material_locked();
   s_state.web_auth_mode = LM_CTRL_WEB_AUTH_UNSET;
+  s_state.heat_display_enabled = true;
   s_state.debug_screenshot_enabled = false;
   s_state.has_cloud_provisioning = false;
   s_state.cloud_installation_ready = false;
@@ -274,6 +276,14 @@ esp_err_t lm_ctrl_settings_load(void) {
   }
   if (ret == ESP_OK) {
     s_state.debug_screenshot_enabled = debug_screenshot_enabled != 0;
+  }
+
+  ret = nvs_get_u8(handle, LM_CTRL_WIFI_KEY_HEAT_DISPLAY, &heat_display_enabled);
+  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
+    goto exit;
+  }
+  if (ret == ESP_OK) {
+    s_state.heat_display_enabled = heat_display_enabled != 0;
   }
 
   size = sizeof(s_state.web_admin_salt);
@@ -861,6 +871,28 @@ bool lm_ctrl_settings_verify_web_admin_password(const char *password) {
   return valid;
 }
 
+esp_err_t lm_ctrl_settings_set_heat_display_enabled(bool enabled) {
+  nvs_handle_t handle = 0;
+  esp_err_t ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
+
+  if (ret != ESP_OK) {
+    return ret;
+  }
+
+  ESP_GOTO_ON_ERROR(nvs_set_u8(handle, LM_CTRL_WIFI_KEY_HEAT_DISPLAY, enabled ? 1U : 0U), exit, TAG, "Failed to store heat display toggle");
+  ESP_GOTO_ON_ERROR(nvs_commit(handle), exit, TAG, "Failed to commit heat display toggle");
+
+exit:
+  nvs_close(handle);
+  if (ret == ESP_OK) {
+    lock_state();
+    s_state.heat_display_enabled = enabled;
+    mark_status_dirty_locked();
+    unlock_state();
+  }
+  return ret;
+}
+
 esp_err_t lm_ctrl_settings_set_debug_screenshot_enabled(bool enabled) {
   nvs_handle_t handle = 0;
   esp_err_t ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
@@ -1011,6 +1043,7 @@ esp_err_t lm_ctrl_settings_factory_reset(void) {
   s_state.sta_connecting = false;
   s_state.sta_ip[0] = '\0';
   s_state.web_auth_mode = LM_CTRL_WEB_AUTH_UNSET;
+  s_state.heat_display_enabled = true;
   s_state.debug_screenshot_enabled = false;
   clear_web_admin_material_locked();
   clear_web_session_locked();

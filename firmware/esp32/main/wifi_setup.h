@@ -8,6 +8,7 @@
 #include "cloud_session.h"
 #include "controller_settings.h"
 #include "controller_state.h"
+#include "machine_link_types.h"
 #include "wifi_setup_types.h"
 
 /** Initialize Wi-Fi, NVS-backed settings, captive portal helpers, and cloud state. */
@@ -33,6 +34,8 @@ esp_err_t lm_ctrl_wifi_save_web_admin_password(const char *password);
 esp_err_t lm_ctrl_wifi_clear_web_admin_password(void);
 /** Verify a candidate LAN admin password against the persisted hash. */
 bool lm_ctrl_wifi_verify_web_admin_password(const char *password);
+/** Persist whether the on-device heating status UI is enabled. */
+esp_err_t lm_ctrl_wifi_set_heat_display_enabled(bool enabled);
 /** Persist whether the remote debug screenshot endpoint is enabled. */
 esp_err_t lm_ctrl_wifi_set_debug_screenshot_enabled(bool enabled);
 /** Copy the latest Wi-Fi/cloud runtime state into the supplied structure. */
@@ -62,7 +65,12 @@ esp_err_t lm_ctrl_wifi_execute_machine_command(
   size_t status_text_size
 );
 /** Read machine-facing dashboard values from the La Marzocco cloud. */
-esp_err_t lm_ctrl_wifi_fetch_dashboard_values(ctrl_values_t *values, uint32_t *loaded_mask, uint32_t *feature_mask);
+esp_err_t lm_ctrl_wifi_fetch_dashboard_values(
+  ctrl_values_t *values,
+  uint32_t *loaded_mask,
+  uint32_t *feature_mask,
+  lm_ctrl_machine_heat_info_t *heat_info
+);
 /** Read only the prebrewing timing values from the cloud dashboard. */
 esp_err_t lm_ctrl_wifi_fetch_prebrewing_values(float *seconds_in, float *seconds_out);
 /** Clear Wi-Fi, cloud, and machine binding settings, then reboot into setup mode. */

@@ -7,6 +7,7 @@
 #include "esp_err.h"
 
 #include "controller_state.h"
+#include "machine_link_types.h"
 
 typedef struct cJSON cJSON;
 
@@ -15,6 +16,11 @@ typedef struct {
   const char *name;
   const char *value;
 } lm_ctrl_cloud_http_header_t;
+
+/** Optional metadata captured from an HTTP response. */
+typedef struct {
+  int64_t server_epoch_ms;
+} lm_ctrl_cloud_http_response_meta_t;
 
 /** Machine metadata returned by the La Marzocco customer fleet endpoint. */
 typedef struct {
@@ -73,7 +79,8 @@ esp_err_t lm_ctrl_cloud_http_request(
   const char *body,
   int timeout_ms,
   char **response_body,
-  int *status_code
+  int *status_code,
+  lm_ctrl_cloud_http_response_meta_t *response_meta
 );
 
 /** Build the signed request headers required by the current cloud API. */
@@ -108,6 +115,7 @@ esp_err_t lm_ctrl_cloud_parse_dashboard_root_values(
   ctrl_values_t *values,
   uint32_t *loaded_mask,
   uint32_t *feature_mask,
+  lm_ctrl_machine_heat_info_t *heat_info,
   bool *brew_active,
   int64_t *brew_start_epoch_ms
 );

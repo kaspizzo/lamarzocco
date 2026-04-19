@@ -93,7 +93,8 @@ esp_err_t lm_ctrl_cloud_auth_http_request_capture(
   const char *body,
   int timeout_ms,
   char **response_body,
-  int *status_code
+  int *status_code,
+  lm_ctrl_cloud_http_response_meta_t *response_meta
 ) {
   esp_err_t ret;
 
@@ -117,7 +118,8 @@ esp_err_t lm_ctrl_cloud_auth_http_request_capture(
     body,
     timeout_ms,
     response_body,
-    status_code
+    status_code,
+    response_meta
   );
   mark_cloud_http_request_finished();
   if (ret != ESP_OK) {
@@ -486,7 +488,8 @@ static esp_err_t ensure_cloud_registration(char *error_text, size_t error_text_s
     request_body,
     12000,
     &response_body,
-    &status_code
+    &status_code,
+    NULL
   );
   free_sensitive_string(&request_body);
   if (ret != ESP_OK) {
@@ -614,7 +617,8 @@ static esp_err_t fetch_cloud_access_token(
       request_body,
       12000,
       &response_body,
-      &status_code
+      &status_code,
+      NULL
     );
     free_sensitive_string(&request_body);
 

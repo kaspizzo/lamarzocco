@@ -22,6 +22,19 @@ typedef struct {
   int64_t due_us;
 } lm_ctrl_runtime_delayed_machine_send_t;
 
+typedef struct {
+  bool heating;
+  int64_t deadline_local_us;
+  int64_t duration_us;
+  int32_t last_rendered_remaining_s;
+  int32_t last_rendered_progress_permille;
+} lm_ctrl_runtime_heat_state_t;
+
+typedef struct {
+  int64_t until_us;
+  int64_t next_request_us;
+} lm_ctrl_runtime_heat_refresh_t;
+
 /** Runtime-owned controller state, status text, and sync bookkeeping. */
 typedef struct {
   ctrl_state_t state;
@@ -34,6 +47,9 @@ typedef struct {
   int64_t last_cloud_refresh_request_us;
   lm_ctrl_runtime_local_value_hold_t local_value_hold;
   lm_ctrl_runtime_delayed_machine_send_t delayed_machine_send;
+  lm_ctrl_runtime_heat_state_t heat_state;
+  lm_ctrl_runtime_heat_state_t steam_heat_state;
+  lm_ctrl_runtime_heat_refresh_t heat_refresh;
 } lm_ctrl_runtime_t;
 
 void lm_ctrl_runtime_init(lm_ctrl_runtime_t *runtime);

@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <strings.h>
 #include <string.h>
 
 #include "cJSON.h"
@@ -31,7 +32,84 @@ typedef struct {
   size_t len;
   size_t capacity;
   esp_err_t append_error;
+  int64_t server_epoch_ms;
 } lm_ctrl_http_buffer_t;
+
+static int month_from_http_date(const char *month) {
+  static const char *MONTHS[] = {
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  };
+
+  if (month == NULL) {
+    return 0;
+  }
+
+  for (size_t i = 0; i < sizeof(MONTHS) / sizeof(MONTHS[0]); ++i) {
+    if (strcmp(month, MONTHS[i]) == 0) {
+      return (int)i + 1;
+    }
+  }
+
+  return 0;
+}
+
+static int64_t days_from_civil(int year, unsigned int month, unsigned int day) {
+  const int adjusted_year = year - (month <= 2U ? 1 : 0);
+  const int era = (adjusted_year >= 0 ? adjusted_year : adjusted_year - 399) / 400;
+  const unsigned int year_of_era = (unsigned int)(adjusted_year - era * 400);
+  const int shifted_month = (int)month + (month > 2U ? -3 : 9);
+  const unsigned int day_of_year = (153U * (unsigned int)shifted_month + 2U) / 5U + day - 1U;
+  const unsigned int day_of_era = year_of_era * 365U + year_of_era / 4U - year_of_era / 100U + day_of_year;
+
+  return (int64_t)era * 146097LL + (int64_t)day_of_era - 719468LL;
+}
+
+static bool parse_http_date_epoch_ms(const char *value, int64_t *epoch_ms) {
+  char weekday[4] = {0};
+  char month_text[4] = {0};
+  char timezone[4] = {0};
+  int day = 0;
+  int year = 0;
+  int hour = 0;
+  int minute = 0;
+  int second = 0;
+  int month = 0;
+  int64_t days = 0;
+
+  if (value == NULL || epoch_ms == NULL) {
+    return false;
+  }
+
+  if (sscanf(
+        value,
+        "%3[^,], %d %3s %d %d:%d:%d %3s",
+        weekday,
+        &day,
+        month_text,
+        &year,
+        &hour,
+        &minute,
+        &second,
+        timezone
+      ) != 8) {
+    return false;
+  }
+
+  month = month_from_http_date(month_text);
+  if (month == 0 ||
+      strcmp(timezone, "GMT") != 0 ||
+      day < 1 || day > 31 ||
+      hour < 0 || hour > 23 ||
+      minute < 0 || minute > 59 ||
+      second < 0 || second > 60) {
+    return false;
+  }
+
+  days = days_from_civil(year, (unsigned int)month, (unsigned int)day);
+  *epoch_ms = (days * 86400LL + (int64_t)hour * 3600LL + (int64_t)minute * 60LL + (int64_t)second) * 1000LL;
+  return true;
+}
 
 static void copy_text(char *dst, size_t dst_size, const char *src) {
   size_t len;
@@ -285,6 +363,16 @@ static esp_err_t http_event_handler(esp_http_client_event_t *event) {
   if (event->event_id == HTTP_EVENT_ON_DATA && event->data != NULL && event->data_len > 0) {
     return http_buffer_append(buffer, (const char *)event->data, event->data_len);
   }
+  if (event->event_id == HTTP_EVENT_ON_HEADER &&
+      event->header_key != NULL &&
+      event->header_value != NULL &&
+      strcasecmp(event->header_key, "Date") == 0) {
+    int64_t server_epoch_ms = 0;
+
+    if (parse_http_date_epoch_ms(event->header_value, &server_epoch_ms)) {
+      buffer->server_epoch_ms = server_epoch_ms;
+    }
+  }
 
   return ESP_OK;
 }
@@ -386,7 +474,8 @@ esp_err_t lm_ctrl_cloud_http_request(
   const char *body,
   int timeout_ms,
   char **response_body,
-  int *status_code
+  int *status_code,
+  lm_ctrl_cloud_http_response_meta_t *response_meta
 ) {
   esp_http_client_config_t config = {
     .host = host,
@@ -411,6 +500,9 @@ esp_err_t lm_ctrl_cloud_http_request(
 
   *response_body = NULL;
   *status_code = 0;
+  if (response_meta != NULL) {
+    *response_meta = (lm_ctrl_cloud_http_response_meta_t){0};
+  }
   config.user_data = &buffer;
 
   client = esp_http_client_init(&config);
@@ -449,6 +541,9 @@ esp_err_t lm_ctrl_cloud_http_request(
     }
   }
 
+  if (response_meta != NULL) {
+    response_meta->server_epoch_ms = buffer.server_epoch_ms;
+  }
   *response_body = buffer.data;
   return ESP_OK;
 }
@@ -762,11 +857,93 @@ static bool parse_machine_status_widget(
   return cJSON_IsString(mode_item) || cJSON_IsNumber(brewing_start_item);
 }
 
+static bool parse_epoch_ms_item(cJSON *item, int64_t *epoch_ms) {
+  char *end = NULL;
+  long long parsed = 0;
+
+  if (item == NULL || epoch_ms == NULL) {
+    return false;
+  }
+
+  if (cJSON_IsNumber(item) && item->valuedouble > 0.0) {
+    *epoch_ms = (int64_t)item->valuedouble;
+    return true;
+  }
+  if (!cJSON_IsString(item) || item->valuestring == NULL || item->valuestring[0] == '\0') {
+    return false;
+  }
+
+  parsed = strtoll(item->valuestring, &end, 10);
+  if (end == item->valuestring || (end != NULL && *end != '\0') || parsed <= 0) {
+    return false;
+  }
+
+  *epoch_ms = (int64_t)parsed;
+  return true;
+}
+
+static void update_heat_info_from_widget(
+  const char *code,
+  cJSON *output,
+  lm_ctrl_machine_heat_info_t *heat_info
+) {
+  cJSON *status_item;
+  cJSON *ready_start_item;
+  int64_t ready_epoch_ms = 0;
+  bool is_coffee = false;
+  bool is_steam = false;
+
+  if (code == NULL || output == NULL || heat_info == NULL) {
+    return;
+  }
+  is_coffee = strcmp(code, "CMCoffeeBoiler") == 0;
+  is_steam = strcmp(code, "CMSteamBoilerLevel") == 0 || strcmp(code, "CMSteamBoilerTemperature") == 0;
+  if (!is_coffee && !is_steam) {
+    return;
+  }
+
+  heat_info->available = true;
+  status_item = cJSON_GetObjectItemCaseSensitive(output, "status");
+  if (!cJSON_IsString(status_item) ||
+      status_item->valuestring == NULL ||
+      strcmp(status_item->valuestring, "HeatingUp") != 0) {
+    return;
+  }
+
+  if (is_coffee) {
+    heat_info->coffee_heating = true;
+  }
+  if (is_steam) {
+    heat_info->steam_heating = true;
+  }
+  heat_info->heating = heat_info->coffee_heating || heat_info->steam_heating;
+  ready_start_item = cJSON_GetObjectItemCaseSensitive(output, "readyStartTime");
+  if (parse_epoch_ms_item(ready_start_item, &ready_epoch_ms)) {
+    if (is_coffee) {
+      heat_info->coffee_eta_available = true;
+      if (ready_epoch_ms > heat_info->coffee_ready_epoch_ms) {
+        heat_info->coffee_ready_epoch_ms = ready_epoch_ms;
+      }
+    }
+    if (is_steam) {
+      heat_info->steam_eta_available = true;
+      if (ready_epoch_ms > heat_info->steam_ready_epoch_ms) {
+        heat_info->steam_ready_epoch_ms = ready_epoch_ms;
+      }
+    }
+    heat_info->eta_available = heat_info->coffee_eta_available || heat_info->steam_eta_available;
+    if (ready_epoch_ms > heat_info->ready_epoch_ms) {
+      heat_info->ready_epoch_ms = ready_epoch_ms;
+    }
+  }
+}
+
 static bool parse_dashboard_widget_values(
   cJSON *widget,
   ctrl_values_t *values,
   uint32_t *loaded_mask,
   uint32_t *feature_mask,
+  lm_ctrl_machine_heat_info_t *heat_info,
   bool *brew_active,
   int64_t *brew_start_epoch_ms
 ) {
@@ -782,6 +959,8 @@ static bool parse_dashboard_widget_values(
   if (!cJSON_IsString(code_item) || code_item->valuestring == NULL || !cJSON_IsObject(output)) {
     return false;
   }
+
+  update_heat_info_from_widget(code_item->valuestring, output, heat_info);
 
   if (strcmp(code_item->valuestring, "CMMachineStatus") == 0) {
     return parse_machine_status_widget(output, values, loaded_mask, brew_active, brew_start_epoch_ms);
@@ -831,6 +1010,7 @@ esp_err_t lm_ctrl_cloud_parse_dashboard_root_values(
   ctrl_values_t *values,
   uint32_t *loaded_mask,
   uint32_t *feature_mask,
+  lm_ctrl_machine_heat_info_t *heat_info,
   bool *brew_active,
   int64_t *brew_start_epoch_ms
 ) {
@@ -839,6 +1019,7 @@ esp_err_t lm_ctrl_cloud_parse_dashboard_root_values(
   ctrl_values_t local_values = {0};
   uint32_t local_loaded_mask = 0;
   uint32_t local_feature_mask = 0;
+  lm_ctrl_machine_heat_info_t local_heat_info = {0};
   bool local_brew_active = false;
   int64_t local_brew_start_epoch_ms = 0;
 
@@ -859,6 +1040,7 @@ esp_err_t lm_ctrl_cloud_parse_dashboard_root_values(
       &local_values,
       &local_loaded_mask,
       &local_feature_mask,
+      heat_info != NULL ? &local_heat_info : NULL,
       brew_active != NULL ? &local_brew_active : NULL,
       brew_start_epoch_ms != NULL ? &local_brew_start_epoch_ms : NULL
     );
@@ -867,6 +1049,9 @@ esp_err_t lm_ctrl_cloud_parse_dashboard_root_values(
   *values = local_values;
   *loaded_mask = local_loaded_mask;
   *feature_mask = local_feature_mask;
+  if (heat_info != NULL) {
+    *heat_info = local_heat_info;
+  }
   if (brew_active != NULL) {
     *brew_active = local_brew_active;
   }
@@ -874,7 +1059,11 @@ esp_err_t lm_ctrl_cloud_parse_dashboard_root_values(
     *brew_start_epoch_ms = local_brew_start_epoch_ms;
   }
 
-  return (local_loaded_mask != 0 || local_feature_mask != 0 || local_brew_active || local_brew_start_epoch_ms != 0)
+  return (local_loaded_mask != 0 ||
+          local_feature_mask != 0 ||
+          local_heat_info.available ||
+          local_brew_active ||
+          local_brew_start_epoch_ms != 0)
     ? ESP_OK
     : ESP_ERR_NOT_FOUND;
 }

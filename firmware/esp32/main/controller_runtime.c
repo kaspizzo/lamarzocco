@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -24,6 +25,180 @@ static const int64_t BLE_VALUE_REFRESH_INTERVAL_US = 15LL * 1000LL * 1000LL;
 static const int64_t CLOUD_VALUE_REFRESH_INTERVAL_US = 60LL * 1000LL * 1000LL;
 static const int64_t LOCAL_VALUE_HOLD_US = 20LL * 1000LL * 1000LL;
 static const int64_t DELAYED_MACHINE_SEND_US = 800LL * 1000LL;
+static const int64_t HEAT_REFRESH_INTERVAL_US = 5LL * 1000LL * 1000LL;
+static const int64_t HEAT_REFRESH_INITIAL_DELAY_US = 2LL * 1000LL * 1000LL;
+static const int64_t HEAT_REFRESH_TIMEOUT_US = 120LL * 1000LL * 1000LL;
+
+static void reset_heat_state(lm_ctrl_runtime_heat_state_t *heat_state) {
+  if (heat_state == NULL) {
+    return;
+  }
+
+  *heat_state = (lm_ctrl_runtime_heat_state_t){
+    .last_rendered_remaining_s = -1,
+    .last_rendered_progress_permille = -1,
+  };
+}
+
+static void clear_heat_refresh(lm_ctrl_runtime_heat_refresh_t *heat_refresh) {
+  if (heat_refresh == NULL) {
+    return;
+  }
+
+  heat_refresh->until_us = 0;
+  heat_refresh->next_request_us = 0;
+}
+
+static void arm_heat_refresh(
+  lm_ctrl_runtime_heat_refresh_t *heat_refresh,
+  int64_t initial_delay_us
+) {
+  const int64_t now_us = esp_timer_get_time();
+
+  if (heat_refresh == NULL) {
+    return;
+  }
+
+  heat_refresh->until_us = now_us + HEAT_REFRESH_TIMEOUT_US;
+  heat_refresh->next_request_us = now_us + initial_delay_us;
+}
+
+static bool should_show_heat_display(void) {
+  lm_ctrl_wifi_info_t wifi_info = {0};
+
+  lm_ctrl_wifi_get_info(&wifi_info);
+  return wifi_info.heat_display_enabled;
+}
+
+static int64_t current_epoch_ms(void) {
+  struct timeval tv = {0};
+
+  if (gettimeofday(&tv, NULL) != 0) {
+    return 0;
+  }
+
+  return ((int64_t)tv.tv_sec * 1000LL) + (tv.tv_usec / 1000LL);
+}
+
+static int64_t heat_state_remaining_us(const lm_ctrl_runtime_heat_state_t *heat_state) {
+  const int64_t now_us = esp_timer_get_time();
+
+  if (heat_state == NULL || !heat_state->heating || heat_state->deadline_local_us <= 0) {
+    return 0;
+  }
+  if (heat_state->deadline_local_us <= now_us) {
+    return 0;
+  }
+
+  return heat_state->deadline_local_us - now_us;
+}
+
+static int32_t heat_state_remaining_seconds(const lm_ctrl_runtime_heat_state_t *heat_state) {
+  int64_t remaining_us = heat_state_remaining_us(heat_state);
+  return remaining_us > 0 ? (int32_t)((remaining_us + 999999LL) / 1000000LL) : 0;
+}
+
+static uint16_t heat_state_progress_permille(const lm_ctrl_runtime_heat_state_t *heat_state) {
+  int64_t remaining_us;
+
+  if (heat_state == NULL || !heat_state->heating || heat_state->duration_us <= 0) {
+    return 0;
+  }
+
+  remaining_us = heat_state_remaining_us(heat_state);
+  if (remaining_us <= 0) {
+    return 0;
+  }
+  if (remaining_us >= heat_state->duration_us) {
+    return 1000;
+  }
+
+  return (uint16_t)((remaining_us * 1000LL) / heat_state->duration_us);
+}
+
+static bool initialize_heat_state_deadline(
+  lm_ctrl_runtime_heat_state_t *heat_state,
+  int64_t observed_epoch_ms,
+  int64_t ready_epoch_ms
+) {
+  int64_t remaining_us = 0;
+  int64_t now_epoch_ms = 0;
+  int64_t now_us = 0;
+
+  if (heat_state == NULL || ready_epoch_ms <= 0) {
+    return false;
+  }
+  if (heat_state->deadline_local_us > 0) {
+    return true;
+  }
+
+  if (observed_epoch_ms > 0 && ready_epoch_ms > observed_epoch_ms) {
+    remaining_us = (ready_epoch_ms - observed_epoch_ms) * 1000LL;
+  } else {
+    now_epoch_ms = current_epoch_ms();
+    if (now_epoch_ms > 0 && ready_epoch_ms > now_epoch_ms) {
+      remaining_us = (ready_epoch_ms - now_epoch_ms) * 1000LL;
+    }
+  }
+  if (remaining_us <= 0) {
+    return false;
+  }
+
+  now_us = esp_timer_get_time();
+  heat_state->deadline_local_us = now_us + remaining_us;
+  heat_state->duration_us = remaining_us;
+  heat_state->last_rendered_remaining_s = -1;
+  heat_state->last_rendered_progress_permille = -1;
+  return true;
+}
+
+static void sync_heat_state(lm_ctrl_runtime_t *runtime) {
+  lm_ctrl_machine_heat_info_t heat_info = {0};
+  bool have_machine_eta = false;
+  bool have_steam_eta = false;
+
+  if (runtime == NULL) {
+    return;
+  }
+  if (!should_show_heat_display()) {
+    reset_heat_state(&runtime->heat_state);
+    reset_heat_state(&runtime->steam_heat_state);
+    clear_heat_refresh(&runtime->heat_refresh);
+    return;
+  }
+
+  lm_ctrl_machine_link_get_heat_info(&heat_info);
+
+  if (!heat_info.available || !heat_info.heating) {
+    reset_heat_state(&runtime->heat_state);
+    reset_heat_state(&runtime->steam_heat_state);
+    clear_heat_refresh(&runtime->heat_refresh);
+    return;
+  }
+
+  runtime->heat_state.heating = heat_info.heating;
+  runtime->steam_heat_state.heating = heat_info.steam_heating;
+  if (!heat_info.steam_heating) {
+    reset_heat_state(&runtime->steam_heat_state);
+  }
+  if (heat_info.eta_available && heat_info.ready_epoch_ms > 0) {
+    have_machine_eta = initialize_heat_state_deadline(
+      &runtime->heat_state,
+      heat_info.observed_epoch_ms,
+      heat_info.ready_epoch_ms
+    );
+  }
+  if (heat_info.steam_eta_available && heat_info.steam_ready_epoch_ms > 0) {
+    have_steam_eta = initialize_heat_state_deadline(
+      &runtime->steam_heat_state,
+      heat_info.observed_epoch_ms,
+      heat_info.steam_ready_epoch_ms
+    );
+  }
+  if (have_machine_eta && (!heat_info.steam_heating || have_steam_eta)) {
+    clear_heat_refresh(&runtime->heat_refresh);
+  }
+}
 
 static bool approx_equal(float a, float b) {
   float delta = a - b;
@@ -498,6 +673,48 @@ static void maybe_request_periodic_value_refresh(int64_t *last_ble_request_us, i
   }
 }
 
+static void maybe_request_fast_heat_refresh(lm_ctrl_runtime_t *runtime) {
+  lm_ctrl_wifi_info_t wifi_info;
+  lm_ctrl_machine_link_info_t machine_info = {0};
+  const int64_t now_us = esp_timer_get_time();
+
+  if (runtime == NULL) {
+    return;
+  }
+  lm_ctrl_wifi_get_info(&wifi_info);
+  if (!wifi_info.heat_display_enabled) {
+    reset_heat_state(&runtime->heat_state);
+    reset_heat_state(&runtime->steam_heat_state);
+    clear_heat_refresh(&runtime->heat_refresh);
+    return;
+  }
+  if (runtime->state.values.standby_on ||
+      (runtime->heat_state.deadline_local_us > 0 &&
+       (!runtime->steam_heat_state.heating || runtime->steam_heat_state.deadline_local_us > 0))) {
+    clear_heat_refresh(&runtime->heat_refresh);
+    return;
+  }
+  if (runtime->heat_refresh.until_us == 0) {
+    return;
+  }
+  if (now_us >= runtime->heat_refresh.until_us) {
+    clear_heat_refresh(&runtime->heat_refresh);
+    return;
+  }
+  if (runtime->heat_refresh.next_request_us != 0 && now_us < runtime->heat_refresh.next_request_us) {
+    return;
+  }
+
+  lm_ctrl_machine_link_get_info(&machine_info);
+  if (!wifi_info.cloud_connected || !wifi_info.has_machine_selection || machine_info.sync_pending) {
+    return;
+  }
+
+  if (lm_ctrl_machine_link_request_sync_mode(LM_CTRL_MACHINE_SYNC_CLOUD) == ESP_OK) {
+    runtime->heat_refresh.next_request_us = now_us + HEAT_REFRESH_INTERVAL_US;
+  }
+}
+
 static uint32_t supported_machine_fields_for_focus(ctrl_focus_t focus) {
   switch (focus) {
     case CTRL_FOCUS_TEMPERATURE:
@@ -527,6 +744,8 @@ void lm_ctrl_runtime_init(lm_ctrl_runtime_t *runtime) {
   }
 
   memset(runtime, 0, sizeof(*runtime));
+  reset_heat_state(&runtime->heat_state);
+  reset_heat_state(&runtime->steam_heat_state);
   ctrl_state_init(&runtime->state);
   if (ctrl_state_load(&runtime->state) != ESP_OK) {
     ESP_LOGW(TAG, "Falling back to default controller values");
@@ -557,6 +776,7 @@ void lm_ctrl_runtime_bootstrap(lm_ctrl_runtime_t *runtime) {
   maybe_request_cloud_probe(&runtime->last_cloud_probe_request_us);
   maybe_request_value_sync(&runtime->state);
   maybe_request_periodic_value_refresh(&runtime->last_ble_refresh_request_us, &runtime->last_cloud_refresh_request_us);
+  sync_heat_state(runtime);
   sync_led_status_from_connectivity();
 }
 
@@ -613,6 +833,9 @@ void lm_ctrl_runtime_handle_input_event(
     case LM_CTRL_EVENT_TOGGLE_FOCUS:
       ctrl_toggle_focus(&runtime->state, event->focus);
       {
+        const bool waking_from_standby =
+          event->focus == CTRL_FOCUS_STANDBY &&
+          runtime->state.values.standby_on == false;
         const uint32_t field_mask = supported_machine_fields_for_focus(event->focus);
         if (lm_ctrl_machine_link_queue_values(&runtime->state.values, field_mask) != ESP_OK &&
             field_mask != LM_CTRL_MACHINE_FIELD_NONE) {
@@ -620,6 +843,15 @@ void lm_ctrl_runtime_handle_input_event(
         } else if (field_mask != LM_CTRL_MACHINE_FIELD_NONE) {
           note_local_value_hold(&runtime->local_value_hold, &runtime->state.values, field_mask);
           clear_delayed_machine_send_mask(&runtime->delayed_machine_send, field_mask);
+        }
+        if (event->focus == CTRL_FOCUS_STANDBY && runtime->state.values.standby_on) {
+          reset_heat_state(&runtime->heat_state);
+          reset_heat_state(&runtime->steam_heat_state);
+          clear_heat_refresh(&runtime->heat_refresh);
+        } else if (waking_from_standby) {
+          reset_heat_state(&runtime->heat_state);
+          reset_heat_state(&runtime->steam_heat_state);
+          arm_heat_refresh(&runtime->heat_refresh, HEAT_REFRESH_INITIAL_DELAY_US);
         }
       }
       (void)lm_ctrl_haptic_click();
@@ -720,6 +952,7 @@ void lm_ctrl_runtime_handle_wifi_status_change(lm_ctrl_runtime_t *runtime, bool 
   maybe_request_cloud_probe(&runtime->last_cloud_probe_request_us);
   maybe_request_value_sync(&runtime->state);
   maybe_request_periodic_value_refresh(&runtime->last_ble_refresh_request_us, &runtime->last_cloud_refresh_request_us);
+  sync_heat_state(runtime);
   if (runtime->state.screen == CTRL_SCREEN_SETUP) {
     lm_ctrl_wifi_format_status(runtime->status, sizeof(runtime->status));
   }
@@ -743,6 +976,7 @@ void lm_ctrl_runtime_handle_machine_status_change(lm_ctrl_runtime_t *runtime, bo
   runtime->last_machine_status_version = machine_status_version;
   sync_led_status_from_connectivity();
   merge_loaded_values(&runtime->state, &runtime->local_value_hold);
+  sync_heat_state(runtime);
   maybe_request_value_sync(&runtime->state);
   maybe_request_periodic_value_refresh(&runtime->last_ble_refresh_request_us, &runtime->last_cloud_refresh_request_us);
   if (needs_render != NULL) {
@@ -771,6 +1005,11 @@ void lm_ctrl_runtime_handle_preset_change(lm_ctrl_runtime_t *runtime, bool *need
 }
 
 void lm_ctrl_runtime_tick(lm_ctrl_runtime_t *runtime, bool *needs_render) {
+  int32_t remaining_s;
+  int32_t progress_permille;
+  int32_t steam_remaining_s;
+  int32_t steam_progress_permille;
+
   if (runtime == NULL) {
     return;
   }
@@ -778,8 +1017,32 @@ void lm_ctrl_runtime_tick(lm_ctrl_runtime_t *runtime, bool *needs_render) {
   maybe_request_cloud_probe(&runtime->last_cloud_probe_request_us);
   maybe_request_value_sync(&runtime->state);
   maybe_request_periodic_value_refresh(&runtime->last_ble_refresh_request_us, &runtime->last_cloud_refresh_request_us);
+  maybe_request_fast_heat_refresh(runtime);
   maybe_flush_delayed_machine_send(&runtime->state, &runtime->delayed_machine_send, &runtime->local_value_hold);
-  (void)needs_render;
+  remaining_s = heat_state_remaining_seconds(&runtime->heat_state);
+  progress_permille = (int32_t)heat_state_progress_permille(&runtime->heat_state);
+  steam_remaining_s = heat_state_remaining_seconds(&runtime->steam_heat_state);
+  steam_progress_permille = (int32_t)heat_state_progress_permille(&runtime->steam_heat_state);
+  if (runtime->heat_state.heating &&
+      runtime->heat_state.deadline_local_us > 0 &&
+      (remaining_s != runtime->heat_state.last_rendered_remaining_s ||
+       progress_permille != runtime->heat_state.last_rendered_progress_permille)) {
+    runtime->heat_state.last_rendered_remaining_s = remaining_s;
+    runtime->heat_state.last_rendered_progress_permille = progress_permille;
+    if (needs_render != NULL) {
+      *needs_render = true;
+    }
+  }
+  if (runtime->steam_heat_state.heating &&
+      runtime->steam_heat_state.deadline_local_us > 0 &&
+      (steam_remaining_s != runtime->steam_heat_state.last_rendered_remaining_s ||
+       steam_progress_permille != runtime->steam_heat_state.last_rendered_progress_permille)) {
+    runtime->steam_heat_state.last_rendered_remaining_s = steam_remaining_s;
+    runtime->steam_heat_state.last_rendered_progress_permille = steam_progress_permille;
+    if (needs_render != NULL) {
+      *needs_render = true;
+    }
+  }
 }
 
 const ctrl_state_t *lm_ctrl_runtime_state(const lm_ctrl_runtime_t *runtime) {
@@ -805,9 +1068,42 @@ void lm_ctrl_runtime_build_ui_view(const lm_ctrl_runtime_t *runtime, lm_ctrl_ui_
   view->language = wifi_info.language;
   view->wifi_visible = wifi_info.sta_connected || wifi_info.sta_connecting;
   view->wifi_connected = wifi_info.sta_connected;
+  view->heat_visible =
+    wifi_info.heat_display_enabled &&
+    runtime->heat_state.heating &&
+    heat_state_remaining_us(&runtime->heat_state) > 0;
+  view->heat_arc_visible =
+    wifi_info.heat_display_enabled &&
+    runtime->heat_state.duration_us > 0 &&
+    view->heat_visible;
+  view->steam_heat_eta_visible =
+    wifi_info.heat_display_enabled &&
+    runtime->steam_heat_state.heating &&
+    heat_state_remaining_us(&runtime->steam_heat_state) > 0;
   view->ble_visible = machine_info.connected || machine_info.authenticated;
   view->ble_authenticated = machine_info.authenticated;
+  view->heat_progress_permille = heat_state_progress_permille(&runtime->heat_state);
   view->custom_logo = wifi_info.has_custom_logo ? lm_ctrl_wifi_get_custom_logo() : NULL;
+  if (view->heat_arc_visible) {
+    int32_t remaining_s = heat_state_remaining_seconds(&runtime->heat_state);
+    snprintf(
+      view->heat_eta_text,
+      sizeof(view->heat_eta_text),
+      "%d:%02d",
+      (int)(remaining_s / 60),
+      (int)(remaining_s % 60)
+    );
+  }
+  if (view->steam_heat_eta_visible) {
+    int32_t remaining_s = heat_state_remaining_seconds(&runtime->steam_heat_state);
+    snprintf(
+      view->steam_heat_eta_text,
+      sizeof(view->steam_heat_eta_text),
+      "%d:%02d",
+      (int)(remaining_s / 60),
+      (int)(remaining_s % 60)
+    );
+  }
   snprintf(view->setup_status_text, sizeof(view->setup_status_text), "%s", runtime->status);
   lm_ctrl_wifi_get_setup_qr_payload(view->setup_qr_payload, sizeof(view->setup_qr_payload));
 }

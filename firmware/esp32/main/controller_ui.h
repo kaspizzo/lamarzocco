@@ -19,9 +19,15 @@ typedef struct {
   ctrl_language_t language;
   bool wifi_visible;
   bool wifi_connected;
+  bool heat_visible;
+  bool heat_arc_visible;
+  bool steam_heat_eta_visible;
   bool ble_visible;
   bool ble_authenticated;
+  uint16_t heat_progress_permille;
   const lv_img_dsc_t *custom_logo;
+  char heat_eta_text[16];
+  char steam_heat_eta_text[16];
   char setup_status_text[LM_CTRL_UI_STATUS_TEXT_LEN];
   char setup_qr_payload[LM_CTRL_UI_SETUP_QR_LEN];
 } lm_ctrl_ui_view_t;
@@ -59,7 +65,9 @@ struct lm_ctrl_ui_s {
   lv_obj_t *title_text;
   lv_obj_t *title_image;
   lv_obj_t *wifi_icon;
+  lv_obj_t *heat_icon;
   lv_obj_t *ble_icon;
+  lv_obj_t *heat_arc;
   lv_obj_t *page_label;
   lv_obj_t *page_dots[LM_CTRL_UI_MAIN_PAGE_COUNT];
 

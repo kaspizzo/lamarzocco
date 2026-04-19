@@ -403,6 +403,14 @@ static void render_advanced_section(httpd_req_t *req, const lm_ctrl_setup_portal
   send_time_step_options(req, view->time_step_s);
   httpd_resp_sendstr_chunk(req, "</select></div></div><input type=\"hidden\" id=\"preset_reduce_confirm\" name=\"preset_reduce_confirm\" value=\"\"><div class=\"section-note\">These settings apply to both this portal and the on-device rotary controls. Reducing the preset count deletes the hidden higher-numbered presets after confirmation.</div><button type=\"submit\">Save Advanced Settings</button></form>");
 
+  httpd_resp_sendstr_chunk(req, "<form class=\"section-card\" method=\"post\" action=\"/heat-display-toggle\"><h3>Heating Display</h3>");
+  send_csrf_hidden_input(req, view);
+  httpd_resp_sendstr_chunk(req, "<label class=\"toggle-row\" for=\"heat_display_enabled\"><input id=\"heat_display_enabled\" name=\"enabled\" type=\"checkbox\" value=\"1\"");
+  if (view->info.heat_display_enabled) {
+    httpd_resp_sendstr_chunk(req, " checked");
+  }
+  httpd_resp_sendstr_chunk(req, "><span>Show Heating Status On Controller</span></label><div class=\"section-note\">Controls the warmup icon, the circular warmup ring, and the warmup ETA text on the round controller UI.</div><div class=\"button-row compact\"><button type=\"submit\">Save Heating Display Setting</button></div></form>");
+
   httpd_resp_sendstr_chunk(req, "<form class=\"section-card\" method=\"post\" action=\"/debug-screenshot-toggle\"><h3>Remote Screenshot</h3>");
   send_csrf_hidden_input(req, view);
   httpd_resp_sendstr_chunk(req, "<label class=\"toggle-row\" for=\"debug_screenshot_enabled\"><input id=\"debug_screenshot_enabled\" name=\"enabled\" type=\"checkbox\" value=\"1\"");
