@@ -16,6 +16,7 @@ idf_component_register(
     "controller_settings.c"
     "controller_runtime.c"
     "controller_state.c"
+    "controller_connectivity.c"
     "controller_ui.c"
     "input.c"
     "machine_link.c"

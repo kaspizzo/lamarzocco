@@ -265,6 +265,24 @@ def summarize_widget(widget: Any) -> dict[str, Any]:
     }
 
 
+def summarize_machine_signals(dashboard: Any) -> dict[str, Any]:
+    """Expose root-level machine reachability fields for offline/recovery diffs."""
+    connected = getattr(dashboard, "connected", None)
+    offline_mode = getattr(dashboard, "offline_mode", None)
+    online = None
+
+    if isinstance(connected, bool):
+        online = connected
+    if isinstance(offline_mode, bool):
+        online = (online if online is not None else True) and not offline_mode
+
+    return {
+        "connected": connected if isinstance(connected, bool) else None,
+        "offlineMode": offline_mode if isinstance(offline_mode, bool) else None,
+        "online": online,
+    }
+
+
 def resolve_selected_codes(args: argparse.Namespace) -> tuple[str, ...] | None:
     """Resolve the widget code filter for snapshot and watch commands."""
     if getattr(args, "all_widgets", False):
@@ -321,6 +339,7 @@ def summarize_dashboard(
         "serialNumber": dashboard.serial_number,
         "selectedCodes": list(selected_codes) if selected_codes is not None else "ALL",
         "selectedWidgetCount": len(widgets),
+        "machineSignals": summarize_machine_signals(dashboard),
         "heatSignals": {
             "heating": heating,
             "readyStartTimePresent": ready_start_time_present,

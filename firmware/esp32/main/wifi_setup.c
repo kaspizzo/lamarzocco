@@ -70,8 +70,65 @@ void mark_status_dirty_locked(void) {
 
 void set_cloud_connected(bool connected) {
   lock_state();
+  if (!connected) {
+    clear_cloud_machine_status_locked();
+  }
   if (s_state.cloud_connected != connected) {
     s_state.cloud_connected = connected;
+    mark_status_dirty_locked();
+  }
+  unlock_state();
+}
+
+void clear_cloud_machine_status_locked(void) {
+  if (!lm_ctrl_cloud_machine_status_is_known(&s_state.cloud_machine_status)) {
+    return;
+  }
+
+  memset(&s_state.cloud_machine_status, 0, sizeof(s_state.cloud_machine_status));
+  mark_status_dirty_locked();
+}
+
+void clear_cloud_machine_status(void) {
+  lock_state();
+  clear_cloud_machine_status_locked();
+  unlock_state();
+}
+
+void set_cloud_machine_status(const lm_ctrl_cloud_machine_status_t *status) {
+  lm_ctrl_cloud_machine_status_t next_status = {0};
+
+  if (status != NULL) {
+    next_status = *status;
+  }
+
+  lock_state();
+  if (memcmp(&s_state.cloud_machine_status, &next_status, sizeof(next_status)) != 0) {
+    s_state.cloud_machine_status = next_status;
+    mark_status_dirty_locked();
+  }
+  unlock_state();
+}
+
+void merge_cloud_machine_status(const lm_ctrl_cloud_machine_status_t *status) {
+  lm_ctrl_cloud_machine_status_t merged_status;
+
+  if (status == NULL) {
+    return;
+  }
+
+  lock_state();
+  merged_status = s_state.cloud_machine_status;
+  if (status->connected_known) {
+    merged_status.connected_known = true;
+    merged_status.connected = status->connected;
+  }
+  if (status->offline_mode_known) {
+    merged_status.offline_mode_known = true;
+    merged_status.offline_mode = status->offline_mode;
+  }
+  if (memcmp(&s_state.cloud_machine_status, &merged_status, sizeof(merged_status)) != 0) {
+    s_state.cloud_machine_status = merged_status;
     mark_status_dirty_locked();
   }
   unlock_state();
@@ -108,6 +165,7 @@ void clear_fleet_locked(void) {
 void clear_selected_machine_locked(void) {
   memset(&s_state.selected_machine, 0, sizeof(s_state.selected_machine));
   s_state.has_machine_selection = false;
+  clear_cloud_machine_status_locked();
 }
 
 void clear_custom_logo_locked(void) {
@@ -664,6 +722,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         s_state.sta_connecting = s_state.has_credentials;
         s_state.sta_ip[0] = '\0';
         s_state.cloud_connected = false;
+        clear_cloud_machine_status_locked();
         clear_cached_cloud_access_token_locked();
         should_retry = s_state.has_credentials;
         mark_status_dirty_locked();
@@ -832,6 +891,9 @@ void lm_ctrl_wifi_get_info(lm_ctrl_wifi_info_t *info) {
   info->language = s_state.language;
   info->has_cloud_credentials = s_state.has_cloud_credentials;
   info->cloud_connected = s_state.cloud_connected;
+  info->cloud_machine_status = s_state.cloud_machine_status;
+  info->cloud_machine_status_known = lm_ctrl_cloud_machine_status_is_known(&s_state.cloud_machine_status);
+  info->machine_cloud_online = lm_ctrl_cloud_machine_status_is_online(&s_state.cloud_machine_status);
   info->has_machine_selection = has_effective_machine;
   info->has_custom_logo = s_state.has_custom_logo;
   info->has_cloud_provisioning = s_state.has_cloud_provisioning;

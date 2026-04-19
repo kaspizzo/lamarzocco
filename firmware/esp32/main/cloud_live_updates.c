@@ -256,6 +256,7 @@ static void handle_cloud_dashboard_message(const char *message) {
   uint32_t loaded_mask = 0;
   uint32_t feature_mask = 0;
   lm_ctrl_machine_heat_info_t heat_info = {0};
+  lm_ctrl_cloud_machine_status_t machine_status = {0};
   bool brew_active = false;
   int64_t brew_start_epoch_ms = 0;
   lm_ctrl_cloud_command_update_t updates[LM_CTRL_CLOUD_COMMAND_UPDATE_MAX] = {0};
@@ -272,6 +273,9 @@ static void handle_cloud_dashboard_message(const char *message) {
   }
 
   update_count = parse_dashboard_command_updates(root, updates, LM_CTRL_CLOUD_COMMAND_UPDATE_MAX);
+  if (lm_ctrl_cloud_parse_dashboard_machine_status(root, &machine_status)) {
+    merge_cloud_machine_status(&machine_status);
+  }
 
   if (lm_ctrl_cloud_parse_dashboard_root_values(
         root,

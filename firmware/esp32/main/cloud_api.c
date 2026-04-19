@@ -654,6 +654,29 @@ esp_err_t lm_ctrl_cloud_parse_access_token(
   return ESP_OK;
 }
 
+static bool parse_machine_status_fields(cJSON *root, lm_ctrl_cloud_machine_status_t *status) {
+  cJSON *connected_item;
+  cJSON *offline_mode_item;
+
+  if (!cJSON_IsObject(root) || status == NULL) {
+    return false;
+  }
+
+  memset(status, 0, sizeof(*status));
+  connected_item = cJSON_GetObjectItemCaseSensitive(root, "connected");
+  offline_mode_item = cJSON_GetObjectItemCaseSensitive(root, "offlineMode");
+  if (cJSON_IsBool(connected_item)) {
+    status->connected_known = true;
+    status->connected = cJSON_IsTrue(connected_item);
+  }
+  if (cJSON_IsBool(offline_mode_item)) {
+    status->offline_mode_known = true;
+    status->offline_mode = cJSON_IsTrue(offline_mode_item);
+  }
+
+  return lm_ctrl_cloud_machine_status_is_known(status);
+}
+
 esp_err_t lm_ctrl_cloud_parse_customer_fleet(
   const char *response_body,
   lm_ctrl_cloud_machine_t *machines,
@@ -683,6 +706,7 @@ esp_err_t lm_ctrl_cloud_parse_customer_fleet(
     cJSON *name_item;
     cJSON *model_item;
     cJSON *ble_token_item;
+    lm_ctrl_cloud_machine_status_t machine_status = {0};
 
     if (count >= max_machines) {
       break;
@@ -708,12 +732,22 @@ esp_err_t lm_ctrl_cloud_parse_customer_fleet(
     if (cJSON_IsString(ble_token_item) && ble_token_item->valuestring != NULL) {
       copy_text(machines[count].communication_key, sizeof(machines[count].communication_key), ble_token_item->valuestring);
     }
+    if (parse_machine_status_fields(entry, &machine_status)) {
+      machines[count].cloud_status = machine_status;
+    }
     count++;
   }
 
   cJSON_Delete(root);
   *machine_count = count;
   return count > 0 ? ESP_OK : ESP_ERR_NOT_FOUND;
+}
+
+bool lm_ctrl_cloud_parse_dashboard_machine_status(
+  cJSON *root,
+  lm_ctrl_cloud_machine_status_t *status
+) {
+  return parse_machine_status_fields(root, status);
 }
 
 static bool parse_prebrew_widget_values(cJSON *widget, float *seconds_in, float *seconds_out) {

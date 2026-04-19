@@ -246,6 +246,7 @@ static esp_err_t fetch_dashboard_root(
     &response_meta
   );
   if (ret != ESP_OK) {
+    clear_cloud_machine_status();
     if (error_text != NULL && error_text_size > 0 && error_text[0] == '\0') {
       snprintf(error_text, error_text_size, "Dashboard request failed.");
     }
@@ -256,6 +257,7 @@ static esp_err_t fetch_dashboard_root(
     if (status_code == 401) {
       clear_cached_cloud_access_token();
     }
+    clear_cloud_machine_status();
     if (error_text != NULL && error_text_size > 0) {
       snprintf(error_text, error_text_size, "Dashboard request failed with status %d.", status_code);
     }
@@ -266,6 +268,7 @@ static esp_err_t fetch_dashboard_root(
   *out_root = cJSON_Parse(response_body);
   free(response_body);
   if (!cJSON_IsObject(*out_root)) {
+    clear_cloud_machine_status();
     if (error_text != NULL && error_text_size > 0) {
       snprintf(error_text, error_text_size, "Dashboard response was not valid JSON.");
     }
@@ -276,6 +279,13 @@ static esp_err_t fetch_dashboard_root(
 
   if (server_epoch_ms != NULL) {
     *server_epoch_ms = response_meta.server_epoch_ms;
+  }
+  {
+    lm_ctrl_cloud_machine_status_t machine_status = {0};
+
+    if (lm_ctrl_cloud_parse_dashboard_machine_status(*out_root, &machine_status)) {
+      set_cloud_machine_status(&machine_status);
+    }
   }
 
   return ESP_OK;

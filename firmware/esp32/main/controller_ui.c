@@ -23,6 +23,7 @@ static const lv_color_t COLOR_MUTED = LV_COLOR_MAKE(0xB7, 0xA0, 0x8B);
 static const lv_color_t COLOR_ACTIVE = LV_COLOR_MAKE(0xFF, 0xC6, 0x85);
 static const lv_color_t COLOR_BUTTON = LV_COLOR_MAKE(0x3A, 0x2A, 0x21);
 static const char *BATTERY_CHARGING_SYMBOL = LV_SYMBOL_BATTERY_FULL LV_SYMBOL_CHARGE;
+static const char *ICON_SLASH_SYMBOL = "/";
 
 static const ctrl_focus_t MAIN_PAGE_ORDER[LM_CTRL_UI_MAIN_PAGE_COUNT] = {
   CTRL_FOCUS_TEMPERATURE,
@@ -217,7 +218,27 @@ static bool is_focus_value_loaded(const ctrl_state_t *state, ctrl_focus_t focus)
   }
 }
 
-static void format_main_placeholder(
+static lm_ctrl_field_presentation_t focus_presentation(
+  const ctrl_state_t *state,
+  const lm_ctrl_ui_view_t *view,
+  ctrl_focus_t focus
+) {
+  if (state == NULL || view == NULL) {
+    return LM_CTRL_FIELD_PRESENTATION_LOADING;
+  }
+
+  return lm_ctrl_controller_field_presentation(view->readable_mask, state->loaded_mask, focus);
+}
+
+static bool focus_editable(const lm_ctrl_ui_view_t *view, ctrl_focus_t focus) {
+  if (view == NULL) {
+    return true;
+  }
+
+  return lm_ctrl_controller_field_is_editable(view->editable_mask, focus);
+}
+
+static void format_main_loading_placeholder(
   ctrl_focus_t focus,
   ctrl_language_t language,
   char *value,
@@ -256,6 +277,50 @@ static void format_main_placeholder(
         language == CTRL_LANGUAGE_DE
           ? "Werte werden geladen,\nsobald die Maschine verbunden ist."
           : "Values load once\nthe machine is connected."
+      );
+      break;
+  }
+}
+
+static void format_main_unavailable_placeholder(
+  ctrl_focus_t focus,
+  ctrl_language_t language,
+  char *value,
+  size_t value_size,
+  char *hint,
+  size_t hint_size
+) {
+  if (value != NULL && value_size > 0) {
+    snprintf(value, value_size, "--");
+  }
+
+  if (hint == NULL || hint_size == 0) {
+    return;
+  }
+
+  switch (focus) {
+    case CTRL_FOCUS_INFUSE:
+    case CTRL_FOCUS_PAUSE:
+    case CTRL_FOCUS_BBW_MODE:
+    case CTRL_FOCUS_BBW_DOSE_1:
+    case CTRL_FOCUS_BBW_DOSE_2:
+      snprintf(
+        hint,
+        hint_size,
+        "%s",
+        language == CTRL_LANGUAGE_DE
+          ? "Maschine offline.\nCloud-Werte nicht verfuegbar."
+          : "Machine offline.\nCloud values unavailable."
+      );
+      break;
+    default:
+      snprintf(
+        hint,
+        hint_size,
+        "%s",
+        language == CTRL_LANGUAGE_DE
+          ? "Maschine nicht erreichbar.\nBLE oder Cloud verbinden."
+          : "Machine unreachable.\nConnect via BLE or cloud."
       );
       break;
   }
@@ -585,6 +650,9 @@ static void render_main_screen(
 ) {
   char value[40];
   char hint[128];
+  lm_ctrl_field_presentation_t presentation;
+  lv_color_t title_color = COLOR_ACTIVE;
+  lv_color_t value_color = COLOR_TEXT;
   bool has_hint;
   const int page_index = main_page_index(state->feature_mask, state->focus);
   const size_t page_count = main_page_count(state->feature_mask);
@@ -604,18 +672,27 @@ static void render_main_screen(
   set_hidden(ui->power_right_button, true);
   set_hidden(ui->power_hint, true);
 
-  set_label_text(ui->focus, focus_title(state->focus, language), COLOR_ACTIVE);
+  presentation = focus_presentation(state, view, state->focus);
+  if (presentation == LM_CTRL_FIELD_PRESENTATION_UNAVAILABLE || !focus_editable(view, state->focus)) {
+    title_color = COLOR_MUTED;
+  }
+  if (presentation != LM_CTRL_FIELD_PRESENTATION_READY) {
+    value_color = COLOR_MUTED;
+  }
+  set_label_text(ui->focus, focus_title(state->focus, language), title_color);
 
-  if (is_focus_value_loaded(state, state->focus)) {
+  if (presentation == LM_CTRL_FIELD_PRESENTATION_READY && is_focus_value_loaded(state, state->focus)) {
     format_main_value(state, view, language, value, sizeof(value), hint, sizeof(hint));
+  } else if (presentation == LM_CTRL_FIELD_PRESENTATION_LOADING) {
+    format_main_loading_placeholder(state->focus, language, value, sizeof(value), hint, sizeof(hint));
   } else {
-    format_main_placeholder(state->focus, language, value, sizeof(value), hint, sizeof(hint));
+    format_main_unavailable_placeholder(state->focus, language, value, sizeof(value), hint, sizeof(hint));
   }
   if (view != NULL && view->heat_arc_visible) {
     lv_arc_set_value(ui->heat_arc, view->heat_progress_permille);
   }
   has_hint = hint[0] != '\0';
-  set_label_text(ui->value, value, COLOR_TEXT);
+  set_label_text(ui->value, value, value_color);
   set_hidden(ui->hint, !has_hint);
   if (has_hint) {
     set_label_text(ui->hint, hint, COLOR_MUTED);
@@ -644,6 +721,8 @@ static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *v
     lv_color_t color;
   } icon_slot_t;
   icon_slot_t slots[5];
+  lm_ctrl_indicator_state_t wifi_indicator = LM_CTRL_INDICATOR_HIDDEN;
+  bool wifi_crossed = false;
   size_t visible_count = 0;
   const int step = 28;
   const int y = 48;
@@ -652,18 +731,34 @@ static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *v
     return;
   }
 
+  wifi_indicator = lm_ctrl_remote_path_indicator_state(view->remote_path_state);
+
   set_hidden(ui->wifi_icon, true);
+  set_hidden(ui->wifi_slash_icon, true);
   set_hidden(ui->usb_icon, true);
   set_hidden(ui->battery_icon, true);
   set_hidden(ui->heat_icon, true);
   set_hidden(ui->ble_icon, true);
 
-  if (view->wifi_visible) {
-    slots[visible_count++] = (icon_slot_t){
-      .obj = ui->wifi_icon,
-      .symbol = LV_SYMBOL_WIFI,
-      .color = view->wifi_connected ? COLOR_ACTIVE : COLOR_MUTED,
-    };
+  switch (wifi_indicator) {
+    case LM_CTRL_INDICATOR_CROSSED:
+      slots[visible_count++] = (icon_slot_t){
+        .obj = ui->wifi_icon,
+        .symbol = LV_SYMBOL_WIFI,
+        .color = COLOR_MUTED,
+      };
+      wifi_crossed = true;
+      break;
+    case LM_CTRL_INDICATOR_ACTIVE:
+      slots[visible_count++] = (icon_slot_t){
+        .obj = ui->wifi_icon,
+        .symbol = LV_SYMBOL_WIFI,
+        .color = COLOR_ACTIVE,
+      };
+      break;
+    case LM_CTRL_INDICATOR_HIDDEN:
+    default:
+      break;
   }
 
   if (view->heat_visible) {
@@ -703,14 +798,38 @@ static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *v
     set_hidden(slots[i].obj, false);
     set_label_text(slots[i].obj, slots[i].symbol, slots[i].color);
     lv_obj_align(slots[i].obj, LV_ALIGN_TOP_MID, x, y);
+    if (wifi_crossed && slots[i].obj == ui->wifi_icon) {
+      set_hidden(ui->wifi_slash_icon, false);
+      set_label_text(ui->wifi_slash_icon, ICON_SLASH_SYMBOL, COLOR_MUTED);
+      lv_obj_align(ui->wifi_slash_icon, LV_ALIGN_TOP_MID, x + 1, y - 1);
+    }
   }
 }
 
-static void render_presets_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, ctrl_language_t language) {
+static void style_disabled_button(lv_obj_t *button, lv_obj_t *label) {
+  if (button == NULL || label == NULL) {
+    return;
+  }
+
+  lv_obj_set_style_bg_color(button, COLOR_BUTTON, 0);
+  lv_obj_set_style_bg_opa(button, LV_OPA_40, 0);
+  lv_obj_set_style_border_width(button, 1, 0);
+  lv_obj_set_style_border_color(button, COLOR_RING, 0);
+  lv_obj_set_style_shadow_width(button, 0, 0);
+  lv_obj_set_style_text_color(label, COLOR_MUTED, 0);
+}
+
+static void render_presets_screen(
+  lm_ctrl_ui_t *ui,
+  const ctrl_state_t *state,
+  const lm_ctrl_ui_view_t *view,
+  ctrl_language_t language
+) {
   char body[160];
   char preset_name[CTRL_PRESET_NAME_LEN];
   char title[32];
   const ctrl_preset_t *preset = &state->presets[state->preset_index];
+  const bool preset_load_enabled = view == NULL || view->preset_load_enabled;
 
   set_hidden(ui->main_card, true);
   set_hidden(ui->presets_card, false);
@@ -730,9 +849,19 @@ static void render_presets_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, c
   set_label_text(ui->presets_name, preset_name, COLOR_MUTED);
   format_preset_body(state, preset, language, body, sizeof(body));
   set_label_text(ui->presets_body, body, COLOR_TEXT);
-  set_label_text(ui->presets_load_label, language == CTRL_LANGUAGE_DE ? "Laden" : "Load", COLOR_BG);
+  set_label_text(
+    ui->presets_load_label,
+    language == CTRL_LANGUAGE_DE ? "Laden" : "Load",
+    preset_load_enabled ? COLOR_BG : COLOR_MUTED
+  );
   set_label_text(ui->presets_save_label, language == CTRL_LANGUAGE_DE ? "Sichern" : "Save", COLOR_TEXT);
-  style_action_button(ui->presets_load_button, ui->presets_load_label, true);
+  if (preset_load_enabled) {
+    lv_obj_clear_state(ui->presets_load_button, LV_STATE_DISABLED);
+    style_action_button(ui->presets_load_button, ui->presets_load_label, true);
+  } else {
+    lv_obj_add_state(ui->presets_load_button, LV_STATE_DISABLED);
+    style_disabled_button(ui->presets_load_button, ui->presets_load_label);
+  }
   style_action_button(ui->presets_save_button, ui->presets_save_label, false);
 }
 
@@ -881,6 +1010,11 @@ esp_err_t lm_ctrl_ui_init(
   ui->wifi_icon = lv_label_create(ui->screen);
   lv_obj_set_style_text_font(ui->wifi_icon, &lv_font_montserrat_14, 0);
   lv_obj_align(ui->wifi_icon, LV_ALIGN_TOP_MID, -68, 48);
+
+  ui->wifi_slash_icon = lv_label_create(ui->screen);
+  lv_obj_set_style_text_font(ui->wifi_slash_icon, &lv_font_montserrat_20, 0);
+  lv_obj_align(ui->wifi_slash_icon, LV_ALIGN_TOP_MID, -68, 47);
+  set_hidden(ui->wifi_slash_icon, true);
 
   ui->usb_icon = lv_label_create(ui->screen);
   lv_obj_set_style_text_font(ui->usb_icon, &lv_font_montserrat_14, 0);
@@ -1074,6 +1208,7 @@ esp_err_t lm_ctrl_ui_init(
   lv_obj_move_foreground(ui->title_text);
   lv_obj_move_foreground(ui->title_image);
   lv_obj_move_foreground(ui->wifi_icon);
+  lv_obj_move_foreground(ui->wifi_slash_icon);
   lv_obj_move_foreground(ui->usb_icon);
   lv_obj_move_foreground(ui->battery_icon);
   lv_obj_move_foreground(ui->heat_icon);
@@ -1099,7 +1234,7 @@ void lm_ctrl_ui_render(lm_ctrl_ui_t *ui, const ctrl_state_t *state, const lm_ctr
 
   switch (state->screen) {
     case CTRL_SCREEN_PRESETS:
-      render_presets_screen(ui, state, language);
+      render_presets_screen(ui, state, view, language);
       break;
     case CTRL_SCREEN_SETUP:
     case CTRL_SCREEN_SETUP_RESET_ARM:

@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "cloud_machine_status.h"
 #include "controller_state.h"
 
 #ifdef __cplusplus
@@ -30,6 +31,8 @@ typedef struct {
   bool has_credentials;
   bool has_cloud_credentials;
   bool cloud_connected;
+  bool cloud_machine_status_known;
+  bool machine_cloud_online;
   bool has_machine_selection;
   bool has_custom_logo;
   bool has_cloud_provisioning;
@@ -40,6 +43,7 @@ typedef struct {
   bool sta_connected;
   lm_ctrl_web_auth_mode_t web_auth_mode;
   ctrl_language_t language;
+  lm_ctrl_cloud_machine_status_t cloud_machine_status;
   char portal_ssid[33];
   char portal_password[65];
   char sta_ssid[33];

@@ -3,6 +3,7 @@
 #include "esp_err.h"
 #include "lvgl.h"
 
+#include "controller_connectivity.h"
 #include "controller_state.h"
 
 /** Maximum number of horizontally swipeable main pages in the round UI. */
@@ -17,8 +18,7 @@
 /** Read-only UI view model built by the runtime layer. */
 typedef struct {
   ctrl_language_t language;
-  bool wifi_visible;
-  bool wifi_connected;
+  lm_ctrl_remote_path_state_t remote_path_state;
   bool usb_visible;
   bool battery_visible;
   bool battery_charging;
@@ -28,6 +28,9 @@ typedef struct {
   bool steam_heat_eta_visible;
   bool ble_visible;
   bool ble_authenticated;
+  uint32_t readable_mask;
+  uint32_t editable_mask;
+  bool preset_load_enabled;
   uint16_t heat_progress_permille;
   const lv_img_dsc_t *custom_logo;
   char heat_eta_text[16];
@@ -69,6 +72,7 @@ struct lm_ctrl_ui_s {
   lv_obj_t *title_text;
   lv_obj_t *title_image;
   lv_obj_t *wifi_icon;
+  lv_obj_t *wifi_slash_icon;
   lv_obj_t *usb_icon;
   lv_obj_t *battery_icon;
   lv_obj_t *heat_icon;
