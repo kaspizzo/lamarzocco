@@ -128,6 +128,11 @@ Expected interpretations:
 - `heatSignals.assessment == "no_heating_signal"`
   The tested dashboard snapshot does not currently expose a warmup signal.
 
+Current controller UI semantics map these reachability signals like this:
+
+- solid Wi-Fi icon: the selected machine is reachable through cloud
+- crossed Wi-Fi icon: account/network context exists, but there is no live cloud path to the selected machine yet
+
 The default widget subset is still:
 
 - `CMMachineStatus`

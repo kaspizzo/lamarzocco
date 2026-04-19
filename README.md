@@ -15,7 +15,7 @@ Today the strongest areas are:
 
 - ESP32 controller bring-up on the targeted round hardware
 - BLE control for the core day-to-day controller actions
-- cloud-backed setup, machine selection, and prebrewing management
+- cloud-backed setup, machine selection, BLE/cloud fallback, and prebrewing management
 
 ## Support development
 
@@ -42,14 +42,18 @@ The current ESP32 firmware supports:
 - physical outer ring input
 - local haptic and LED-ring feedback
 - local Wi-Fi/cloud setup portal with Wi-Fi scan
+- setup portal sections for overview, controller settings, network, cloud, recipes, advanced settings, and diagnostics
 - optional local SVG upload for a custom controller header logo
 - setup AP QR code and captive-portal style onboarding
 - machine selection via La Marzocco cloud account
+- connectivity-aware status icons for BLE fallback versus cloud machine reachability
+- conditional USB and low-battery/charging indicators on the on-device status bar
 - BLE control for:
   - coffee boiler temperature
   - steam boiler `Off / 1 / 2 / 3` level control from the controller screen
   - standby
 - cloud-backed prebrewing mode and timing changes
+- on-device recovery actions for `Clear web password` and `Reset network`
 - periodic machine value refresh while the controller stays online
 - recipe presets for:
   - coffee boiler temperature
@@ -69,6 +73,7 @@ The currently targeted hardware is a JC3636K718-style ESP32-S3 round controller 
 Representative controller UI screenshots are published as PNG files under `docs/controller/images/`.
 The full gallery is in [`docs/controller/SCREENSHOTS.md`](docs/controller/SCREENSHOTS.md).
 The published defaults intentionally show the text header, not an official La Marzocco logo.
+The current published examples intentionally show the local fallback state with BLE active and a crossed Wi-Fi icon while the selected machine is not yet reachable through cloud.
 
 | Coffee Boiler | Presets | Setup |
 | --- | --- | --- |
@@ -92,9 +97,11 @@ If you want to flash the controller:
 - On first boot without stored Wi-Fi credentials, and again after a full factory reset, the controller opens `Setup` automatically and starts its own setup AP.
 - In that state the setup screen shows a QR code for the controller AP plus the AP name, password, and local setup IP so onboarding can start directly on a phone.
 - After home Wi-Fi is saved, the controller immediately tries to join that network. Once connected, the setup portal stays available again via the on-device setup gesture and the configured `http://<hostname>.local/` address.
+- The browser setup portal is currently split into `Overview`, `Controller`, `Network`, `Cloud`, `Recipes`, `Advanced`, and `Diagnostics`.
+- A crossed Wi-Fi icon means the controller has account/network context but the selected machine is not currently reachable through cloud. BLE control can still stay active in that state.
 - The cloud login path expects a direct La Marzocco account email/password. Accounts created only through Apple or Google sign-in are not expected to work with the current controller login flow.
 - A possible workaround for Apple/Google-only accounts is to create a second La Marzocco account with a normal email/password login and grant that account access in the official app. Treat this as a best-effort workaround, not a guaranteed fix.
-- Main gestures are: swipe down for `Presets`, swipe up for `Setup`, and long-press on the setup screen to open the on-device network reset flow.
+- Main gestures are: swipe down for `Presets`, swipe up for `Setup`, and long-press on the setup screen to open `Recovery` for `Clear web password` or `Reset network`.
 
 ## Developer tools
 
@@ -109,6 +116,7 @@ These tools are useful if you want to:
 - inspect cloud dashboard responses on a desktop machine
 - inspect settings, statistics, schedule, and dashboard websocket responses
 - bootstrap machine selection and BLE token retrieval
+- expose a BMP controller screenshot route through the portal `Diagnostics` section
 - compare controller behaviour with a Python-side reference client
 - debug BLE/cloud behaviour outside the embedded firmware loop
 - build a normalized inventory of which fields are already mapped to the controller and which are still unused
