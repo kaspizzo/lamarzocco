@@ -341,11 +341,9 @@ static void format_main_value(
         hint,
         hint_size,
         "%s",
-        (view != NULL && view->heat_arc_visible && view->heat_eta_text[0] != '\0')
-          ? (language == CTRL_LANGUAGE_DE ? "Aufheizen laeuft.\nBereit in %s." : "Heating up.\nReady in %s.")
-          : (language == CTRL_LANGUAGE_DE
-            ? "Maschinenstatus direkt\nam Controller einstellen."
-            : "Adjust machine status\ndirectly on the controller.")
+        language == CTRL_LANGUAGE_DE
+          ? "Maschinenstatus direkt\nam Controller einstellen."
+          : "Adjust machine status\ndirectly on the controller."
       );
       if (view != NULL && view->heat_arc_visible && view->heat_eta_text[0] != '\0') {
         snprintf(
