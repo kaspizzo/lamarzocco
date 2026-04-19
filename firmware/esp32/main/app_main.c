@@ -13,6 +13,7 @@
 #include "board_display.h"
 #include "board_haptic.h"
 #include "board_leds.h"
+#include "board_power.h"
 #include "controller_runtime.h"
 #include "controller_ui.h"
 #include "input.h"
@@ -122,6 +123,7 @@ void app_main(void) {
   ESP_ERROR_CHECK(lm_ctrl_backlight_on());
   ESP_ERROR_CHECK(lm_ctrl_wifi_init());
   ESP_ERROR_CHECK(lm_ctrl_machine_link_init(&machine_link_deps));
+  ESP_ERROR_CHECK(lm_ctrl_power_init());
   if (lm_ctrl_leds_init() != ESP_OK) {
     ESP_LOGW(TAG, "LED ring init failed");
   }
@@ -148,6 +150,7 @@ void app_main(void) {
     }
 
     lm_ctrl_runtime_handle_wifi_status_change(&runtime, &needs_render);
+    lm_ctrl_runtime_handle_power_status_change(&runtime, &needs_render);
     lm_ctrl_runtime_handle_machine_status_change(&runtime, &needs_render);
     lm_ctrl_runtime_handle_preset_change(&runtime, &needs_render);
     lm_ctrl_runtime_tick(&runtime, &needs_render);

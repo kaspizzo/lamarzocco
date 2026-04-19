@@ -22,6 +22,7 @@ static const lv_color_t COLOR_TEXT = LV_COLOR_MAKE(0xF4, 0xEF, 0xE7);
 static const lv_color_t COLOR_MUTED = LV_COLOR_MAKE(0xB7, 0xA0, 0x8B);
 static const lv_color_t COLOR_ACTIVE = LV_COLOR_MAKE(0xFF, 0xC6, 0x85);
 static const lv_color_t COLOR_BUTTON = LV_COLOR_MAKE(0x3A, 0x2A, 0x21);
+static const char *BATTERY_CHARGING_SYMBOL = LV_SYMBOL_BATTERY_FULL LV_SYMBOL_CHARGE;
 
 static const ctrl_focus_t MAIN_PAGE_ORDER[LM_CTRL_UI_MAIN_PAGE_COUNT] = {
   CTRL_FOCUS_TEMPERATURE,
@@ -637,29 +638,71 @@ static void render_main_screen(
 }
 
 static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *view) {
+  typedef struct {
+    lv_obj_t *obj;
+    const char *symbol;
+    lv_color_t color;
+  } icon_slot_t;
+  icon_slot_t slots[5];
+  size_t visible_count = 0;
+  const int step = 34;
+  const int y = 48;
+
   if (ui == NULL || view == NULL) {
     return;
   }
 
+  set_hidden(ui->wifi_icon, true);
+  set_hidden(ui->usb_icon, true);
+  set_hidden(ui->battery_icon, true);
+  set_hidden(ui->heat_icon, true);
+  set_hidden(ui->ble_icon, true);
+
   if (view->wifi_visible) {
-    set_hidden(ui->wifi_icon, false);
-    set_label_text(ui->wifi_icon, LV_SYMBOL_WIFI, view->wifi_connected ? COLOR_ACTIVE : COLOR_MUTED);
-  } else {
-    set_hidden(ui->wifi_icon, true);
+    slots[visible_count++] = (icon_slot_t){
+      .obj = ui->wifi_icon,
+      .symbol = LV_SYMBOL_WIFI,
+      .color = view->wifi_connected ? COLOR_ACTIVE : COLOR_MUTED,
+    };
   }
 
   if (view->heat_visible) {
-    set_hidden(ui->heat_icon, false);
-    set_label_text(ui->heat_icon, LV_SYMBOL_CHARGE, COLOR_ACTIVE);
-  } else {
-    set_hidden(ui->heat_icon, true);
+    slots[visible_count++] = (icon_slot_t){
+      .obj = ui->heat_icon,
+      .symbol = LV_SYMBOL_CHARGE,
+      .color = COLOR_ACTIVE,
+    };
   }
 
   if (view->ble_visible) {
-    set_hidden(ui->ble_icon, false);
-    set_label_text(ui->ble_icon, LV_SYMBOL_BLUETOOTH, view->ble_authenticated ? COLOR_ACTIVE : COLOR_MUTED);
-  } else {
-    set_hidden(ui->ble_icon, true);
+    slots[visible_count++] = (icon_slot_t){
+      .obj = ui->ble_icon,
+      .symbol = LV_SYMBOL_BLUETOOTH,
+      .color = view->ble_authenticated ? COLOR_ACTIVE : COLOR_MUTED,
+    };
+  }
+
+  if (view->usb_visible) {
+    slots[visible_count++] = (icon_slot_t){
+      .obj = ui->usb_icon,
+      .symbol = LV_SYMBOL_USB,
+      .color = COLOR_ACTIVE,
+    };
+  }
+
+  if (view->battery_visible) {
+    slots[visible_count++] = (icon_slot_t){
+      .obj = ui->battery_icon,
+      .symbol = view->battery_charging ? BATTERY_CHARGING_SYMBOL : LV_SYMBOL_BATTERY_EMPTY,
+      .color = COLOR_ACTIVE,
+    };
+  }
+
+  for (size_t i = 0; i < visible_count; ++i) {
+    const int x = ((int)i * step) - (((int)visible_count - 1) * step / 2);
+    set_hidden(slots[i].obj, false);
+    set_label_text(slots[i].obj, slots[i].symbol, slots[i].color);
+    lv_obj_align(slots[i].obj, LV_ALIGN_TOP_MID, x, y);
   }
 }
 
@@ -837,16 +880,26 @@ esp_err_t lm_ctrl_ui_init(
 
   ui->wifi_icon = lv_label_create(ui->screen);
   lv_obj_set_style_text_font(ui->wifi_icon, &lv_font_montserrat_14, 0);
-  lv_obj_align(ui->wifi_icon, LV_ALIGN_TOP_MID, -24, 48);
+  lv_obj_align(ui->wifi_icon, LV_ALIGN_TOP_MID, -68, 48);
+
+  ui->usb_icon = lv_label_create(ui->screen);
+  lv_obj_set_style_text_font(ui->usb_icon, &lv_font_montserrat_14, 0);
+  lv_obj_align(ui->usb_icon, LV_ALIGN_TOP_MID, 34, 48);
+  set_hidden(ui->usb_icon, true);
+
+  ui->battery_icon = lv_label_create(ui->screen);
+  lv_obj_set_style_text_font(ui->battery_icon, &lv_font_montserrat_14, 0);
+  lv_obj_align(ui->battery_icon, LV_ALIGN_TOP_MID, 68, 48);
+  set_hidden(ui->battery_icon, true);
 
   ui->heat_icon = lv_label_create(ui->screen);
   lv_obj_set_style_text_font(ui->heat_icon, &lv_font_montserrat_14, 0);
-  lv_obj_align(ui->heat_icon, LV_ALIGN_TOP_MID, 0, 48);
+  lv_obj_align(ui->heat_icon, LV_ALIGN_TOP_MID, -34, 48);
   set_hidden(ui->heat_icon, true);
 
   ui->ble_icon = lv_label_create(ui->screen);
   lv_obj_set_style_text_font(ui->ble_icon, &lv_font_montserrat_14, 0);
-  lv_obj_align(ui->ble_icon, LV_ALIGN_TOP_MID, 24, 48);
+  lv_obj_align(ui->ble_icon, LV_ALIGN_TOP_MID, 0, 48);
 
   ui->page_label = lv_label_create(ui->screen);
   lv_obj_set_style_text_font(ui->page_label, &lv_font_montserrat_14, 0);
@@ -1021,6 +1074,8 @@ esp_err_t lm_ctrl_ui_init(
   lv_obj_move_foreground(ui->title_text);
   lv_obj_move_foreground(ui->title_image);
   lv_obj_move_foreground(ui->wifi_icon);
+  lv_obj_move_foreground(ui->usb_icon);
+  lv_obj_move_foreground(ui->battery_icon);
   lv_obj_move_foreground(ui->heat_icon);
   lv_obj_move_foreground(ui->ble_icon);
   lv_obj_move_foreground(ui->page_label);

@@ -34,6 +34,15 @@
 #define LM_CTRL_KNOB_DIRECTION (-1)
 #define LM_CTRL_ENCODER_ENABLED 1
 
+/** Optional local battery telemetry exposed by the controller board. */
+#define LM_CTRL_BATTERY_ADC_GPIO GPIO_NUM_6
+/* JC3636K718 v1.3 routes ETA6003 STAT only to the charge LED, not to the ESP32. */
+#define LM_CTRL_BATTERY_CHARGE_GPIO GPIO_NUM_NC
+#define LM_CTRL_BATTERY_CHARGE_ACTIVE_LEVEL 0
+#define LM_CTRL_BATTERY_SAMPLE_INTERVAL_MS 30000UL
+#define LM_CTRL_BATTERY_VOLTAGE_DIVIDER 3.0f
+#define LM_CTRL_BATTERY_LOW_PERCENT 20
+
 /** WS2812 LED ring on the controller face. */
 #define LM_CTRL_LED_RING_GPIO GPIO_NUM_0
 #define LM_CTRL_LED_RING_COUNT 13

@@ -5,6 +5,7 @@ idf_component_register(
     "board_display.c"
     "board_haptic.c"
     "board_leds.c"
+    "board_power.c"
     "cloud_api.c"
     "cloud_auth.c"
     "cloud_dashboard.c"
@@ -34,6 +35,8 @@ idf_component_register(
     bt
     mdns
     led_strip
+    esp_adc
+    esp_driver_usb_serial_jtag
     esp_http_client
     esp_driver_ledc
     esp_driver_rmt
