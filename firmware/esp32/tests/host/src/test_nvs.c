@@ -10,8 +10,10 @@
 
 typedef enum {
   TEST_NVS_TYPE_NONE = 0,
+  TEST_NVS_TYPE_STR,
   TEST_NVS_TYPE_BLOB,
   TEST_NVS_TYPE_U8,
+  TEST_NVS_TYPE_U32,
 } test_nvs_type_t;
 
 typedef struct {
@@ -26,6 +28,7 @@ typedef struct {
   char key[32];
   test_nvs_type_t type;
   uint8_t value_u8;
+  uint32_t value_u32;
   void *blob;
   size_t blob_size;
 } test_nvs_entry_t;
@@ -129,6 +132,14 @@ esp_err_t test_nvs_seed_blob(const char *namespace_name, const char *key, const 
   return ESP_OK;
 }
 
+esp_err_t test_nvs_seed_str(const char *namespace_name, const char *key, const char *value) {
+  if (value == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  return test_nvs_seed_blob(namespace_name, key, value, strlen(value) + 1U);
+}
+
 esp_err_t test_nvs_seed_u8(const char *namespace_name, const char *key, uint8_t value) {
   test_nvs_entry_t *entry;
 
@@ -146,6 +157,27 @@ esp_err_t test_nvs_seed_u8(const char *namespace_name, const char *key, uint8_t 
   entry->blob_size = 0;
   entry->type = TEST_NVS_TYPE_U8;
   entry->value_u8 = value;
+  return ESP_OK;
+}
+
+esp_err_t test_nvs_seed_u32(const char *namespace_name, const char *key, uint32_t value) {
+  test_nvs_entry_t *entry;
+
+  if (namespace_name == NULL || key == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  entry = find_or_create_entry(namespace_name, key);
+  if (entry == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  free(entry->blob);
+  entry->blob = NULL;
+  entry->blob_size = 0;
+  entry->type = TEST_NVS_TYPE_U32;
+  entry->value_u8 = 0;
+  entry->value_u32 = value;
   return ESP_OK;
 }
 
@@ -207,6 +239,46 @@ esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key, void *out_value, si
   return ESP_OK;
 }
 
+esp_err_t nvs_get_str(nvs_handle_t handle, const char *key, char *out_value, size_t *length) {
+  test_nvs_handle_slot_t *slot = lookup_handle(handle);
+  test_nvs_entry_t *entry;
+
+  if (slot == NULL || key == NULL || length == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  entry = find_entry(slot->namespace_name, key);
+  if (entry == NULL || entry->type != TEST_NVS_TYPE_BLOB) {
+    return ESP_ERR_NVS_NOT_FOUND;
+  }
+
+  if (out_value == NULL) {
+    *length = entry->blob_size;
+    return ESP_OK;
+  }
+  if (*length < entry->blob_size) {
+    *length = entry->blob_size;
+    return ESP_ERR_NVS_INVALID_LENGTH;
+  }
+
+  memcpy(out_value, entry->blob, entry->blob_size);
+  *length = entry->blob_size;
+  return ESP_OK;
+}
+
+esp_err_t nvs_set_str(nvs_handle_t handle, const char *key, const char *value) {
+  test_nvs_handle_slot_t *slot = lookup_handle(handle);
+
+  if (slot == NULL || slot->mode != NVS_READWRITE) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  if (value == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  return test_nvs_seed_str(slot->namespace_name, key, value);
+}
+
 esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *value, size_t length) {
   test_nvs_handle_slot_t *slot = lookup_handle(handle);
 
@@ -242,6 +314,33 @@ esp_err_t nvs_set_u8(nvs_handle_t handle, const char *key, uint8_t value) {
   }
 
   return test_nvs_seed_u8(slot->namespace_name, key, value);
+}
+
+esp_err_t nvs_get_u32(nvs_handle_t handle, const char *key, uint32_t *out_value) {
+  test_nvs_handle_slot_t *slot = lookup_handle(handle);
+  test_nvs_entry_t *entry;
+
+  if (slot == NULL || key == NULL || out_value == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  entry = find_entry(slot->namespace_name, key);
+  if (entry == NULL || entry->type != TEST_NVS_TYPE_U32) {
+    return ESP_ERR_NVS_NOT_FOUND;
+  }
+
+  *out_value = entry->value_u32;
+  return ESP_OK;
+}
+
+esp_err_t nvs_set_u32(nvs_handle_t handle, const char *key, uint32_t value) {
+  test_nvs_handle_slot_t *slot = lookup_handle(handle);
+
+  if (slot == NULL || slot->mode != NVS_READWRITE) {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  return test_nvs_seed_u32(slot->namespace_name, key, value);
 }
 
 esp_err_t nvs_erase_key(nvs_handle_t handle, const char *key) {

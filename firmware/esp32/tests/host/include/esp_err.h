@@ -14,5 +14,9 @@ typedef int esp_err_t;
 #define ESP_ERR_INVALID_RESPONSE 0x109
 #define ESP_ERR_INVALID_VERSION 0x10A
 #define ESP_ERR_NVS_NOT_FOUND 0x1101
+#define ESP_ERR_NVS_INVALID_LENGTH 0x1102
+#define ESP_ERR_NVS_NO_FREE_PAGES 0x1103
+#define ESP_ERR_NVS_NEW_VERSION_FOUND 0x1104
+#define ESP_ERR_NVS_SEC_HMAC_KEY_NOT_FOUND 0x1110
 
 const char *esp_err_to_name(esp_err_t err);

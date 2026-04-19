@@ -664,6 +664,7 @@ static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, con
     ? view->setup_status_text
     : (language == CTRL_LANGUAGE_DE ? "Setup-Portal wird gestartet." : "Setup portal is starting.");
   char reset_body[160];
+  char recovery_actions[96];
   const int reset_progress = state != NULL ? (int)state->reset_progress : 0;
   const int reset_progress_pct = (reset_progress * 100) / 24;
 
@@ -678,23 +679,25 @@ static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, con
   set_hidden(ui->setup_reset_arc, !is_setup_reset_screen(state->screen));
   set_hidden(ui->setup_secondary_button, state->screen != CTRL_SCREEN_SETUP_RESET_CONFIRM);
   set_hidden(ui->setup_primary_button, state->screen != CTRL_SCREEN_SETUP_RESET_CONFIRM);
+  set_hidden(ui->setup_action_list, state->screen != CTRL_SCREEN_SETUP_RESET_CONFIRM);
 
   if (state->screen == CTRL_SCREEN_SETUP_RESET_ARM) {
     lv_obj_align(ui->setup_title, LV_ALIGN_TOP_MID, 0, 24);
     lv_obj_align(ui->setup_body, LV_ALIGN_BOTTOM_MID, 0, -6);
-    set_label_text(ui->setup_title, language == CTRL_LANGUAGE_DE ? "Netzwerk-Reset" : "Reset Network", COLOR_ACTIVE);
+    set_label_text(ui->setup_title, language == CTRL_LANGUAGE_DE ? "Zuruecksetzen" : "Reset", COLOR_ACTIVE);
     snprintf(
       reset_body,
       sizeof(reset_body),
       "%s\n\n%s",
       language == CTRL_LANGUAGE_DE
-        ? "Einmal im Uhrzeigersinn drehen, um den Reset zu aktivieren."
-        : "Rotate clockwise once to arm the network reset.",
+        ? "Einmal im Uhrzeigersinn drehen, um die Wiederherstellung zu oeffnen."
+        : "Rotate clockwise once to open recovery.",
       language == CTRL_LANGUAGE_DE
         ? "Nach unten wischen zum Abbrechen."
         : "Swipe down to cancel."
     );
     set_label_text(ui->setup_body, reset_body, COLOR_TEXT);
+    set_label_text(ui->setup_action_list, "", COLOR_TEXT);
     lv_arc_set_value(ui->setup_reset_arc, reset_progress_pct);
     set_hidden(ui->setup_qr, true);
     return;
@@ -702,21 +705,32 @@ static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, con
 
   if (state->screen == CTRL_SCREEN_SETUP_RESET_CONFIRM) {
     lv_obj_align(ui->setup_title, LV_ALIGN_TOP_MID, 0, 24);
-    lv_obj_align(ui->setup_body, LV_ALIGN_TOP_MID, 0, 66);
-    lv_obj_align(ui->setup_secondary_button, LV_ALIGN_CENTER, -50, 24);
-    lv_obj_align(ui->setup_primary_button, LV_ALIGN_CENTER, 50, 24);
-    set_label_text(ui->setup_title, language == CTRL_LANGUAGE_DE ? "Reset bestaetigen" : "Confirm Reset", COLOR_ACTIVE);
+    lv_obj_align(ui->setup_body, LV_ALIGN_TOP_MID, 0, 64);
+    lv_obj_align(ui->setup_action_list, LV_ALIGN_TOP_MID, 0, 102);
+    lv_obj_align(ui->setup_secondary_button, LV_ALIGN_CENTER, -50, 74);
+    lv_obj_align(ui->setup_primary_button, LV_ALIGN_CENTER, 50, 74);
+    set_label_text(ui->setup_title, language == CTRL_LANGUAGE_DE ? "Wiederherstellung" : "Recovery", COLOR_ACTIVE);
+    snprintf(
+      recovery_actions,
+      sizeof(recovery_actions),
+      "%s %s\n%s %s",
+      state->recovery_action == CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD ? ">" : " ",
+      language == CTRL_LANGUAGE_DE ? "Web-Passwort loeschen" : "Clear web password",
+      state->recovery_action == CTRL_RECOVERY_ACTION_RESET_NETWORK ? ">" : " ",
+      language == CTRL_LANGUAGE_DE ? "Netzwerk zuruecksetzen" : "Reset network"
+    );
     set_label_text(
       ui->setup_body,
       language == CTRL_LANGUAGE_DE
-        ? "WLAN, Cloud und Maschinenauswahl werden geloescht. Danach startet der Controller neu."
-        : "Wi-Fi, cloud account, and machine selection will be cleared. The controller will reboot after that.",
+        ? "Aktion mit dem Drehknopf waehlen."
+        : "Rotate to choose the recovery action.",
       COLOR_TEXT
     );
-    set_label_text(ui->setup_secondary_label, language == CTRL_LANGUAGE_DE ? "Nein" : "No", COLOR_TEXT);
-    set_label_text(ui->setup_primary_label, language == CTRL_LANGUAGE_DE ? "Ja" : "Yes", COLOR_BG);
-    style_action_button(ui->setup_secondary_button, ui->setup_secondary_label, !state->reset_confirm_yes);
-    style_action_button(ui->setup_primary_button, ui->setup_primary_label, state->reset_confirm_yes);
+    set_label_text(ui->setup_action_list, recovery_actions, COLOR_TEXT);
+    set_label_text(ui->setup_secondary_label, language == CTRL_LANGUAGE_DE ? "Zurueck" : "Back", COLOR_TEXT);
+    set_label_text(ui->setup_primary_label, language == CTRL_LANGUAGE_DE ? "Start" : "Run", COLOR_BG);
+    style_action_button(ui->setup_secondary_button, ui->setup_secondary_label, false);
+    style_action_button(ui->setup_primary_button, ui->setup_primary_label, true);
     lv_arc_set_value(ui->setup_reset_arc, 100);
     set_hidden(ui->setup_qr, true);
     return;
@@ -727,6 +741,7 @@ static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, con
   lv_obj_align_to(ui->setup_body, ui->setup_qr, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
   set_label_text(ui->setup_title, "Setup", COLOR_ACTIVE);
   set_label_text(ui->setup_body, body, COLOR_TEXT);
+  set_label_text(ui->setup_action_list, "", COLOR_TEXT);
 
   if (view != NULL &&
       view->setup_qr_payload[0] != '\0' &&
@@ -902,6 +917,15 @@ esp_err_t lm_ctrl_ui_init(
   lv_obj_set_style_text_align(ui->setup_body, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_align_to(ui->setup_body, ui->setup_qr, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
   lv_obj_add_event_cb(ui->setup_body, handle_setup_long_press, LV_EVENT_LONG_PRESSED, ui);
+
+  ui->setup_action_list = lv_label_create(ui->setup_card);
+  lv_obj_set_width(ui->setup_action_list, 236);
+  lv_label_set_long_mode(ui->setup_action_list, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_font(ui->setup_action_list, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_align(ui->setup_action_list, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(ui->setup_action_list, LV_ALIGN_TOP_MID, 0, 102);
+  lv_obj_add_event_cb(ui->setup_action_list, handle_setup_long_press, LV_EVENT_LONG_PRESSED, ui);
+  set_hidden(ui->setup_action_list, true);
 
   ui->setup_reset_arc = lv_arc_create(ui->screen);
   lv_obj_set_size(ui->setup_reset_arc, 314, 314);

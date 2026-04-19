@@ -9,6 +9,13 @@
 extern "C" {
 #endif
 
+/** Persisted LAN web-access policy for the setup portal outside the captive setup AP. */
+typedef enum {
+  LM_CTRL_WEB_AUTH_UNSET = 0,
+  LM_CTRL_WEB_AUTH_DISABLED,
+  LM_CTRL_WEB_AUTH_ENABLED,
+} lm_ctrl_web_auth_mode_t;
+
 /** Fixed on-device header logo width used for optional custom uploads. */
 #define LM_CTRL_CUSTOM_LOGO_WIDTH 150
 /** Fixed on-device header logo height used for optional custom uploads. */
@@ -25,9 +32,12 @@ typedef struct {
   bool cloud_connected;
   bool has_machine_selection;
   bool has_custom_logo;
+  bool has_cloud_provisioning;
+  bool debug_screenshot_enabled;
   bool portal_running;
   bool sta_connecting;
   bool sta_connected;
+  lm_ctrl_web_auth_mode_t web_auth_mode;
   ctrl_language_t language;
   char portal_ssid[33];
   char portal_password[65];

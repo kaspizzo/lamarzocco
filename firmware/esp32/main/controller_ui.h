@@ -88,6 +88,7 @@ struct lm_ctrl_ui_s {
   lv_obj_t *setup_title;
   lv_obj_t *setup_qr;
   lv_obj_t *setup_body;
+  lv_obj_t *setup_action_list;
   lv_obj_t *setup_reset_arc;
   lv_obj_t *setup_secondary_button;
   lv_obj_t *setup_secondary_label;

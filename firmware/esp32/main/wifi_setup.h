@@ -20,6 +20,21 @@ esp_err_t lm_ctrl_wifi_save_controller_preferences(const char *hostname, ctrl_la
 esp_err_t lm_ctrl_wifi_save_controller_logo(uint8_t schema_version, const uint8_t *logo_data, size_t logo_size);
 /** Remove the persisted custom header logo so the controller falls back to text. */
 esp_err_t lm_ctrl_wifi_clear_controller_logo(void);
+/** Persist or replace the cloud provisioning bundle used for signed La Marzocco requests. */
+esp_err_t lm_ctrl_wifi_save_cloud_provisioning(
+  const char *installation_id,
+  const uint8_t *secret,
+  const uint8_t *private_key_der,
+  size_t private_key_der_len
+);
+/** Persist a LAN admin password and require it for portal access outside the setup AP. */
+esp_err_t lm_ctrl_wifi_save_web_admin_password(const char *password);
+/** Disable LAN portal auth and clear the persisted admin password hash. */
+esp_err_t lm_ctrl_wifi_clear_web_admin_password(void);
+/** Verify a candidate LAN admin password against the persisted hash. */
+bool lm_ctrl_wifi_verify_web_admin_password(const char *password);
+/** Persist whether the remote debug screenshot endpoint is enabled. */
+esp_err_t lm_ctrl_wifi_set_debug_screenshot_enabled(bool enabled);
 /** Copy the latest Wi-Fi/cloud runtime state into the supplied structure. */
 void lm_ctrl_wifi_get_info(lm_ctrl_wifi_info_t *info);
 /** Return the optional custom header logo descriptor used by the on-device UI. */

@@ -59,6 +59,16 @@ static void send_chunk_if_not_empty(httpd_req_t *req, const char *text) {
   httpd_resp_sendstr_chunk(req, text);
 }
 
+static void send_csrf_hidden_input(httpd_req_t *req, const lm_ctrl_setup_portal_view_t *view) {
+  if (req == NULL || view == NULL || view->csrf_token_html[0] == '\0') {
+    return;
+  }
+
+  httpd_resp_sendstr_chunk(req, "<input type=\"hidden\" name=\"csrf_token\" value=\"");
+  httpd_resp_sendstr_chunk(req, view->csrf_token_html);
+  httpd_resp_sendstr_chunk(req, "\">");
+}
+
 static void send_nav(httpd_req_t *req) {
   httpd_resp_sendstr_chunk(
     req,
@@ -110,7 +120,9 @@ static void render_overview_section(httpd_req_t *req, const lm_ctrl_setup_portal
 static void render_controller_section(httpd_req_t *req, const lm_ctrl_setup_portal_view_t *view) {
   httpd_resp_sendstr_chunk(req, "<section id=\"controller-section\" class=\"stack preset-anchor\"><div class=\"section-head\"><h2>Controller</h2><p>Local controller identity, language, and optional header branding.</p></div>");
 
-  httpd_resp_sendstr_chunk(req, "<form class=\"section-card\" method=\"post\" action=\"/controller\"><label for=\"hostname\">Controller Hostname</label><input id=\"hostname\" name=\"hostname\" maxlength=\"32\" value=\"");
+  httpd_resp_sendstr_chunk(req, "<form class=\"section-card\" method=\"post\" action=\"/controller\">");
+  send_csrf_hidden_input(req, view);
+  httpd_resp_sendstr_chunk(req, "<label for=\"hostname\">Controller Hostname</label><input id=\"hostname\" name=\"hostname\" maxlength=\"32\" value=\"");
   send_chunk_if_not_empty(req, view->hostname_html);
   httpd_resp_sendstr_chunk(req, "\"><label for=\"language\">Controller Language</label><select id=\"language\" name=\"language\">");
   httpd_resp_sendstr_chunk(req, "<option value=\"en\"");
@@ -123,7 +135,9 @@ static void render_controller_section(httpd_req_t *req, const lm_ctrl_setup_port
   }
   httpd_resp_sendstr_chunk(req, ">Deutsch</option></select><div class=\"section-note\">Language only affects the on-device controller UI. English stays the default.</div><button type=\"submit\">Save Controller Settings</button></form>");
 
-  httpd_resp_sendstr_chunk(req, "<form class=\"section-card\"><h3>Header Logo</h3><div class=\"section-note\">Current header: <strong id=\"header-logo-state\">");
+  httpd_resp_sendstr_chunk(req, "<form class=\"section-card\"><h3>Header Logo</h3>");
+  send_csrf_hidden_input(req, view);
+  httpd_resp_sendstr_chunk(req, "<div class=\"section-note\">Current header: <strong id=\"header-logo-state\">");
   httpd_resp_sendstr_chunk(req, view->info.has_custom_logo ? "Custom logo installed" : "Default text");
   httpd_resp_sendstr_chunk(req, "</strong></div><label for=\"logo-file\">Local SVG File</label><input id=\"logo-file\" type=\"file\" accept=\".svg,image/svg+xml\"><div class=\"section-note\">Optional controller setting. The project does not ship official La Marzocco logos. Uploaded SVGs are rasterized in your browser, stored locally on this controller, and shown only on the device display.</div><div class=\"button-row\"><button type=\"button\" id=\"logo-upload-button\">Upload Logo</button><button class=\"secondary\" type=\"submit\" formaction=\"/controller-logo-clear\" formmethod=\"post\" onclick=\"return confirm('Remove the custom controller logo and fall back to the text header?');\">Remove Logo</button></div><div id=\"logo-upload-status\" class=\"section-note\"></div></form>");
   httpd_resp_sendstr_chunk(req, "</section>");
@@ -131,7 +145,9 @@ static void render_controller_section(httpd_req_t *req, const lm_ctrl_setup_port
 
 static void render_network_section(httpd_req_t *req, const lm_ctrl_setup_portal_view_t *view) {
   httpd_resp_sendstr_chunk(req, "<section id=\"network-section\" class=\"stack preset-anchor\"><div class=\"section-head\"><h2>Network</h2><p>Home Wi-Fi onboarding with scan-assisted SSID selection.</p></div>");
-  httpd_resp_sendstr_chunk(req, "<form class=\"section-card\" method=\"post\" action=\"/wifi\"><div class=\"button-row compact\"><button type=\"button\" id=\"scan-button\">Scan Nearby Networks</button></div><label for=\"network-list\">Nearby Networks</label><select id=\"network-list\"><option value=\"\">Select from scan results</option></select><label for=\"ssid\">Home Wi-Fi SSID</label><input id=\"ssid\" name=\"ssid\" maxlength=\"32\" required value=\"");
+  httpd_resp_sendstr_chunk(req, "<form class=\"section-card\" method=\"post\" action=\"/wifi\">");
+  send_csrf_hidden_input(req, view);
+  httpd_resp_sendstr_chunk(req, "<div class=\"button-row compact\"><button type=\"button\" id=\"scan-button\">Scan Nearby Networks</button></div><label for=\"network-list\">Nearby Networks</label><select id=\"network-list\"><option value=\"\">Select from scan results</option></select><label for=\"ssid\">Home Wi-Fi SSID</label><input id=\"ssid\" name=\"ssid\" maxlength=\"32\" required value=\"");
   send_chunk_if_not_empty(req, view->ssid_html);
   httpd_resp_sendstr_chunk(req, "\"><label for=\"password\">Wi-Fi Password</label><input id=\"password\" name=\"password\" type=\"password\" maxlength=\"64\"><div class=\"section-note\">Saving Wi-Fi starts a reconnect attempt immediately. Leave the password blank to keep the stored password for the same SSID.</div><button type=\"submit\">Save Wi-Fi And Connect</button></form></section>");
 }
@@ -139,12 +155,21 @@ static void render_network_section(httpd_req_t *req, const lm_ctrl_setup_portal_
 static void render_cloud_section(httpd_req_t *req, const lm_ctrl_setup_portal_view_t *view) {
   httpd_resp_sendstr_chunk(req, "<section id=\"cloud-section\" class=\"stack preset-anchor\"><div class=\"section-head\"><h2>Cloud</h2><p>Account onboarding, machine selection, and optional brew-by-weight values.</p></div>");
 
-  httpd_resp_sendstr_chunk(req, "<form class=\"section-card\" method=\"post\" action=\"/cloud\"><label for=\"cloud_username\">Account E-Mail</label><input id=\"cloud_username\" name=\"cloud_username\" type=\"email\" maxlength=\"95\" value=\"");
-  send_chunk_if_not_empty(req, view->cloud_user_html);
-  httpd_resp_sendstr_chunk(req, "\"><label for=\"cloud_password\">Account Password</label><input id=\"cloud_password\" name=\"cloud_password\" type=\"password\" maxlength=\"127\"><div class=\"section-note\">Saving verifies the account and loads the machine list from La Marzocco Cloud. It does not restart networking.</div><button type=\"submit\">Save Cloud Account And Load Machines</button></form>");
+  if (!view->info.has_cloud_provisioning) {
+    httpd_resp_sendstr_chunk(req, "<section class=\"section-card\"><h3>Cloud Setup Failed</h3><div class=\"section-note\">The controller could not prepare its local cloud identity automatically. Reboot once and try again. If the problem persists, use the recovery provisioning path.</div></section>");
+  }
+
+  if (view->info.has_cloud_provisioning) {
+    httpd_resp_sendstr_chunk(req, "<form class=\"section-card\" method=\"post\" action=\"/cloud\">");
+    send_csrf_hidden_input(req, view);
+    httpd_resp_sendstr_chunk(req, "<label for=\"cloud_username\">Account E-Mail</label><input id=\"cloud_username\" name=\"cloud_username\" type=\"email\" maxlength=\"95\" value=\"");
+    send_chunk_if_not_empty(req, view->cloud_user_html);
+    httpd_resp_sendstr_chunk(req, "\"><label for=\"cloud_password\">Account Password</label><input id=\"cloud_password\" name=\"cloud_password\" type=\"password\" maxlength=\"127\"><div class=\"section-note\">Saving verifies the account and loads the machine list from La Marzocco Cloud. It does not restart networking.</div><button type=\"submit\">Save Cloud Account And Load Machines</button></form>");
+  }
 
   if (view->info.has_cloud_credentials) {
     httpd_resp_sendstr_chunk(req, "<form class=\"section-card\" method=\"post\" action=\"/cloud-refresh\"><h3>Cloud Machines</h3>");
+    send_csrf_hidden_input(req, view);
     if (view->info.has_machine_selection) {
       httpd_resp_sendstr_chunk(req, "<div class=\"machine-pill\">Selected: ");
       send_chunk_if_not_empty(req, view->selected_machine_html);
@@ -156,7 +181,9 @@ static void render_cloud_section(httpd_req_t *req, const lm_ctrl_setup_portal_vi
   }
 
   if (view->fleet_count > 0) {
-    httpd_resp_sendstr_chunk(req, "<form class=\"section-card\" method=\"post\" action=\"/cloud-machine\"><h3>Select Machine</h3><label for=\"machine_serial\">Machine</label><select id=\"machine_serial\" name=\"machine_serial\" required>");
+    httpd_resp_sendstr_chunk(req, "<form class=\"section-card\" method=\"post\" action=\"/cloud-machine\"><h3>Select Machine</h3>");
+    send_csrf_hidden_input(req, view);
+    httpd_resp_sendstr_chunk(req, "<label for=\"machine_serial\">Machine</label><select id=\"machine_serial\" name=\"machine_serial\" required>");
     for (size_t i = 0; i < view->fleet_count; ++i) {
       char machine_serial_html[96];
       char machine_name_html[160];
@@ -208,7 +235,9 @@ static void render_cloud_section(httpd_req_t *req, const lm_ctrl_setup_portal_vi
       (double)((view->dashboard_loaded_mask & LM_CTRL_MACHINE_FIELD_BBW_DOSE_2) != 0 ? view->dashboard_values.bbw_dose_2_g : 34.0f)
     );
 
-    httpd_resp_sendstr_chunk(req, "<form class=\"section-card\" method=\"post\" action=\"/bbw\"><h3>Brew By Weight</h3><div class=\"section-note\">Shown because the cloud dashboard reports brew by weight support for the selected machine.</div><label for=\"bbw_mode\">Mode</label><select id=\"bbw_mode\" name=\"bbw_mode\"><option value=\"Dose1\"");
+    httpd_resp_sendstr_chunk(req, "<form class=\"section-card\" method=\"post\" action=\"/bbw\"><h3>Brew By Weight</h3>");
+    send_csrf_hidden_input(req, view);
+    httpd_resp_sendstr_chunk(req, "<div class=\"section-note\">Shown because the cloud dashboard reports brew by weight support for the selected machine.</div><label for=\"bbw_mode\">Mode</label><select id=\"bbw_mode\" name=\"bbw_mode\"><option value=\"Dose1\"");
     if (view->dashboard_values.bbw_mode == CTRL_BBW_MODE_DOSE_1) {
       httpd_resp_sendstr_chunk(req, " selected");
     }
@@ -279,7 +308,9 @@ static void render_recipe_card(httpd_req_t *req, const lm_ctrl_setup_portal_view
   httpd_resp_sendstr_chunk(req, preset_display_name_html);
   httpd_resp_sendstr_chunk(req, "</div></div><div class=\"summary-meta\">");
   httpd_resp_sendstr_chunk(req, preset_summary_html);
-  httpd_resp_sendstr_chunk(req, "</div></summary><form method=\"post\" action=\"/preset\"><input type=\"hidden\" name=\"preset_slot\" value=\"");
+  httpd_resp_sendstr_chunk(req, "</div></summary><form method=\"post\" action=\"/preset\">");
+  send_csrf_hidden_input(req, view);
+  httpd_resp_sendstr_chunk(req, "<input type=\"hidden\" name=\"preset_slot\" value=\"");
   httpd_resp_sendstr_chunk(req, preset_slot_text);
   httpd_resp_sendstr_chunk(req, "\"><label for=\"preset_name_");
   httpd_resp_sendstr_chunk(req, preset_slot_text);
@@ -349,7 +380,9 @@ static void render_advanced_section(httpd_req_t *req, const lm_ctrl_setup_portal
   snprintf(preset_count_text, sizeof(preset_count_text), "%u", (unsigned)view->preset_count);
   httpd_resp_sendstr_chunk(req, "<section id=\"advanced-section\" class=\"stack preset-anchor\"><div class=\"section-head\"><h2>Advanced</h2><p>Optional power-user settings that change controller editing behavior.</p></div><form class=\"section-card\" id=\"advanced-form\" method=\"post\" action=\"/controller-advanced\" data-current-preset-count=\"");
   httpd_resp_sendstr_chunk(req, preset_count_text);
-  httpd_resp_sendstr_chunk(req, "\"><div class=\"field-grid\"><div><label for=\"preset_count\">Preset Count</label><select id=\"preset_count\" name=\"preset_count\">");
+  httpd_resp_sendstr_chunk(req, "\">");
+  send_csrf_hidden_input(req, view);
+  httpd_resp_sendstr_chunk(req, "<div class=\"field-grid\"><div><label for=\"preset_count\">Preset Count</label><select id=\"preset_count\" name=\"preset_count\">");
   for (int preset_count = 2; preset_count <= CTRL_PRESET_MAX_COUNT; ++preset_count) {
     char option_value[8];
 
@@ -370,7 +403,30 @@ static void render_advanced_section(httpd_req_t *req, const lm_ctrl_setup_portal
   send_time_step_options(req, view->time_step_s);
   httpd_resp_sendstr_chunk(req, "</select></div></div><input type=\"hidden\" id=\"preset_reduce_confirm\" name=\"preset_reduce_confirm\" value=\"\"><div class=\"section-note\">These settings apply to both this portal and the on-device rotary controls. Reducing the preset count deletes the hidden higher-numbered presets after confirmation.</div><button type=\"submit\">Save Advanced Settings</button></form>");
 
-  httpd_resp_sendstr_chunk(req, "<form class=\"section-card\"><h3>System Actions</h3><div class=\"section-note\">Use these actions when you want to restart the controller or wipe onboarding data.</div><div class=\"button-row\"><button class=\"secondary\" type=\"submit\" formaction=\"/reboot\" formmethod=\"post\">Reboot Controller</button><button class=\"secondary\" type=\"submit\" formaction=\"/reset-network\" formmethod=\"post\" onclick=\"return confirm('Clear Wi-Fi, cloud account, and machine selection?');\">Reset Network Setup</button><button class=\"danger\" type=\"submit\" formaction=\"/factory-reset\" formmethod=\"post\" onclick=\"return confirm('Factory reset the controller and erase presets?');\">Factory Reset</button></div></form></section>");
+  httpd_resp_sendstr_chunk(req, "<form class=\"section-card\" method=\"post\" action=\"/debug-screenshot-toggle\"><h3>Remote Screenshot</h3>");
+  send_csrf_hidden_input(req, view);
+  httpd_resp_sendstr_chunk(req, "<label class=\"toggle-row\" for=\"debug_screenshot_enabled\"><input id=\"debug_screenshot_enabled\" name=\"enabled\" type=\"checkbox\" value=\"1\"");
+  if (view->info.debug_screenshot_enabled) {
+    httpd_resp_sendstr_chunk(req, " checked");
+  }
+  httpd_resp_sendstr_chunk(req, "><span>Enable Remote Screenshot</span></label><div class=\"section-note\">When enabled, <code>/debug/screenshot.bmp</code> returns the current controller screen as a BMP after the normal portal access checks.");
+  if (view->info.debug_screenshot_enabled) {
+    httpd_resp_sendstr_chunk(req, " <a class=\"inline-link\" href=\"/debug/screenshot.bmp\" target=\"_blank\" rel=\"noopener noreferrer\">Open Screenshot</a>");
+  }
+  httpd_resp_sendstr_chunk(req, "</div><div class=\"button-row compact\"><button type=\"submit\">Save Screenshot Setting</button></div></form>");
+
+  httpd_resp_sendstr_chunk(req, "<form class=\"section-card\" method=\"post\" action=\"/admin-password\"><h3>LAN Admin Password</h3>");
+  send_csrf_hidden_input(req, view);
+  if (view->info.web_auth_mode == LM_CTRL_WEB_AUTH_ENABLED && !view->info.portal_running) {
+    httpd_resp_sendstr_chunk(req, "<label for=\"web_password\">New Admin Password</label><input id=\"web_password\" name=\"web_password\" type=\"password\" maxlength=\"63\"><label for=\"web_password_confirm\">Confirm New Password</label><input id=\"web_password_confirm\" name=\"web_password_confirm\" type=\"password\" maxlength=\"63\"><div class=\"section-note\">The LAN portal is currently protected. Saving a new password keeps the portal protected; removing it leaves the home-network portal open again.</div><div class=\"button-row\"><button type=\"submit\" name=\"mode\" value=\"set\">Save Admin Password</button><button class=\"secondary\" type=\"submit\" name=\"mode\" value=\"clear\" onclick=\"return confirm('Disable the LAN admin password and leave the portal open in the home network?');\">Remove Password Protection</button><a class=\"secondary action-link\" href=\"/logout\">Log Out</a></div>");
+  } else {
+    httpd_resp_sendstr_chunk(req, "<label for=\"web_password\">Admin Password</label><input id=\"web_password\" name=\"web_password\" type=\"password\" maxlength=\"63\"><label for=\"web_password_confirm\">Confirm Password</label><input id=\"web_password_confirm\" name=\"web_password_confirm\" type=\"password\" maxlength=\"63\"><div class=\"section-note\">Optional for home-network use. If you leave the LAN portal open, every device in the same network can reconfigure this controller.</div><button type=\"submit\" name=\"mode\" value=\"set\">Enable Admin Password</button>");
+  }
+  httpd_resp_sendstr_chunk(req, "</form>");
+
+  httpd_resp_sendstr_chunk(req, "<form class=\"section-card\">");
+  send_csrf_hidden_input(req, view);
+  httpd_resp_sendstr_chunk(req, "<h3>System Actions</h3><div class=\"section-note\">Use these actions when you want to restart the controller or wipe onboarding data.</div><div class=\"button-row\"><button class=\"secondary\" type=\"submit\" formaction=\"/reboot\" formmethod=\"post\">Reboot Controller</button><button class=\"secondary\" type=\"submit\" formaction=\"/reset-network\" formmethod=\"post\" onclick=\"return confirm('Clear Wi-Fi, cloud account, and machine selection?');\">Reset Network Setup</button><button class=\"danger\" type=\"submit\" formaction=\"/factory-reset\" formmethod=\"post\" onclick=\"return confirm('Factory reset the controller and erase presets?');\">Factory Reset</button></div></form></section>");
 }
 
 static void render_diagnostics_section(httpd_req_t *req, const lm_ctrl_setup_portal_view_t *view) {
@@ -379,10 +435,14 @@ static void render_diagnostics_section(httpd_req_t *req, const lm_ctrl_setup_por
   httpd_resp_sendstr_chunk(req, "</pre></section></section>");
 }
 
-static void send_page_script(httpd_req_t *req, const char *history_target) {
+static void send_page_script(httpd_req_t *req, const lm_ctrl_setup_portal_view_t *view, const char *history_target) {
+  httpd_resp_sendstr_chunk(req, "<script>const csrfToken='");
+  if (view != NULL) {
+    send_chunk_if_not_empty(req, view->csrf_token_html);
+  }
   httpd_resp_sendstr_chunk(
     req,
-    "<script>"
+    "';"
     "const scanButton=document.getElementById('scan-button');"
     "const networkList=document.getElementById('network-list');"
     "const ssidInput=document.getElementById('ssid');"
@@ -393,16 +453,18 @@ static void send_page_script(httpd_req_t *req, const char *history_target) {
     "const advancedForm=document.getElementById('advanced-form');"
     "const presetCountSelect=document.getElementById('preset_count');"
     "const presetReduceConfirm=document.getElementById('preset_reduce_confirm');"
+    "const debugScreenshotToggle=document.getElementById('debug_screenshot_enabled');"
     "const LOGO_WIDTH=150;"
     "const LOGO_HEIGHT=26;"
     "const LOGO_VERSION=1;"
+    "const buildHeaders=(contentType)=>{const headers={};if(contentType){headers['Content-Type']=contentType;}if(csrfToken){headers['X-CSRF-Token']=csrfToken;}return headers;};"
     "const setLogoStatus=(text,isError)=>{if(!logoUploadStatus){return;}logoUploadStatus.textContent=text||'';logoUploadStatus.style.color=isError?'#ffb4a8':'#d5c1ae';};"
     "const readSvgText=(file)=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(typeof reader.result==='string'?reader.result:'');reader.onerror=()=>reject(new Error('Could not read the SVG file.'));reader.readAsText(file);});"
     "const loadSvgImage=(svgText)=>new Promise((resolve,reject)=>{const url=URL.createObjectURL(new Blob([svgText],{type:'image/svg+xml'}));const image=new Image();image.onload=()=>{URL.revokeObjectURL(url);resolve(image);};image.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('Could not decode the SVG file.'));};image.src=url;});"
     "const bytesToBase64=(bytes)=>{let binary='';const chunkSize=0x8000;for(let i=0;i<bytes.length;i+=chunkSize){binary+=String.fromCharCode(...bytes.subarray(i,i+chunkSize));}return btoa(binary);};"
     "const rasterizeSvgToLvgl=(image)=>{const canvas=document.createElement('canvas');canvas.width=LOGO_WIDTH;canvas.height=LOGO_HEIGHT;const ctx=canvas.getContext('2d');if(!ctx){throw new Error('Canvas rendering is not available.');}ctx.clearRect(0,0,LOGO_WIDTH,LOGO_HEIGHT);const sourceWidth=image.naturalWidth||image.width;const sourceHeight=image.naturalHeight||image.height;if(!sourceWidth||!sourceHeight){throw new Error('The SVG has no usable size.');}const scale=Math.min(LOGO_WIDTH/sourceWidth,LOGO_HEIGHT/sourceHeight);const drawWidth=sourceWidth*scale;const drawHeight=sourceHeight*scale;ctx.drawImage(image,(LOGO_WIDTH-drawWidth)/2,(LOGO_HEIGHT-drawHeight)/2,drawWidth,drawHeight);const rgba=ctx.getImageData(0,0,LOGO_WIDTH,LOGO_HEIGHT).data;const output=new Uint8Array(LOGO_WIDTH*LOGO_HEIGHT*3);for(let i=0,j=0;i<rgba.length;i+=4,j+=3){const r=rgba[i];const g=rgba[i+1];const b=rgba[i+2];const a=rgba[i+3];output[j]=((r&0xF8)|((g>>5)&0x07));output[j+1]=(((g&0x1C)<<3)|((b>>3)&0x1F));output[j+2]=a;}return output;};"
-    "if(scanButton&&networkList&&ssidInput){scanButton.addEventListener('click',async()=>{scanButton.disabled=true;scanButton.textContent='Scanning...';try{const response=await fetch('/wifi-scan');const data=await response.json();networkList.innerHTML='<option value=\"\">Select from scan results</option>';(data.ssids||[]).forEach((ssid)=>{const option=document.createElement('option');option.value=ssid;option.textContent=ssid;networkList.appendChild(option);});scanButton.textContent=(data.ssids||[]).length?'Scan Again':'No Networks Found';}catch(error){scanButton.textContent='Scan Failed';}finally{scanButton.disabled=false;}});networkList.addEventListener('change',()=>{if(networkList.value){ssidInput.value=networkList.value;}});}"
-    "if(logoUploadButton&&logoFileInput){logoUploadButton.addEventListener('click',async()=>{const file=logoFileInput&&logoFileInput.files?logoFileInput.files[0]:null;if(!file){setLogoStatus('Choose an SVG file first.',true);return;}if(!/\\.svg$/i.test(file.name)&&file.type!=='image/svg+xml'){setLogoStatus('Only SVG uploads are supported.',true);return;}logoUploadButton.disabled=true;logoUploadButton.textContent='Uploading...';setLogoStatus('',false);try{const svgText=await readSvgText(file);const image=await loadSvgImage(svgText);const logoBytes=rasterizeSvgToLvgl(image);const response=await fetch('/controller-logo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({version:LOGO_VERSION,width:LOGO_WIDTH,height:LOGO_HEIGHT,data:bytesToBase64(logoBytes)})});const payload=await response.json().catch(()=>({ok:false,message:'Unexpected response from controller.'}));if(!response.ok||!payload.ok){throw new Error(payload.message||'Upload failed.');}if(logoState){logoState.textContent='Custom logo installed';}setLogoStatus(payload.message||'Custom logo saved.',false);logoFileInput.value='';}catch(error){setLogoStatus(error&&error.message?error.message:'Upload failed.',true);}finally{logoUploadButton.disabled=false;logoUploadButton.textContent='Upload Logo';}});}"
+    "if(scanButton&&networkList&&ssidInput){scanButton.addEventListener('click',async()=>{scanButton.disabled=true;scanButton.textContent='Scanning...';try{const response=await fetch('/wifi-scan',{headers:buildHeaders(),credentials:'same-origin'});const data=await response.json();networkList.innerHTML='<option value=\"\">Select from scan results</option>';(data.ssids||[]).forEach((ssid)=>{const option=document.createElement('option');option.value=ssid;option.textContent=ssid;networkList.appendChild(option);});scanButton.textContent=(data.ssids||[]).length?'Scan Again':'No Networks Found';}catch(error){scanButton.textContent='Scan Failed';}finally{scanButton.disabled=false;}});networkList.addEventListener('change',()=>{if(networkList.value){ssidInput.value=networkList.value;}});}"
+    "if(logoUploadButton&&logoFileInput){logoUploadButton.addEventListener('click',async()=>{const file=logoFileInput&&logoFileInput.files?logoFileInput.files[0]:null;if(!file){setLogoStatus('Choose an SVG file first.',true);return;}if(!/\\.svg$/i.test(file.name)&&file.type!=='image/svg+xml'){setLogoStatus('Only SVG uploads are supported.',true);return;}logoUploadButton.disabled=true;logoUploadButton.textContent='Uploading...';setLogoStatus('',false);try{const svgText=await readSvgText(file);const image=await loadSvgImage(svgText);const logoBytes=rasterizeSvgToLvgl(image);const response=await fetch('/controller-logo',{method:'POST',headers:buildHeaders('application/json'),credentials:'same-origin',body:JSON.stringify({version:LOGO_VERSION,width:LOGO_WIDTH,height:LOGO_HEIGHT,data:bytesToBase64(logoBytes)})});const payload=await response.json().catch(()=>({ok:false,message:'Unexpected response from controller.'}));if(!response.ok||!payload.ok){throw new Error(payload.message||'Upload failed.');}if(logoState){logoState.textContent='Custom logo installed';}setLogoStatus(payload.message||'Custom logo saved.',false);logoFileInput.value='';}catch(error){setLogoStatus(error&&error.message?error.message:'Upload failed.',true);}finally{logoUploadButton.disabled=false;logoUploadButton.textContent='Upload Logo';}});}"
     "if(advancedForm&&presetCountSelect&&presetReduceConfirm){advancedForm.addEventListener('submit',(event)=>{const currentCount=Number(advancedForm.dataset.currentPresetCount||'0');const nextCount=Number(presetCountSelect.value||'0');presetReduceConfirm.value='';if(!currentCount||nextCount>=currentCount){return;}const deleted=[];for(let index=nextCount+1;index<=currentCount;index+=1){deleted.push(`Preset ${index}`);}const message=`Reducing the preset count from ${currentCount} to ${nextCount} permanently deletes ${deleted.join(' and ')}. Continue?`;if(!window.confirm(message)){event.preventDefault();return;}presetReduceConfirm.value='1';});}"
     "</script>"
   );
@@ -427,10 +489,19 @@ const char *lm_ctrl_setup_portal_history_target(const char *uri) {
     return "/#advanced-section";
   }
 
+  if (strcmp(uri, "/debug-screenshot-toggle") == 0) {
+    return "/#advanced-section";
+  }
+
+  if (strcmp(uri, "/admin-password") == 0) {
+    return "/#advanced-section";
+  }
+
   if (strcmp(uri, "/cloud") == 0 ||
       strcmp(uri, "/cloud-refresh") == 0 ||
       strcmp(uri, "/cloud-machine") == 0 ||
-      strcmp(uri, "/bbw") == 0) {
+      strcmp(uri, "/bbw") == 0 ||
+      strcmp(uri, "/cloud-provisioning") == 0) {
     return "/#cloud-section";
   }
 
@@ -440,6 +511,10 @@ const char *lm_ctrl_setup_portal_history_target(const char *uri) {
 
   if (strcmp(uri, "/wifi") == 0) {
     return "/#network-section";
+  }
+
+  if (strcmp(uri, "/login") == 0 || strcmp(uri, "/access-setup") == 0) {
+    return "/";
   }
 
   return NULL;
@@ -463,13 +538,14 @@ esp_err_t lm_ctrl_setup_portal_send_page(
     "<style>"
     "body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#120d0a;color:#f4efe7;padding:24px;margin:0;}"
     "main{max-width:760px;margin:0 auto;}h1{margin:0 0 8px;font-size:32px;}h2{margin:0;font-size:22px;color:#ffc685;}h3{margin:0 0 8px;font-size:18px;color:#ffc685;}p{color:#d5c1ae;margin:0;}"
-    "label{display:block;margin:14px 0 6px;color:#ffc685;font-weight:600;}input,select{width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1px solid #5d4128;background:#1a120d;color:#f4efe7;}"
+    "label{display:block;margin:14px 0 6px;color:#ffc685;font-weight:600;}input,select,textarea{width:100%;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1px solid #5d4128;background:#1a120d;color:#f4efe7;font:inherit;}"
     "button{margin-top:18px;padding:12px 18px;border:none;border-radius:14px;background:#ffc685;color:#120d0a;font-weight:700;cursor:pointer;}"
     "pre{white-space:pre-wrap;background:#1a120d;padding:16px;border-radius:16px;border:1px solid #5d4128;margin:0;}"
-    ".banner{color:#ffc685;font-weight:700;margin:12px 0;}.section-note{margin-top:6px;font-size:14px;color:#d5c1ae;line-height:1.45;}"
+    ".banner{color:#ffc685;font-weight:700;margin:12px 0;}.warning{margin:12px 0;padding:14px 16px;border-radius:16px;border:1px solid #b56c3e;background:#2d1a11;color:#ffd0a6;font-weight:600;line-height:1.45;}.section-note{margin-top:6px;font-size:14px;color:#d5c1ae;line-height:1.45;}"
     ".secondary{background:#3a281d;color:#f4efe7;}.danger{background:#7f3328;color:#fff7f2;}"
     ".machine-pill{margin-top:12px;padding:12px 14px;border-radius:14px;background:#1a120d;border:1px solid #5d4128;}"
-    ".button-row{display:flex;gap:12px;flex-wrap:wrap;}.button-row button{flex:1 1 180px;}.button-row.compact button{flex:0 0 auto;}"
+    ".button-row{display:flex;gap:12px;flex-wrap:wrap;}.button-row button,.button-row .action-link{flex:1 1 180px;}.button-row.compact button{flex:0 0 auto;}"
+    ".toggle-row{display:flex;align-items:center;gap:10px;margin:16px 0 0;font-weight:600;color:#f4efe7;}.toggle-row input{width:auto;margin:0;}.inline-link{color:#ffc685;font-weight:600;text-decoration:none;}.inline-link:hover{text-decoration:underline;}"
     ".topnav{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0 18px;}.topnav a{padding:10px 14px;border-radius:999px;border:1px solid #5d4128;background:#261a13;color:#f4efe7;text-decoration:none;font-weight:600;}"
     ".topnav a:hover{border-color:#926333;color:#ffc685;}.stack{display:grid;gap:18px;margin-top:18px;}.section-head{display:grid;gap:6px;}"
     ".section-card{background:#261a13;border:1px solid #926333;border-radius:22px;padding:18px;display:grid;gap:0;}.preset-anchor{scroll-margin-top:24px;}"
@@ -478,11 +554,15 @@ esp_err_t lm_ctrl_setup_portal_send_page(
     ".preset-card summary::-webkit-details-marker{display:none;}.preset-card[open] summary{border-bottom:1px solid #5d4128;background:#211710;}"
     ".summary-name{margin-top:4px;color:#d5c1ae;font-size:14px;}.summary-meta{color:#b7a08b;font-size:14px;line-height:1.4;text-align:right;max-width:320px;}"
     ".preset-card form{padding:0 18px 18px;margin:0;background:transparent;border:none;border-radius:0;}"
+    ".action-link{margin-top:18px;padding:12px 18px;border-radius:14px;background:#3a281d;color:#f4efe7;text-decoration:none;font-weight:700;text-align:center;}"
     "@media (max-width:640px){body{padding:16px;}main{max-width:none;}.preset-card summary{flex-direction:column;}.summary-meta{text-align:left;max-width:none;}}"
     "</style></head><body><main>"
   );
 
   httpd_resp_sendstr_chunk(req, "<h1>Controller Setup</h1><p>Use this page to store the La Marzocco cloud account, home Wi-Fi settings, and optional advanced controller editing behavior.</p>");
+  if (!view->info.portal_running && view->info.web_auth_mode == LM_CTRL_WEB_AUTH_DISABLED) {
+    httpd_resp_sendstr_chunk(req, "<div class=\"warning\">The LAN portal is intentionally left open. Every device in the same home network can reconfigure this controller until you enable an admin password.</div>");
+  }
   if (view->banner_html[0] != '\0') {
     httpd_resp_sendstr_chunk(req, "<div class=\"banner\">");
     httpd_resp_sendstr_chunk(req, view->banner_html);
@@ -497,7 +577,7 @@ esp_err_t lm_ctrl_setup_portal_send_page(
   render_recipes_section(req, view);
   render_advanced_section(req, view);
   render_diagnostics_section(req, view);
-  send_page_script(req, history_target);
+  send_page_script(req, view, history_target);
 
   httpd_resp_sendstr_chunk(req, "</main></body></html>");
   httpd_resp_sendstr_chunk(req, NULL);

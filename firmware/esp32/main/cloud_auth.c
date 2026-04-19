@@ -12,6 +12,7 @@
 
 #include "cloud_auth_internal.h"
 #include "cloud_live_updates.h"
+#include "controller_settings.h"
 
 static const char *TAG = "lm_cloud_auth";
 
@@ -28,6 +29,35 @@ static void append_text(char *buffer, size_t buffer_size, const char *text) {
   }
 
   snprintf(buffer + used, buffer_size - used, "%s", text);
+}
+
+static void free_sensitive_string(char **value) {
+  if (value == NULL || *value == NULL) {
+    return;
+  }
+
+  secure_zero(*value, strlen(*value));
+  free(*value);
+  *value = NULL;
+}
+
+static void clear_installation_material(
+  char *installation_id,
+  size_t installation_id_size,
+  uint8_t *secret,
+  size_t secret_size,
+  uint8_t *private_key_der,
+  size_t private_key_der_size
+) {
+  if (installation_id != NULL && installation_id_size > 0) {
+    secure_zero(installation_id, installation_id_size);
+  }
+  if (secret != NULL && secret_size > 0) {
+    secure_zero(secret, secret_size);
+  }
+  if (private_key_der != NULL && private_key_der_size > 0) {
+    secure_zero(private_key_der, private_key_der_size);
+  }
 }
 
 static void mark_cloud_http_request_started(void) {
@@ -104,18 +134,6 @@ esp_err_t lm_ctrl_cloud_auth_http_request_capture(
   }
 
   return ret;
-}
-
-static esp_err_t base64_decode_bytes(const char *input, uint8_t *output, size_t output_size, size_t *output_len) {
-  int ret;
-
-  if (input == NULL || output == NULL || output_len == NULL) {
-    return ESP_ERR_INVALID_ARG;
-  }
-
-  *output_len = 0;
-  ret = mbedtls_base64_decode(output, output_size, output_len, (const unsigned char *)input, strlen(input));
-  return ret == 0 ? ESP_OK : ESP_FAIL;
 }
 
 static bool parse_cloud_access_token_jwt_times(
@@ -306,17 +324,10 @@ static esp_err_t generate_request_proof_text(
 }
 
 static esp_err_t set_cloud_installation_registration(bool registered) {
-  lock_state();
-  s_state.cloud_installation_registered = registered;
-  unlock_state();
-  return ESP_OK;
+  return lm_ctrl_settings_set_cloud_installation_registered(registered);
 }
 
 static esp_err_t ensure_cloud_installation(void) {
-  uint8_t secret[LM_CTRL_CLOUD_SECRET_LEN];
-  uint8_t key_der[LM_CTRL_PRIVATE_KEY_DER_MAX];
-  size_t secret_len = 0;
-  size_t key_der_len = 0;
   esp_err_t ret;
 
   lock_state();
@@ -325,29 +336,13 @@ static esp_err_t ensure_cloud_installation(void) {
     return ESP_OK;
   }
   unlock_state();
-
-  ret = base64_decode_bytes(LM_CTRL_STATIC_INSTALLATION_SECRET_B64, secret, sizeof(secret), &secret_len);
-  if (ret != ESP_OK || secret_len != LM_CTRL_CLOUD_SECRET_LEN) {
-    ESP_LOGE(TAG, "Failed to decode static cloud secret");
-    return ESP_FAIL;
+  ret = lm_ctrl_settings_ensure_cloud_provisioning();
+  if (ret == ESP_OK) {
+    return ESP_OK;
   }
 
-  ret = base64_decode_bytes(LM_CTRL_STATIC_PRIVATE_KEY_B64, key_der, sizeof(key_der), &key_der_len);
-  if (ret != ESP_OK || key_der_len == 0) {
-    ESP_LOGE(TAG, "Failed to decode static cloud private key");
-    return ret;
-  }
-
-  lock_state();
-  copy_text(s_state.cloud_installation_id, sizeof(s_state.cloud_installation_id), LM_CTRL_STATIC_INSTALLATION_ID);
-  memcpy(s_state.cloud_secret, secret, sizeof(secret));
-  memcpy(s_state.cloud_private_key_der, key_der, key_der_len);
-  s_state.cloud_private_key_der_len = key_der_len;
-  s_state.cloud_installation_registered = false;
-  s_state.cloud_installation_ready = true;
-  unlock_state();
-
-  return ESP_OK;
+  ESP_LOGW(TAG, "Cloud installation key generation failed: %s", esp_err_to_name(ret));
+  return ret;
 }
 
 static esp_err_t build_signed_request_headers(
@@ -422,7 +417,7 @@ static esp_err_t ensure_cloud_registration(char *error_text, size_t error_text_s
     if (error_text != NULL && error_text_size > 0) {
       snprintf(error_text, error_text_size, "Cloud installation setup failed.");
     }
-    return ret;
+    goto cleanup;
   }
 
   lock_state();
@@ -449,7 +444,7 @@ static esp_err_t ensure_cloud_registration(char *error_text, size_t error_text_s
     if (error_text != NULL && error_text_size > 0) {
       snprintf(error_text, error_text_size, "Cloud key material could not be prepared.");
     }
-    return ret;
+    goto cleanup;
   }
 
   ret = generate_request_proof_text(base_string, secret, request_proof, sizeof(request_proof));
@@ -457,21 +452,24 @@ static esp_err_t ensure_cloud_registration(char *error_text, size_t error_text_s
     if (error_text != NULL && error_text_size > 0) {
       snprintf(error_text, error_text_size, "Cloud registration proof failed.");
     }
-    return ret;
+    goto cleanup;
   }
 
   body_root = cJSON_CreateObject();
   if (body_root == NULL) {
-    return ESP_ERR_NO_MEM;
+    ret = ESP_ERR_NO_MEM;
+    goto cleanup;
   }
   if (!cJSON_AddStringToObject(body_root, "pk", public_key_b64)) {
-    cJSON_Delete(body_root);
-    return ESP_ERR_NO_MEM;
+    ret = ESP_ERR_NO_MEM;
+    goto cleanup;
   }
   request_body = cJSON_PrintUnformatted(body_root);
   cJSON_Delete(body_root);
+  body_root = NULL;
   if (request_body == NULL) {
-    return ESP_ERR_NO_MEM;
+    ret = ESP_ERR_NO_MEM;
+    goto cleanup;
   }
 
   headers[0] = (lm_ctrl_cloud_http_header_t){ .name = "Content-Type", .value = "application/json" };
@@ -490,24 +488,37 @@ static esp_err_t ensure_cloud_registration(char *error_text, size_t error_text_s
     &response_body,
     &status_code
   );
-  free(request_body);
+  free_sensitive_string(&request_body);
   if (ret != ESP_OK) {
     if (error_text != NULL && error_text_size > 0) {
       snprintf(error_text, error_text_size, "Cloud registration request failed.");
     }
-    return ret;
+    goto cleanup;
   }
 
   if (status_code < 200 || status_code >= 300) {
-    free(response_body);
+    free_sensitive_string(&response_body);
     if (error_text != NULL && error_text_size > 0) {
       snprintf(error_text, error_text_size, "Cloud registration failed with status %d.", status_code);
     }
-    return ESP_FAIL;
+    ret = ESP_FAIL;
+    goto cleanup;
   }
 
-  free(response_body);
-  return set_cloud_installation_registration(true);
+  free_sensitive_string(&response_body);
+  ret = set_cloud_installation_registration(true);
+
+cleanup:
+  if (body_root != NULL) {
+    cJSON_Delete(body_root);
+  }
+  free_sensitive_string(&request_body);
+  free_sensitive_string(&response_body);
+  clear_installation_material(installation_id, sizeof(installation_id), secret, sizeof(secret), private_key_der, sizeof(private_key_der));
+  secure_zero(public_key_b64, sizeof(public_key_b64));
+  secure_zero(base_string, sizeof(base_string));
+  secure_zero(request_proof, sizeof(request_proof));
+  return ret;
 }
 
 static esp_err_t fetch_cloud_access_token(
@@ -529,7 +540,7 @@ static esp_err_t fetch_cloud_access_token(
   char *response_body = NULL;
   cJSON *body_root = NULL;
   int status_code = 0;
-  esp_err_t ret;
+  esp_err_t ret = ESP_FAIL;
 
   if (error_text != NULL && error_text_size > 0) {
     error_text[0] = '\0';
@@ -540,7 +551,7 @@ static esp_err_t fetch_cloud_access_token(
 
     ret = ensure_cloud_registration(error_text, error_text_size);
     if (ret != ESP_OK) {
-      return ret;
+      goto cleanup;
     }
 
     lock_state();
@@ -566,22 +577,25 @@ static esp_err_t fetch_cloud_access_token(
       if (error_text != NULL && error_text_size > 0) {
         snprintf(error_text, error_text_size, "Cloud request signing failed.");
       }
-      return ret;
+      goto cleanup;
     }
 
     body_root = cJSON_CreateObject();
     if (body_root == NULL) {
-      return ESP_ERR_NO_MEM;
+      ret = ESP_ERR_NO_MEM;
+      goto cleanup;
     }
     if (!cJSON_AddStringToObject(body_root, "username", username) ||
         !cJSON_AddStringToObject(body_root, "password", password)) {
-      cJSON_Delete(body_root);
-      return ESP_ERR_NO_MEM;
+      ret = ESP_ERR_NO_MEM;
+      goto cleanup;
     }
     request_body = cJSON_PrintUnformatted(body_root);
     cJSON_Delete(body_root);
+    body_root = NULL;
     if (request_body == NULL) {
-      return ESP_ERR_NO_MEM;
+      ret = ESP_ERR_NO_MEM;
+      goto cleanup;
     }
 
     headers[0] = (lm_ctrl_cloud_http_header_t){ .name = "Content-Type", .value = "application/json" };
@@ -602,42 +616,42 @@ static esp_err_t fetch_cloud_access_token(
       &response_body,
       &status_code
     );
-    free(request_body);
-    request_body = NULL;
+    free_sensitive_string(&request_body);
 
     if (ret != ESP_OK) {
       set_cloud_connected(false);
       if (error_text != NULL && error_text_size > 0) {
         snprintf(error_text, error_text_size, "Cloud login request failed.");
       }
-      return ret;
+      goto cleanup;
     }
 
     if (status_code == 401) {
-      free(response_body);
+      free_sensitive_string(&response_body);
       set_cloud_connected(false);
       if (error_text != NULL && error_text_size > 0) {
         snprintf(error_text, error_text_size, "Cloud login failed. Check e-mail and password.");
       }
-      return ESP_ERR_INVALID_RESPONSE;
+      ret = ESP_ERR_INVALID_RESPONSE;
+      goto cleanup;
     }
     if (status_code == 412 && attempt == 0) {
-      free(response_body);
-      response_body = NULL;
+      free_sensitive_string(&response_body);
       set_cloud_installation_registration(false);
       continue;
     }
     if (status_code < 200 || status_code >= 300) {
-      free(response_body);
+      free_sensitive_string(&response_body);
       set_cloud_connected(false);
       if (error_text != NULL && error_text_size > 0) {
         snprintf(error_text, error_text_size, "Cloud login failed with status %d.", status_code);
       }
-      return ESP_FAIL;
+      ret = ESP_FAIL;
+      goto cleanup;
     }
 
     ret = parse_cloud_access_token(response_body, access_token, access_token_size);
-    free(response_body);
+    free_sensitive_string(&response_body);
     set_cloud_connected(ret == ESP_OK);
     if (ret == ESP_OK) {
       store_cached_cloud_access_token(access_token);
@@ -645,14 +659,26 @@ static esp_err_t fetch_cloud_access_token(
     if (ret != ESP_OK && error_text != NULL && error_text_size > 0) {
       snprintf(error_text, error_text_size, "Cloud login response could not be parsed.");
     }
-    return ret;
+    goto cleanup;
   }
 
   if (error_text != NULL && error_text_size > 0) {
     snprintf(error_text, error_text_size, "Cloud installation registration retry failed.");
   }
   set_cloud_connected(false);
-  return ESP_FAIL;
+  ret = ESP_FAIL;
+
+cleanup:
+  if (body_root != NULL) {
+    cJSON_Delete(body_root);
+  }
+  free_sensitive_string(&request_body);
+  free_sensitive_string(&response_body);
+  clear_installation_material(installation_id, sizeof(installation_id), secret, sizeof(secret), private_key_der, sizeof(private_key_der));
+  secure_zero(timestamp, sizeof(timestamp));
+  secure_zero(nonce, sizeof(nonce));
+  secure_zero(signature_b64, sizeof(signature_b64));
+  return ret;
 }
 
 esp_err_t lm_ctrl_cloud_session_fetch_access_token_cached(
@@ -715,7 +741,7 @@ esp_err_t lm_ctrl_cloud_auth_prepare_request_auth(
   uint8_t secret[LM_CTRL_CLOUD_SECRET_LEN];
   uint8_t private_key_der[LM_CTRL_PRIVATE_KEY_DER_MAX];
   size_t private_key_der_len = 0;
-  esp_err_t ret;
+  esp_err_t ret = ESP_FAIL;
 
   if (auth == NULL || username == NULL || password == NULL) {
     return ESP_ERR_INVALID_ARG;
@@ -731,7 +757,7 @@ esp_err_t lm_ctrl_cloud_auth_prepare_request_auth(
     error_text_size
   );
   if (ret != ESP_OK) {
-    return ret;
+    goto cleanup;
   }
 
   ret = ensure_cloud_installation();
@@ -739,7 +765,7 @@ esp_err_t lm_ctrl_cloud_auth_prepare_request_auth(
     if (error_text != NULL && error_text_size > 0) {
       snprintf(error_text, error_text_size, "Cloud installation data is missing.");
     }
-    return ret;
+    goto cleanup;
   }
 
   lock_state();
@@ -765,11 +791,16 @@ esp_err_t lm_ctrl_cloud_auth_prepare_request_auth(
     if (error_text != NULL && error_text_size > 0) {
       snprintf(error_text, error_text_size, "Cloud request signing failed.");
     }
-    return ret;
+    goto cleanup;
   }
 
   snprintf(auth->auth_header, sizeof(auth->auth_header), "Bearer %s", access_token);
-  return ESP_OK;
+  ret = ESP_OK;
+
+cleanup:
+  secure_zero(access_token, sizeof(access_token));
+  clear_installation_material(NULL, 0, secret, sizeof(secret), private_key_der, sizeof(private_key_der));
+  return ret;
 }
 
 static void append_ws_header_line(char *buffer, size_t buffer_size, const char *name, const char *value) {
@@ -788,6 +819,7 @@ esp_err_t lm_ctrl_cloud_session_build_websocket_headers(char *buffer, size_t buf
   lm_ctrl_cloud_request_auth_t auth = {0};
   char username[96];
   char password[128];
+  esp_err_t ret = ESP_FAIL;
 
   if (buffer == NULL || buffer_size == 0) {
     return ESP_ERR_INVALID_ARG;
@@ -800,17 +832,18 @@ esp_err_t lm_ctrl_cloud_session_build_websocket_headers(char *buffer, size_t buf
 
   buffer[0] = '\0';
   if (username[0] == '\0' || password[0] == '\0') {
-    return ESP_ERR_INVALID_STATE;
+    ret = ESP_ERR_INVALID_STATE;
+    goto cleanup;
   }
 
   {
     uint8_t secret[LM_CTRL_CLOUD_SECRET_LEN];
     uint8_t private_key_der[LM_CTRL_PRIVATE_KEY_DER_MAX];
     size_t private_key_der_len = 0;
-    esp_err_t ret = ensure_cloud_installation();
+    ret = ensure_cloud_installation();
 
     if (ret != ESP_OK) {
-      return ret;
+      goto cleanup;
     }
 
     lock_state();
@@ -833,13 +866,21 @@ esp_err_t lm_ctrl_cloud_session_build_websocket_headers(char *buffer, size_t buf
       sizeof(auth.signature_b64)
     );
     if (ret != ESP_OK) {
-      return ret;
+      clear_installation_material(NULL, 0, secret, sizeof(secret), private_key_der, sizeof(private_key_der));
+      goto cleanup;
     }
+
+    clear_installation_material(NULL, 0, secret, sizeof(secret), private_key_der, sizeof(private_key_der));
   }
 
   append_ws_header_line(buffer, buffer_size, "X-App-Installation-Id", auth.installation_id);
   append_ws_header_line(buffer, buffer_size, "X-Timestamp", auth.timestamp);
   append_ws_header_line(buffer, buffer_size, "X-Nonce", auth.nonce);
   append_ws_header_line(buffer, buffer_size, "X-Request-Signature", auth.signature_b64);
-  return ESP_OK;
+  ret = ESP_OK;
+
+cleanup:
+  secure_zero(username, sizeof(username));
+  secure_zero(password, sizeof(password));
+  return ret;
 }

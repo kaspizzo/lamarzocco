@@ -20,6 +20,7 @@ typedef struct {
   char machine_status[160];
   char debug_status_html[768];
   char banner_html[256];
+  char csrf_token_html[96];
   char ssid_html[96];
   char hostname_html[96];
   char cloud_user_html[192];
