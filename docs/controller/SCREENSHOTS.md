@@ -10,9 +10,9 @@ The published screenshots intentionally show the shipped text header and not an 
 | --- | --- | --- |
 | ![Coffee Boiler screen](./images/boiler.png) | ![Prebrewing on-time screen](./images/prebrew-on-time.png) | ![Prebrewing off-time screen](./images/prebrew-off-time.png) |
 
-| Steam Boiler | Standby | Preset View |
+| Steam Boiler | Status | Preset View |
 | --- | --- | --- |
-| ![Steam boiler screen](./images/steam-boiler.png) | ![Standby screen](./images/standby.png) | ![Preset screen](./images/preset-view.png) |
+| ![Steam boiler screen](./images/steam-boiler.png) | ![Status screen](./images/status.png) | ![Preset screen](./images/preset-view.png) |
 
 ## Setup screens
 

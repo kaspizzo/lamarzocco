@@ -1124,7 +1124,7 @@ const char *ctrl_focus_name_for_language(ctrl_focus_t focus, ctrl_language_t lan
     case CTRL_FOCUS_STEAM:
       return language == CTRL_LANGUAGE_DE ? "Dampfboiler" : "Steam Boiler";
     case CTRL_FOCUS_STANDBY:
-      return "Standby";
+      return "Status";
     case CTRL_FOCUS_BBW_MODE:
       return language == CTRL_LANGUAGE_DE ? "Brew by Weight" : "Brew by Weight";
     case CTRL_FOCUS_BBW_DOSE_1:
