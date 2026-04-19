@@ -225,7 +225,7 @@ static int generate_main_screens(const char *output_dir) {
   }
 
   state.focus = CTRL_FOCUS_STANDBY;
-  snprintf(path, sizeof(path), "%s/standby.bmp", output_dir);
+  snprintf(path, sizeof(path), "%s/status.bmp", output_dir);
   if (!render_to_bmp(path, &state, &env, NULL)) {
     return 1;
   }

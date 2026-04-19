@@ -7,7 +7,7 @@ This note describes the planned onboarding flow for the controller when the La M
 - Pair the controller and machine without a cloud dependency
 - Read the BLE token directly from the machine
 - Store the serial number, BLE address, and token locally on the controller
-- Enable local control for `Coffee Boiler`, `Steam Boiler`, and `Standby` immediately afterwards
+- Enable local control for `Coffee Boiler`, `Steam Boiler`, and `Status` immediately afterwards
 
 ## Current State
 

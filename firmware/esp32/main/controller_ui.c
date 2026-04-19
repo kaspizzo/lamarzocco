@@ -117,7 +117,7 @@ static const char *focus_title(ctrl_focus_t focus, ctrl_language_t language) {
     case CTRL_FOCUS_STEAM:
       return language == CTRL_LANGUAGE_DE ? "Dampfboiler" : "Steam Boiler";
     case CTRL_FOCUS_STANDBY:
-      return "Standby";
+      return "Status";
     case CTRL_FOCUS_BBW_MODE:
       return "Brew by Weight";
     case CTRL_FOCUS_BBW_DOSE_1:
@@ -324,16 +324,16 @@ static void format_main_value(
         value_size,
         "%s",
         state->values.standby_on
-          ? (language == CTRL_LANGUAGE_DE ? "AN" : "ON")
-          : (language == CTRL_LANGUAGE_DE ? "AUS" : "OFF")
+          ? "Standby"
+          : (language == CTRL_LANGUAGE_DE ? "An" : "On")
       );
       snprintf(
         hint,
         hint_size,
         "%s",
         language == CTRL_LANGUAGE_DE
-          ? "Standby direkt\nam Controller umschalten."
-          : "Toggle standby\ndirectly on the controller."
+          ? "Maschinenstatus direkt\nam Controller einstellen."
+          : "Adjust machine status\ndirectly on the controller."
       );
       break;
     case CTRL_FOCUS_BBW_MODE:

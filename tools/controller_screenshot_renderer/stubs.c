@@ -64,6 +64,20 @@ const char *ctrl_bbw_mode_name(ctrl_bbw_mode_t mode, ctrl_language_t language) {
   }
 }
 
+const char *ctrl_steam_level_label(ctrl_steam_level_t level) {
+  switch (level) {
+    case CTRL_STEAM_LEVEL_1:
+      return "1";
+    case CTRL_STEAM_LEVEL_2:
+      return "2";
+    case CTRL_STEAM_LEVEL_3:
+      return "3";
+    case CTRL_STEAM_LEVEL_OFF:
+    default:
+      return "Off";
+  }
+}
+
 void ctrl_preset_display_name(const ctrl_preset_t *preset, int preset_index, char *buffer, size_t buffer_size) {
   if (buffer == NULL || buffer_size == 0) {
     return;

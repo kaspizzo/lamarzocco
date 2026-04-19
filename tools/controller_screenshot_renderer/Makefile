@@ -4,7 +4,7 @@ OBJDIR := $(CURDIR)/build
 OUT_DIR := $(CURDIR)/out
 DOCS_DIR := $(ROOT_DIR)/docs/controller/images
 PORTAL_PREVIEW := $(CURDIR)/controller_setup_portal_preview.html
-DEVICE_SHOTS := boiler prebrew-on-time prebrew-off-time steam-boiler standby preset-view first-setup setup-with-wlan-connected
+DEVICE_SHOTS := boiler prebrew-on-time prebrew-off-time steam-boiler status preset-view first-setup setup-with-wlan-connected
 
 include $(LVGL_DIR)/src/core/lv_core.mk
 include $(LVGL_DIR)/src/draw/lv_draw.mk
