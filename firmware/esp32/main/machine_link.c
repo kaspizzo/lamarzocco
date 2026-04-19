@@ -82,6 +82,27 @@ void snapshot_desired_values(ctrl_values_t *values) {
   portEXIT_CRITICAL(&s_link_lock);
 }
 
+void snapshot_remote_values(ctrl_values_t *values, uint32_t *loaded_mask) {
+  portENTER_CRITICAL(&s_link_lock);
+  if (values != NULL) {
+    *values = s_link.remote_values;
+  }
+  if (loaded_mask != NULL) {
+    *loaded_mask = s_link.remote_loaded_mask;
+  }
+  portEXIT_CRITICAL(&s_link_lock);
+}
+
+bool snapshot_ble_write_ready(void) {
+  bool ready;
+
+  portENTER_CRITICAL(&s_link_lock);
+  ready = s_link.connected && s_link.handles_ready && s_link.authenticated;
+  portEXIT_CRITICAL(&s_link_lock);
+
+  return ready;
+}
+
 uint32_t snapshot_pending_mask(void) {
   uint32_t pending_mask;
 
@@ -404,6 +425,32 @@ void update_reported_values(const ctrl_values_t *values, uint32_t loaded_mask) {
   }
 
   portENTER_CRITICAL(&s_link_lock);
+  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_TEMPERATURE) != 0) {
+    s_link.remote_values.temperature_c = values->temperature_c;
+  }
+  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_INFUSE) != 0) {
+    s_link.remote_values.infuse_s = values->infuse_s;
+  }
+  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_PAUSE) != 0) {
+    s_link.remote_values.pause_s = values->pause_s;
+  }
+  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0) {
+    s_link.remote_values.steam_level = values->steam_level;
+  }
+  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0) {
+    s_link.remote_values.standby_on = values->standby_on;
+  }
+  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_BBW_MODE) != 0) {
+    s_link.remote_values.bbw_mode = values->bbw_mode;
+  }
+  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_BBW_DOSE_1) != 0) {
+    s_link.remote_values.bbw_dose_1_g = values->bbw_dose_1_g;
+  }
+  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_BBW_DOSE_2) != 0) {
+    s_link.remote_values.bbw_dose_2_g = values->bbw_dose_2_g;
+  }
+  s_link.remote_loaded_mask |= loaded_mask;
+
   if ((loaded_mask & LM_CTRL_MACHINE_FIELD_TEMPERATURE) != 0 &&
       should_accept_remote_float_locked(LM_CTRL_MACHINE_FIELD_TEMPERATURE, values->temperature_c) &&
       !approx_equal(s_link.reported_values.temperature_c, values->temperature_c)) {
@@ -620,6 +667,25 @@ static void machine_link_worker(void *arg) {
         break;
       }
 
+      {
+        ctrl_values_t remote_values = {0};
+        uint32_t remote_loaded_mask = 0;
+
+        snapshot_remote_values(&remote_values, &remote_loaded_mask);
+        if (!snapshot_ble_write_ready() &&
+            lm_ctrl_machine_should_prefer_cloud_power_wakeup(
+              &desired_values,
+              &remote_values,
+              remote_loaded_mask,
+              pending_mask
+            )) {
+          progress = apply_pending_via_cloud(&desired_values, pending_mask);
+          if (progress) {
+            continue;
+          }
+        }
+      }
+
       if ((pending_mask & LM_CTRL_MACHINE_FIELD_BLE_MASK) == 0) {
         if (!progress) {
           vTaskDelay(pdMS_TO_TICKS(LM_CTRL_MACHINE_RETRY_DELAY_MS));
@@ -633,8 +699,8 @@ static void machine_link_worker(void *arg) {
         progress = apply_pending_via_cloud(&desired_values, pending_mask);
         snapshot_desired_values(&desired_values);
         pending_mask = snapshot_pending_mask();
-        if ((pending_mask & LM_CTRL_MACHINE_FIELD_BLE_MASK) != 0) {
-          clear_pending_mask(pending_mask & LM_CTRL_MACHINE_FIELD_BLE_MASK);
+        if ((pending_mask & LM_CTRL_MACHINE_FIELD_BLE_MASK & ~LM_CTRL_MACHINE_FIELD_CLOUD_WRITE_MASK) != 0) {
+          clear_pending_mask(pending_mask & LM_CTRL_MACHINE_FIELD_BLE_MASK & ~LM_CTRL_MACHINE_FIELD_CLOUD_WRITE_MASK);
           set_statusf("No BLE machine token configured.");
         }
         if (!progress) {

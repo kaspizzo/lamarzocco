@@ -12,6 +12,7 @@
 #include "esp_wifi.h"
 #include "mbedtls/base64.h"
 
+#include "cloud_machine_selection.h"
 #include "cloud_live_updates.h"
 #include "machine_link.h"
 #include "setup_portal_http.h"
@@ -1155,18 +1156,20 @@ static esp_err_t handle_cloud_machine_post(httpd_req_t *req) {
 
   parse_form_value(body, "machine_serial", machine_serial, sizeof(machine_serial));
   if (machine_serial[0] == '\0') {
+    if (!lm_ctrl_settings_get_effective_selected_machine(&selected_machine)) {
+      secure_zero(body, sizeof(body));
+      return lm_ctrl_setup_portal_send_response(req, "Select a machine first.", csrf_token);
+    }
     secure_zero(body, sizeof(body));
-    return lm_ctrl_setup_portal_send_response(req, "Select a machine first.", csrf_token);
+    if (save_machine_selection(&selected_machine) != ESP_OK) {
+      return lm_ctrl_setup_portal_send_response(req, "Could not store the selected machine.", csrf_token);
+    }
+    (void)lm_ctrl_machine_link_request_sync();
+    return lm_ctrl_setup_portal_send_response(req, "Machine selection saved on the controller.", csrf_token);
   }
 
   lock_state();
-  for (size_t i = 0; i < s_state.fleet_count; ++i) {
-    if (strcmp(machine_serial, s_state.fleet[i].serial) == 0) {
-      selected_machine = s_state.fleet[i];
-      found = true;
-      break;
-    }
-  }
+  found = lm_ctrl_cloud_find_machine_by_serial(machine_serial, s_state.fleet, s_state.fleet_count, &selected_machine);
   unlock_state();
   secure_zero(body, sizeof(body));
 
@@ -1178,13 +1181,7 @@ static esp_err_t handle_cloud_machine_post(httpd_req_t *req) {
     }
 
     lock_state();
-    for (size_t i = 0; i < s_state.fleet_count; ++i) {
-      if (strcmp(machine_serial, s_state.fleet[i].serial) == 0) {
-        selected_machine = s_state.fleet[i];
-        found = true;
-        break;
-      }
-    }
+    found = lm_ctrl_cloud_find_machine_by_serial(machine_serial, s_state.fleet, s_state.fleet_count, &selected_machine);
     unlock_state();
   }
 

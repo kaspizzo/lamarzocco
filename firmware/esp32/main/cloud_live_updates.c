@@ -12,7 +12,9 @@
 #include "esp_timer.h"
 
 #include "cloud_api.h"
+#include "cloud_machine_selection.h"
 #include "cloud_session.h"
+#include "controller_settings.h"
 #include "machine_link.h"
 #include "wifi_setup_internal.h"
 
@@ -100,13 +102,23 @@ static void set_brew_timer_state(bool brew_active, int64_t brew_start_epoch_ms) 
 }
 
 static bool should_run_cloud_websocket_locked(void) {
+  bool has_effective_machine_selection = false;
+
   if (LM_CTRL_ENABLE_CLOUD_LIVE_UPDATES == 0) {
     return false;
   }
+  has_effective_machine_selection = lm_ctrl_cloud_resolve_effective_machine_selection(
+    &s_state.selected_machine,
+    s_state.has_machine_selection,
+    s_state.fleet,
+    s_state.fleet_count,
+    NULL,
+    NULL
+  );
   return s_state.initialized &&
          s_state.sta_connected &&
          s_state.has_cloud_credentials &&
-         s_state.has_machine_selection;
+         has_effective_machine_selection;
 }
 
 static bool can_start_cloud_websocket_locked(void) {
@@ -305,9 +317,15 @@ static void send_cloud_ws_subscribe_frame(esp_websocket_client_handle_t client) 
     return;
   }
 
-  lock_state();
-  copy_text(serial, sizeof(serial), s_state.selected_machine.serial);
-  unlock_state();
+  {
+    lm_ctrl_cloud_machine_t selected_machine = {0};
+
+    (void)lm_ctrl_settings_get_effective_selected_machine(&selected_machine);
+    copy_text(serial, sizeof(serial), selected_machine.serial);
+  }
+  if (serial[0] == '\0') {
+    return;
+  }
   snprintf(destination, sizeof(destination), "%s%s%s", LM_CTRL_CLOUD_WS_DEST_PREFIX, serial, LM_CTRL_CLOUD_WS_DEST_SUFFIX);
 
   headers[0] = (lm_ctrl_cloud_http_header_t){ .name = "destination", .value = destination };

@@ -8,6 +8,11 @@
 
 static const char *TAG = "lm_ble";
 
+static void rearm_ble_after_cloud_wakeup(void) {
+  clear_ble_failure();
+  (void)lm_ctrl_machine_link_request_sync_mode(LM_CTRL_MACHINE_SYNC_BLE);
+}
+
 bool fetch_values_via_cloud(
   ctrl_values_t *values,
   uint32_t *loaded_mask,
@@ -428,7 +433,10 @@ bool apply_bbw_via_cloud(const ctrl_values_t *desired_values, uint32_t pending_m
 
 bool apply_pending_via_cloud(const ctrl_values_t *desired_values, uint32_t pending_mask) {
   ctrl_values_t current_values;
+  ctrl_values_t remote_values = {0};
+  uint32_t remote_loaded_mask = 0;
   bool progress = false;
+  bool wakeup_first = false;
 
   if (desired_values == NULL) {
     return false;
@@ -436,6 +444,25 @@ bool apply_pending_via_cloud(const ctrl_values_t *desired_values, uint32_t pendi
 
   current_values = *desired_values;
   snapshot_desired_values(&current_values);
+  snapshot_remote_values(&remote_values, &remote_loaded_mask);
+  wakeup_first = lm_ctrl_machine_should_prefer_cloud_power_wakeup(
+    &current_values,
+    &remote_values,
+    remote_loaded_mask,
+    pending_mask
+  );
+
+  if (wakeup_first) {
+    lm_ctrl_cloud_send_result_t result = send_power_command_cloud(true);
+    if (result != LM_CTRL_CLOUD_SEND_FAILED) {
+      rearm_ble_after_cloud_wakeup();
+      if (result == LM_CTRL_CLOUD_SEND_APPLIED) {
+        mark_field_complete(LM_CTRL_MACHINE_FIELD_STANDBY, &current_values);
+      }
+      return true;
+    }
+    return false;
+  }
 
   if (!current_values.standby_on && (pending_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0) {
     lm_ctrl_cloud_send_result_t result = send_steam_command_cloud(current_values.steam_level);
@@ -447,13 +474,12 @@ bool apply_pending_via_cloud(const ctrl_values_t *desired_values, uint32_t pendi
     }
   }
 
-  if (!LM_CTRL_MACHINE_ENABLE_CLOUD_FALLBACK) {
-    return progress;
-  }
-
   if ((pending_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0) {
     lm_ctrl_cloud_send_result_t result = send_power_command_cloud(!current_values.standby_on);
     if (result != LM_CTRL_CLOUD_SEND_FAILED) {
+      if (!current_values.standby_on) {
+        rearm_ble_after_cloud_wakeup();
+      }
       if (result == LM_CTRL_CLOUD_SEND_APPLIED) {
         mark_field_complete(LM_CTRL_MACHINE_FIELD_STANDBY, &current_values);
       }

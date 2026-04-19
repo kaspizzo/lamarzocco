@@ -8,6 +8,7 @@
 #include "esp_log.h"
 
 #include "cloud_auth_internal.h"
+#include "cloud_machine_selection.h"
 #include "controller_settings.h"
 
 static const char *TAG = "lm_cloud_machine";
@@ -31,6 +32,7 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
   int status_code = 0;
   esp_err_t ret;
   bool restored_selection = false;
+  bool auto_selected = false;
   lm_ctrl_cloud_machine_t selected_machine = {0};
   lm_ctrl_cloud_http_header_t headers[5];
   lm_ctrl_cloud_request_auth_t auth = {0};
@@ -112,23 +114,21 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
   clear_fleet_locked();
   memcpy(s_state.fleet, machines, machine_count * sizeof(machines[0]));
   s_state.fleet_count = machine_count;
-  if (selected_serial[0] != '\0') {
-    for (size_t i = 0; i < machine_count; ++i) {
-      if (strcmp(selected_serial, machines[i].serial) == 0) {
-        s_state.selected_machine = machines[i];
-        s_state.has_machine_selection = true;
-        selected_machine = machines[i];
-        restored_selection = true;
-        break;
-      }
-    }
+  restored_selection = lm_ctrl_cloud_find_machine_by_serial(selected_serial, machines, machine_count, &selected_machine);
+  if (!restored_selection) {
+    restored_selection = lm_ctrl_cloud_resolve_effective_machine_selection(
+      NULL,
+      false,
+      machines,
+      machine_count,
+      &selected_machine,
+      &auto_selected
+    );
   }
-  if (!restored_selection && machine_count == 1) {
-    s_state.selected_machine = machines[0];
+  if (restored_selection) {
+    s_state.selected_machine = selected_machine;
     s_state.has_machine_selection = true;
-    selected_machine = machines[0];
-    restored_selection = true;
-  } else if (!restored_selection && selected_serial[0] != '\0') {
+  } else if (selected_serial[0] != '\0') {
     clear_selected_machine_locked();
   }
   mark_status_dirty_locked();
@@ -148,7 +148,7 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
   }
 
   if (banner_text != NULL && banner_text_size > 0) {
-    if (restored_selection && machine_count == 1) {
+    if (auto_selected) {
       snprintf(banner_text, banner_text_size, "Cloud account verified. One machine was found and selected automatically.");
     } else {
       snprintf(banner_text, banner_text_size, "Cloud account verified. Select your machine below.");
@@ -222,6 +222,7 @@ esp_err_t lm_ctrl_cloud_session_execute_machine_command(
   esp_err_t ret;
   lm_ctrl_cloud_http_header_t headers[6];
   lm_ctrl_cloud_request_auth_t auth = {0};
+  lm_ctrl_cloud_machine_t selected_machine = {0};
 
   if (status_text != NULL && status_text_size > 0) {
     status_text[0] = '\0';
@@ -237,8 +238,9 @@ esp_err_t lm_ctrl_cloud_session_execute_machine_command(
   lock_state();
   copy_text(username, sizeof(username), s_state.cloud_username);
   copy_text(password, sizeof(password), s_state.cloud_password);
-  copy_text(serial, sizeof(serial), s_state.selected_machine.serial);
   unlock_state();
+  (void)lm_ctrl_settings_get_effective_selected_machine(&selected_machine);
+  copy_text(serial, sizeof(serial), selected_machine.serial);
 
   if (username[0] == '\0' || password[0] == '\0') {
     if (status_text != NULL && status_text_size > 0) {
