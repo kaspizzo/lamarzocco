@@ -32,7 +32,8 @@ esp_err_t lm_ctrl_cloud_auth_http_request_capture(
   const char *body,
   int timeout_ms,
   char **response_body,
-  int *status_code
+  int *status_code,
+  lm_ctrl_cloud_http_response_meta_t *response_meta
 );
 
 /** Prepare bearer and signed headers for a cloud REST call. */

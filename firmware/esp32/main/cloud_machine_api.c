@@ -75,7 +75,8 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
     NULL,
     12000,
     &response_body,
-    &status_code
+    &status_code,
+    NULL
   );
   if (ret != ESP_OK) {
     if (banner_text != NULL && banner_text_size > 0) {
@@ -278,7 +279,8 @@ esp_err_t lm_ctrl_cloud_session_execute_machine_command(
     json_body,
     12000,
     &response_body,
-    &status_code
+    &status_code,
+    NULL
   );
   if (ret != ESP_OK) {
     if (status_text != NULL && status_text_size > 0 && status_text[0] == '\0') {

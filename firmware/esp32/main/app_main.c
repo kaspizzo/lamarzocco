@@ -91,9 +91,10 @@ static esp_err_t machine_link_execute_cloud_command(
 static esp_err_t machine_link_fetch_dashboard_values(
   ctrl_values_t *values,
   uint32_t *loaded_mask,
-  uint32_t *feature_mask
+  uint32_t *feature_mask,
+  lm_ctrl_machine_heat_info_t *heat_info
 ) {
-  return lm_ctrl_wifi_fetch_dashboard_values(values, loaded_mask, feature_mask);
+  return lm_ctrl_wifi_fetch_dashboard_values(values, loaded_mask, feature_mask, heat_info);
 }
 
 void app_main(void) {

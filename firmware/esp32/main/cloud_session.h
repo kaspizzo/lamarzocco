@@ -7,6 +7,7 @@
 #include "esp_err.h"
 
 #include "controller_state.h"
+#include "machine_link_types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,9 +32,20 @@ esp_err_t lm_ctrl_cloud_session_execute_machine_command(
   size_t status_text_size
 );
 /** Fetch the current dashboard values for the selected machine. */
-esp_err_t lm_ctrl_cloud_session_fetch_dashboard_values(ctrl_values_t *values, uint32_t *loaded_mask, uint32_t *feature_mask);
+esp_err_t lm_ctrl_cloud_session_fetch_dashboard_values(
+  ctrl_values_t *values,
+  uint32_t *loaded_mask,
+  uint32_t *feature_mask,
+  lm_ctrl_machine_heat_info_t *heat_info
+);
 /** Fetch only the prebrewing timing values from the cloud dashboard. */
 esp_err_t lm_ctrl_cloud_session_fetch_prebrewing_values(float *seconds_in, float *seconds_out);
+/** Fetch a raw JSON debug view of the warmup-related dashboard widgets. The caller owns the returned string. */
+esp_err_t lm_ctrl_cloud_session_fetch_heat_debug_json(
+  char **json_text,
+  char *error_text,
+  size_t error_text_size
+);
 /** Log and summarize the prebrewing-related dashboard widgets. */
 esp_err_t lm_ctrl_cloud_session_log_prebrew_dashboard_state(char *status_text, size_t status_text_size);
 /** Return a cached cloud access token or sign in again if the cache is stale. */

@@ -23,7 +23,12 @@ typedef struct {
     char *status_text,
     size_t status_text_size
   );
-  esp_err_t (*fetch_dashboard_values)(ctrl_values_t *values, uint32_t *loaded_mask, uint32_t *feature_mask);
+  esp_err_t (*fetch_dashboard_values)(
+    ctrl_values_t *values,
+    uint32_t *loaded_mask,
+    uint32_t *feature_mask,
+    lm_ctrl_machine_heat_info_t *heat_info
+  );
 } lm_ctrl_machine_link_deps_t;
 
 /** Start the machine link worker and restore any persisted binding context. */
@@ -36,8 +41,15 @@ esp_err_t lm_ctrl_machine_link_request_sync(void);
 esp_err_t lm_ctrl_machine_link_request_sync_mode(uint32_t sync_flags);
 /** Copy the most recently synchronized machine values and the loaded field mask. */
 bool lm_ctrl_machine_link_get_values(ctrl_values_t *values, uint32_t *loaded_mask, uint32_t *feature_mask);
+/** Copy the latest warmup status mirrored from the cloud dashboard. */
+void lm_ctrl_machine_link_get_heat_info(lm_ctrl_machine_heat_info_t *info);
 /** Apply dashboard values delivered asynchronously by the cloud websocket. */
-void lm_ctrl_machine_link_apply_cloud_dashboard_values(const ctrl_values_t *values, uint32_t loaded_mask, uint32_t feature_mask);
+void lm_ctrl_machine_link_apply_cloud_dashboard_values(
+  const ctrl_values_t *values,
+  uint32_t loaded_mask,
+  uint32_t feature_mask,
+  const lm_ctrl_machine_heat_info_t *heat_info
+);
 /** Apply command updates delivered asynchronously by the cloud websocket. */
 void lm_ctrl_machine_link_apply_cloud_command_updates(const lm_ctrl_cloud_command_update_t *updates, size_t update_count);
 /** Report whether the cloud websocket path is active and whether it is fully subscribed. */

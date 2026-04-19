@@ -33,6 +33,7 @@ typedef struct {
   bool has_machine_selection;
   bool has_custom_logo;
   bool has_cloud_provisioning;
+  bool heat_display_enabled;
   bool debug_screenshot_enabled;
   bool portal_running;
   bool sta_connecting;

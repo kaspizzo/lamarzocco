@@ -29,6 +29,21 @@ typedef enum {
   LM_CTRL_MACHINE_FEATURE_BBW = 1 << 0,
 } lm_ctrl_machine_feature_t;
 
+/** Warmup status surfaced by the cloud dashboard for the selected machine. */
+typedef struct {
+  bool available;
+  bool heating;
+  bool eta_available;
+  bool coffee_heating;
+  bool coffee_eta_available;
+  bool steam_heating;
+  bool steam_eta_available;
+  int64_t observed_epoch_ms;
+  int64_t ready_epoch_ms;
+  int64_t coffee_ready_epoch_ms;
+  int64_t steam_ready_epoch_ms;
+} lm_ctrl_machine_heat_info_t;
+
 /** Sync sources that can be requested from the machine link worker. */
 typedef enum {
   LM_CTRL_MACHINE_SYNC_NONE = 0,

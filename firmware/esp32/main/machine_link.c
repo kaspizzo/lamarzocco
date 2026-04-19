@@ -15,6 +15,24 @@ lm_ctrl_pending_cloud_command_t s_pending_cloud_commands[LM_CTRL_MACHINE_MAX_PEN
 lm_ctrl_machine_link_deps_t s_deps = {0};
 portMUX_TYPE s_link_lock = portMUX_INITIALIZER_UNLOCKED;
 
+static bool heat_info_equal(const lm_ctrl_machine_heat_info_t *lhs, const lm_ctrl_machine_heat_info_t *rhs) {
+  if (lhs == NULL || rhs == NULL) {
+    return lhs == rhs;
+  }
+
+  return lhs->available == rhs->available &&
+         lhs->heating == rhs->heating &&
+         lhs->eta_available == rhs->eta_available &&
+         lhs->coffee_heating == rhs->coffee_heating &&
+         lhs->coffee_eta_available == rhs->coffee_eta_available &&
+         lhs->steam_heating == rhs->steam_heating &&
+         lhs->steam_eta_available == rhs->steam_eta_available &&
+         lhs->observed_epoch_ms == rhs->observed_epoch_ms &&
+         lhs->ready_epoch_ms == rhs->ready_epoch_ms &&
+         lhs->coffee_ready_epoch_ms == rhs->coffee_ready_epoch_ms &&
+         lhs->steam_ready_epoch_ms == rhs->steam_ready_epoch_ms;
+}
+
 static ctrl_steam_level_t preferred_non_off_steam_level_locked(void) {
   if (ctrl_steam_level_enabled(s_link.reported_values.steam_level)) {
     return ctrl_steam_level_normalize(s_link.reported_values.steam_level);
@@ -523,6 +541,21 @@ void update_feature_mask(uint32_t feature_mask) {
   portEXIT_CRITICAL(&s_link_lock);
 }
 
+void update_heat_info(const lm_ctrl_machine_heat_info_t *info) {
+  if (info == NULL) {
+    return;
+  }
+
+  portENTER_CRITICAL(&s_link_lock);
+  if (!heat_info_equal(&s_link.heat_info, info)) {
+    s_link.heat_info = *info;
+    s_link.status_version++;
+  } else {
+    s_link.heat_info = *info;
+  }
+  portEXIT_CRITICAL(&s_link_lock);
+}
+
 bool should_skip_ble_attempt(void) {
   int64_t last_failure_us;
 
@@ -600,6 +633,7 @@ static void machine_link_worker(void *arg) {
         ctrl_values_t merged_values = {0};
         ctrl_values_t cloud_values = {0};
         ctrl_values_t ble_values = {0};
+        lm_ctrl_machine_heat_info_t heat_info = {0};
         uint32_t merged_mask = 0;
         uint32_t cloud_loaded_mask = 0;
         uint32_t ble_loaded_mask = 0;
@@ -607,8 +641,11 @@ static void machine_link_worker(void *arg) {
         bool synced = false;
 
         if ((sync_request_flags & LM_CTRL_MACHINE_SYNC_CLOUD) != 0) {
-          synced |= fetch_values_via_cloud(&cloud_values, &cloud_loaded_mask, &feature_mask);
+          synced |= fetch_values_via_cloud(&cloud_values, &cloud_loaded_mask, &feature_mask, &heat_info);
           update_feature_mask(feature_mask);
+          if (heat_info.available) {
+            update_heat_info(&heat_info);
+          }
           if (cloud_loaded_mask != 0) {
             merged_values = cloud_values;
             merged_mask = cloud_loaded_mask;
@@ -891,6 +928,16 @@ bool lm_ctrl_machine_link_get_values(ctrl_values_t *values, uint32_t *loaded_mas
   portEXIT_CRITICAL(&s_link_lock);
 
   return *loaded_mask != 0 || *feature_mask != 0;
+}
+
+void lm_ctrl_machine_link_get_heat_info(lm_ctrl_machine_heat_info_t *info) {
+  if (info == NULL) {
+    return;
+  }
+
+  portENTER_CRITICAL(&s_link_lock);
+  *info = s_link.heat_info;
+  portEXIT_CRITICAL(&s_link_lock);
 }
 
 void lm_ctrl_machine_link_set_live_updates_state(bool active, bool connected) {

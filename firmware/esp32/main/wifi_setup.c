@@ -224,6 +224,10 @@ esp_err_t lm_ctrl_wifi_set_debug_screenshot_enabled(bool enabled) {
   return lm_ctrl_settings_set_debug_screenshot_enabled(enabled);
 }
 
+esp_err_t lm_ctrl_wifi_set_heat_display_enabled(bool enabled) {
+  return lm_ctrl_settings_set_heat_display_enabled(enabled);
+}
+
 esp_err_t lm_ctrl_wifi_schedule_reboot(void) {
   if (xTaskCreate(delayed_restart_task, "lm_reboot", 3072, (void *)(intptr_t)1200, 5, NULL) != pdPASS) {
     return ESP_ERR_NO_MEM;
@@ -787,6 +791,7 @@ void lm_ctrl_wifi_get_info(lm_ctrl_wifi_info_t *info) {
   info->has_machine_selection = has_effective_machine;
   info->has_custom_logo = s_state.has_custom_logo;
   info->has_cloud_provisioning = s_state.has_cloud_provisioning;
+  info->heat_display_enabled = s_state.heat_display_enabled;
   info->debug_screenshot_enabled = s_state.debug_screenshot_enabled;
   info->web_auth_mode = s_state.web_auth_mode;
   copy_text(info->portal_ssid, sizeof(info->portal_ssid), s_state.portal_ssid);
@@ -919,6 +924,11 @@ esp_err_t lm_ctrl_wifi_fetch_prebrewing_values(float *seconds_in, float *seconds
   return lm_ctrl_cloud_session_fetch_prebrewing_values(seconds_in, seconds_out);
 }
 
-esp_err_t lm_ctrl_wifi_fetch_dashboard_values(ctrl_values_t *values, uint32_t *loaded_mask, uint32_t *feature_mask) {
-  return lm_ctrl_cloud_session_fetch_dashboard_values(values, loaded_mask, feature_mask);
+esp_err_t lm_ctrl_wifi_fetch_dashboard_values(
+  ctrl_values_t *values,
+  uint32_t *loaded_mask,
+  uint32_t *feature_mask,
+  lm_ctrl_machine_heat_info_t *heat_info
+) {
+  return lm_ctrl_cloud_session_fetch_dashboard_values(values, loaded_mask, feature_mask, heat_info);
 }

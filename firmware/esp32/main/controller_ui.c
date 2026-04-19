@@ -262,6 +262,7 @@ static void format_main_placeholder(
 
 static void format_main_value(
   const ctrl_state_t *state,
+  const lm_ctrl_ui_view_t *view,
   ctrl_language_t language,
   char *value,
   size_t value_size,
@@ -309,14 +310,23 @@ static void format_main_value(
         "%s",
         ctrl_steam_level_label(state->values.steam_level)
       );
-      snprintf(
-        hint,
-        hint_size,
-        "%s",
-        language == CTRL_LANGUAGE_DE
-          ? "Dampflevel direkt\nam Controller einstellen."
-          : "Adjust the steam level\ndirectly on the controller."
-      );
+      if (view != NULL && view->steam_heat_eta_visible && view->steam_heat_eta_text[0] != '\0') {
+        snprintf(
+          hint,
+          hint_size,
+          language == CTRL_LANGUAGE_DE ? "Dampf heizt auf.\nBereit in %s." : "Steam heating.\nReady in %s.",
+          view->steam_heat_eta_text
+        );
+      } else {
+        snprintf(
+          hint,
+          hint_size,
+          "%s",
+          language == CTRL_LANGUAGE_DE
+            ? "Dampflevel direkt\nam Controller einstellen."
+            : "Adjust the steam level\ndirectly on the controller."
+        );
+      }
       break;
     case CTRL_FOCUS_STANDBY:
       snprintf(
@@ -335,6 +345,14 @@ static void format_main_value(
           ? "Maschinenstatus direkt\nam Controller einstellen."
           : "Adjust machine status\ndirectly on the controller."
       );
+      if (view != NULL && view->heat_arc_visible && view->heat_eta_text[0] != '\0') {
+        snprintf(
+          hint,
+          hint_size,
+          language == CTRL_LANGUAGE_DE ? "Aufheizen laeuft.\nBereit in %s." : "Heating up.\nReady in %s.",
+          view->heat_eta_text
+        );
+      }
       break;
     case CTRL_FOCUS_BBW_MODE:
       snprintf(value, value_size, "%s", ctrl_bbw_mode_name(state->values.bbw_mode, language));
@@ -558,7 +576,12 @@ static void handle_screen_gesture(lv_event_t *event) {
   lv_indev_wait_release(indev);
 }
 
-static void render_main_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, ctrl_language_t language) {
+static void render_main_screen(
+  lm_ctrl_ui_t *ui,
+  const ctrl_state_t *state,
+  const lm_ctrl_ui_view_t *view,
+  ctrl_language_t language
+) {
   char value[40];
   char hint[128];
   bool has_hint;
@@ -569,6 +592,7 @@ static void render_main_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, ctrl
   set_hidden(ui->presets_card, true);
   set_hidden(ui->setup_card, true);
   set_hidden(ui->setup_reset_arc, true);
+  set_hidden(ui->heat_arc, view == NULL || !view->heat_arc_visible);
   set_hidden(ui->setup_secondary_button, true);
   set_hidden(ui->setup_primary_button, true);
   set_hidden(ui->focus, false);
@@ -582,9 +606,12 @@ static void render_main_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, ctrl
   set_label_text(ui->focus, focus_title(state->focus, language), COLOR_ACTIVE);
 
   if (is_focus_value_loaded(state, state->focus)) {
-    format_main_value(state, language, value, sizeof(value), hint, sizeof(hint));
+    format_main_value(state, view, language, value, sizeof(value), hint, sizeof(hint));
   } else {
     format_main_placeholder(state->focus, language, value, sizeof(value), hint, sizeof(hint));
+  }
+  if (view != NULL && view->heat_arc_visible) {
+    lv_arc_set_value(ui->heat_arc, view->heat_progress_permille);
   }
   has_hint = hint[0] != '\0';
   set_label_text(ui->value, value, COLOR_TEXT);
@@ -621,6 +648,13 @@ static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *v
     set_hidden(ui->wifi_icon, true);
   }
 
+  if (view->heat_visible) {
+    set_hidden(ui->heat_icon, false);
+    set_label_text(ui->heat_icon, LV_SYMBOL_CHARGE, COLOR_ACTIVE);
+  } else {
+    set_hidden(ui->heat_icon, true);
+  }
+
   if (view->ble_visible) {
     set_hidden(ui->ble_icon, false);
     set_label_text(ui->ble_icon, LV_SYMBOL_BLUETOOTH, view->ble_authenticated ? COLOR_ACTIVE : COLOR_MUTED);
@@ -639,6 +673,7 @@ static void render_presets_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, c
   set_hidden(ui->presets_card, false);
   set_hidden(ui->setup_card, true);
   set_hidden(ui->setup_reset_arc, true);
+  set_hidden(ui->heat_arc, true);
   set_hidden(ui->setup_secondary_button, true);
   set_hidden(ui->setup_primary_button, true);
   for (size_t i = 0; i < LM_CTRL_UI_MAIN_PAGE_COUNT; ++i) {
@@ -671,6 +706,7 @@ static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, con
   set_hidden(ui->main_card, true);
   set_hidden(ui->presets_card, true);
   set_hidden(ui->setup_card, false);
+  set_hidden(ui->heat_arc, true);
   for (size_t i = 0; i < LM_CTRL_UI_MAIN_PAGE_COUNT; ++i) {
     set_hidden(ui->page_dots[i], true);
   }
@@ -801,15 +837,38 @@ esp_err_t lm_ctrl_ui_init(
 
   ui->wifi_icon = lv_label_create(ui->screen);
   lv_obj_set_style_text_font(ui->wifi_icon, &lv_font_montserrat_14, 0);
-  lv_obj_align(ui->wifi_icon, LV_ALIGN_TOP_MID, -12, 48);
+  lv_obj_align(ui->wifi_icon, LV_ALIGN_TOP_MID, -24, 48);
+
+  ui->heat_icon = lv_label_create(ui->screen);
+  lv_obj_set_style_text_font(ui->heat_icon, &lv_font_montserrat_14, 0);
+  lv_obj_align(ui->heat_icon, LV_ALIGN_TOP_MID, 0, 48);
+  set_hidden(ui->heat_icon, true);
 
   ui->ble_icon = lv_label_create(ui->screen);
   lv_obj_set_style_text_font(ui->ble_icon, &lv_font_montserrat_14, 0);
-  lv_obj_align(ui->ble_icon, LV_ALIGN_TOP_MID, 12, 48);
+  lv_obj_align(ui->ble_icon, LV_ALIGN_TOP_MID, 24, 48);
 
   ui->page_label = lv_label_create(ui->screen);
   lv_obj_set_style_text_font(ui->page_label, &lv_font_montserrat_14, 0);
   lv_obj_align(ui->page_label, LV_ALIGN_TOP_MID, 0, 46);
+
+  ui->heat_arc = lv_arc_create(ui->screen);
+  lv_obj_set_size(ui->heat_arc, 328, 328);
+  lv_obj_center(ui->heat_arc);
+  lv_arc_set_rotation(ui->heat_arc, 270);
+  lv_arc_set_bg_angles(ui->heat_arc, 0, 360);
+  lv_arc_set_mode(ui->heat_arc, LV_ARC_MODE_REVERSE);
+  lv_arc_set_range(ui->heat_arc, 0, 1000);
+  lv_arc_set_value(ui->heat_arc, 1000);
+  lv_obj_set_style_arc_width(ui->heat_arc, 5, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(ui->heat_arc, COLOR_ACTIVE, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_width(ui->heat_arc, 1, LV_PART_MAIN);
+  lv_obj_set_style_arc_color(ui->heat_arc, COLOR_RING, LV_PART_MAIN);
+  lv_obj_set_style_arc_opa(ui->heat_arc, LV_OPA_30, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(ui->heat_arc, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_opa(ui->heat_arc, LV_OPA_TRANSP, LV_PART_KNOB);
+  lv_obj_clear_flag(ui->heat_arc, LV_OBJ_FLAG_CLICKABLE);
+  set_hidden(ui->heat_arc, true);
 
   ui->main_card = create_panel(ui->screen, 280, 192);
 
@@ -956,7 +1015,15 @@ esp_err_t lm_ctrl_ui_init(
     lv_obj_remove_style_all(ui->page_dots[i]);
     lv_obj_set_style_radius(ui->page_dots[i], LV_RADIUS_CIRCLE, 0);
     lv_obj_align(ui->page_dots[i], LV_ALIGN_CENTER, -26 + ((int)i * 17), 106);
+    lv_obj_move_foreground(ui->page_dots[i]);
   }
+
+  lv_obj_move_foreground(ui->title_text);
+  lv_obj_move_foreground(ui->title_image);
+  lv_obj_move_foreground(ui->wifi_icon);
+  lv_obj_move_foreground(ui->heat_icon);
+  lv_obj_move_foreground(ui->ble_icon);
+  lv_obj_move_foreground(ui->page_label);
 
   lm_ctrl_ui_render(ui, state, view);
   ESP_LOGI(TAG, "UI initialized");
@@ -986,7 +1053,7 @@ void lm_ctrl_ui_render(lm_ctrl_ui_t *ui, const ctrl_state_t *state, const lm_ctr
       break;
     case CTRL_SCREEN_MAIN:
     default:
-      render_main_screen(ui, state, language);
+      render_main_screen(ui, state, view, language);
       break;
   }
 
