@@ -17,28 +17,25 @@ Visual reference:
 
 ## Simulator flow
 
-1. **Start the simulator**
-   ```bash
-   ./run_bt_poc.sh --host 127.0.0.1 --port 8080
-   ```
-2. **Open setup** using the `Setup` button or the `S` key.
-3. Fill in **Wi-Fi & Portal**:
+1. **Open setup** using the `Setup` button or the `S` key.
+2. Fill in **Wi-Fi & Portal**:
    - Wi-Fi SSID
    - Wi-Fi password
    - country code
    - setup hostname
-4. Click **Save setup**.
+3. Click **Save setup**.
    The values are stored locally in browser `localStorage`.
-5. In **Machine Link**, enter cloud credentials:
+4. In **Machine Link**, enter cloud credentials:
    - account email
    - password
    - click `Load machines`
-6. Select the machine from the list with `Use`.
+5. Select the machine from the list with `Use`.
    This stores the machine serial in the simulator state.
-7. Optionally use the **Bluetooth** section to:
+6. Optionally use the **Bluetooth** section to:
    - BLE scan
    - set an address
    - copy or inspect the BLE token
+7. Desktop-side simulator and inspector tooling are maintained separately and are no longer included in this repository.
 
 ## Current ESP32 flow
 
