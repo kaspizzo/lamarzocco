@@ -31,8 +31,6 @@ For that, I need an Acaia Lunar with USB-C. My older Lunar with Mini-USB is unfo
   ESP-IDF firmware for a JC3636K718-style round ESP32-S3 controller board.
 - `docs/controller/`
   Flashing, setup, bring-up, and implementation notes for the controller hardware.
-- `bt_poc_app.py` and related local tools
-  Developer utilities for cloud/BLE testing and protocol exploration.
 
 ## Current controller capabilities
 
@@ -100,14 +98,16 @@ If you want to flash the controller:
 
 ## Developer tools
 
-The repository intentionally includes the local `bt_poc_*` tooling used during protocol exploration and controller bring-up.
+Desktop-side inspector tooling is maintained separately and is not part of this repository.
 
 These tools are useful if you want to:
 
 - inspect cloud dashboard responses on a desktop machine
+- inspect settings, statistics, schedule, and dashboard websocket responses
 - bootstrap machine selection and BLE token retrieval
 - compare controller behaviour with a Python-side reference client
 - debug BLE/cloud behaviour outside the embedded firmware loop
+- build a normalized inventory of which fields are already mapped to the controller and which are still unused
 
 They are developer-facing utilities, not part of the end-user firmware.
 
