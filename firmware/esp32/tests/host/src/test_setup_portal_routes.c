@@ -117,6 +117,11 @@ esp_err_t lm_ctrl_wifi_set_debug_screenshot_enabled(bool enabled) {
   return ESP_OK;
 }
 
+esp_err_t lm_ctrl_wifi_set_heat_display_enabled(bool enabled) {
+  s_state.heat_display_enabled = enabled;
+  return ESP_OK;
+}
+
 esp_err_t lm_ctrl_wifi_save_controller_logo(uint8_t schema_version, const uint8_t *logo_data, size_t logo_size) {
   (void)schema_version;
   (void)logo_data;
@@ -186,6 +191,29 @@ esp_err_t lm_ctrl_wifi_execute_machine_command(
   (void)result;
   if (status_text != NULL && status_text_size > 0) {
     copy_text(status_text, status_text_size, "ok");
+  }
+  return ESP_OK;
+}
+
+esp_err_t lm_ctrl_cloud_session_fetch_heat_debug_json(
+  char **json_text,
+  char *error_text,
+  size_t error_text_size
+) {
+  static const char RESPONSE[] = "{\"ok\":true}";
+  const size_t response_len = sizeof(RESPONSE);
+
+  if (json_text == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  *json_text = malloc(response_len);
+  if (*json_text == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+  memcpy(*json_text, RESPONSE, response_len);
+  if (error_text != NULL && error_text_size > 0) {
+    error_text[0] = '\0';
   }
   return ESP_OK;
 }

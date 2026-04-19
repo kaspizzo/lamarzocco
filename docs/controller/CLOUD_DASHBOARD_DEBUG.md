@@ -112,6 +112,9 @@ Each snapshot includes:
 
 - `selectedCodes`
 - `selectedWidgetCount`
+- `machineSignals.connected`
+- `machineSignals.offlineMode`
+- `machineSignals.online`
 - `widgets[].output` with the raw normalized widget output
 - `widgets[].derived` with a few convenience fields
 - `heatSignals.*` when the selected widgets include boiler warmup data
@@ -133,4 +136,6 @@ The default widget subset is still:
 - `CMSteamBoilerTemperature`
 
 `snapshot --output ...` writes a JSON bundle containing the summarized output
-plus normalized full-dashboard data for deeper inspection.
+plus normalized full-dashboard data for deeper inspection. For connectivity
+reverse-engineering, compare `machineSignals.*` across normal, disconnected,
+and recovered snapshots before changing controller UI semantics.

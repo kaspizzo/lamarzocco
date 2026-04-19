@@ -128,6 +128,7 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
   }
   if (restored_selection) {
     s_state.selected_machine = selected_machine;
+    s_state.cloud_machine_status = selected_machine.cloud_status;
     s_state.has_machine_selection = true;
   } else if (selected_serial[0] != '\0') {
     clear_selected_machine_locked();

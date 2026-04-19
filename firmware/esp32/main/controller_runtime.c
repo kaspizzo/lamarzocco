@@ -16,6 +16,7 @@
 #include "board_haptic.h"
 #include "board_leds.h"
 #include "board_power.h"
+#include "controller_connectivity.h"
 #include "machine_link.h"
 #include "machine_link_policy.h"
 #include "wifi_setup.h"
@@ -716,29 +717,6 @@ static void maybe_request_fast_heat_refresh(lm_ctrl_runtime_t *runtime) {
   }
 }
 
-static uint32_t supported_machine_fields_for_focus(ctrl_focus_t focus) {
-  switch (focus) {
-    case CTRL_FOCUS_TEMPERATURE:
-      return LM_CTRL_MACHINE_FIELD_TEMPERATURE;
-    case CTRL_FOCUS_INFUSE:
-      return LM_CTRL_MACHINE_FIELD_INFUSE;
-    case CTRL_FOCUS_PAUSE:
-      return LM_CTRL_MACHINE_FIELD_PAUSE;
-    case CTRL_FOCUS_STEAM:
-      return LM_CTRL_MACHINE_FIELD_STEAM;
-    case CTRL_FOCUS_STANDBY:
-      return LM_CTRL_MACHINE_FIELD_STANDBY;
-    case CTRL_FOCUS_BBW_MODE:
-      return LM_CTRL_MACHINE_FIELD_BBW_MODE;
-    case CTRL_FOCUS_BBW_DOSE_1:
-      return LM_CTRL_MACHINE_FIELD_BBW_DOSE_1;
-    case CTRL_FOCUS_BBW_DOSE_2:
-      return LM_CTRL_MACHINE_FIELD_BBW_DOSE_2;
-    default:
-      return LM_CTRL_MACHINE_FIELD_NONE;
-  }
-}
-
 void lm_ctrl_runtime_init(lm_ctrl_runtime_t *runtime) {
   if (runtime == NULL) {
     return;
@@ -792,6 +770,9 @@ void lm_ctrl_runtime_handle_input_event(
     .applied_focus = CTRL_FOCUS_TEMPERATURE,
     .preset_slot = -1,
   };
+  lm_ctrl_wifi_info_t wifi_info = {0};
+  lm_ctrl_machine_link_info_t machine_info = {0};
+  lm_ctrl_controller_access_t access = {0};
   bool should_persist_state = false;
   bool preserve_status = false;
 
@@ -800,12 +781,19 @@ void lm_ctrl_runtime_handle_input_event(
   }
 
   action.applied_focus = runtime->state.focus;
+  lm_ctrl_wifi_get_info(&wifi_info);
+  lm_ctrl_machine_link_get_info(&machine_info);
+  lm_ctrl_controller_compute_access(&wifi_info, &machine_info, runtime->state.feature_mask, &access);
 
   switch (event->type) {
     case LM_CTRL_EVENT_ROTATE:
+      if (runtime->state.screen == CTRL_SCREEN_MAIN &&
+          !lm_ctrl_controller_field_is_editable(access.editable_mask, runtime->state.focus)) {
+        break;
+      }
       ctrl_rotate(&runtime->state, event->delta_steps);
       {
-        const uint32_t field_mask = supported_machine_fields_for_focus(runtime->state.focus);
+        const uint32_t field_mask = lm_ctrl_machine_field_for_focus(runtime->state.focus);
         if (field_mask != LM_CTRL_MACHINE_FIELD_NONE && should_defer_machine_send(field_mask)) {
           note_local_value_hold(&runtime->local_value_hold, &runtime->state.values, field_mask);
           arm_delayed_machine_send(&runtime->delayed_machine_send, field_mask);
@@ -833,12 +821,16 @@ void lm_ctrl_runtime_handle_input_event(
       (void)lm_ctrl_haptic_click();
       break;
     case LM_CTRL_EVENT_TOGGLE_FOCUS:
+      if (runtime->state.screen == CTRL_SCREEN_MAIN &&
+          !lm_ctrl_controller_field_is_editable(access.editable_mask, event->focus)) {
+        break;
+      }
       ctrl_toggle_focus(&runtime->state, event->focus);
       {
         const bool waking_from_standby =
           event->focus == CTRL_FOCUS_STANDBY &&
           runtime->state.values.standby_on == false;
-        const uint32_t field_mask = supported_machine_fields_for_focus(event->focus);
+        const uint32_t field_mask = lm_ctrl_machine_field_for_focus(event->focus);
         if (lm_ctrl_machine_link_queue_values(&runtime->state.values, field_mask) != ESP_OK &&
             field_mask != LM_CTRL_MACHINE_FIELD_NONE) {
           ESP_LOGW(TAG, "Failed to queue BLE toggle for focus=%s", ctrl_focus_name(event->focus));
@@ -863,12 +855,12 @@ void lm_ctrl_runtime_handle_input_event(
       (void)lm_ctrl_haptic_click();
       break;
     case LM_CTRL_EVENT_LOAD_PRESET:
+      if (!access.preset_load_enabled) {
+        break;
+      }
       action = ctrl_load_preset(&runtime->state);
       if (action.type == CTRL_ACTION_LOAD_PRESET) {
-        const uint32_t field_mask =
-          LM_CTRL_MACHINE_FIELD_TEMPERATURE |
-          LM_CTRL_MACHINE_FIELD_PREBREWING |
-          (((runtime->state.feature_mask & CTRL_FEATURE_BBW) != 0) ? LM_CTRL_MACHINE_FIELD_BBW : 0);
+        const uint32_t field_mask = lm_ctrl_machine_preset_field_mask(runtime->state.feature_mask);
         if (lm_ctrl_machine_link_queue_values(&runtime->state.values, field_mask) != ESP_OK) {
           ESP_LOGW(TAG, "Failed to queue BLE preset sync");
         } else {
@@ -1077,6 +1069,7 @@ void lm_ctrl_runtime_build_ui_view(const lm_ctrl_runtime_t *runtime, lm_ctrl_ui_
   lm_ctrl_wifi_info_t wifi_info = {0};
   lm_ctrl_power_info_t power_info = {0};
   lm_ctrl_machine_link_info_t machine_info = {0};
+  lm_ctrl_controller_access_t access = {0};
 
   if (runtime == NULL || view == NULL) {
     return;
@@ -1086,10 +1079,10 @@ void lm_ctrl_runtime_build_ui_view(const lm_ctrl_runtime_t *runtime, lm_ctrl_ui_
   lm_ctrl_wifi_get_info(&wifi_info);
   lm_ctrl_power_get_info(&power_info);
   lm_ctrl_machine_link_get_info(&machine_info);
+  lm_ctrl_controller_compute_access(&wifi_info, &machine_info, runtime->state.feature_mask, &access);
 
   view->language = wifi_info.language;
-  view->wifi_visible = wifi_info.sta_connected || wifi_info.sta_connecting;
-  view->wifi_connected = wifi_info.sta_connected;
+  view->remote_path_state = access.remote_path_state;
   view->usb_visible = power_info.usb_connected;
   view->battery_visible = power_info.low || power_info.charging;
   view->battery_charging = power_info.charging;
@@ -1108,6 +1101,9 @@ void lm_ctrl_runtime_build_ui_view(const lm_ctrl_runtime_t *runtime, lm_ctrl_ui_
     heat_state_remaining_us(&runtime->steam_heat_state) > 0;
   view->ble_visible = machine_info.connected || machine_info.authenticated;
   view->ble_authenticated = machine_info.authenticated;
+  view->readable_mask = access.readable_mask;
+  view->editable_mask = access.editable_mask;
+  view->preset_load_enabled = access.preset_load_enabled;
   view->heat_progress_permille = heat_state_progress_permille(&runtime->heat_state);
   view->custom_logo = wifi_info.has_custom_logo ? lm_ctrl_wifi_get_custom_logo() : NULL;
   if (view->heat_arc_visible) {

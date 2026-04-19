@@ -118,6 +118,7 @@ typedef struct {
   char cloud_username[96];
   char cloud_password[128];
   lm_ctrl_cloud_machine_t selected_machine;
+  lm_ctrl_cloud_machine_status_t cloud_machine_status;
   lm_ctrl_cloud_machine_t fleet[LM_CTRL_CLOUD_MAX_FLEET];
   size_t fleet_count;
   bool cloud_installation_ready;
@@ -238,10 +239,18 @@ esp_err_t lm_ctrl_wifi_store_credentials(const char *ssid, const char *password,
 esp_err_t lm_ctrl_wifi_apply_station_credentials(void);
 /** Update the cached cloud connectivity flag and status version if it changed. */
 void set_cloud_connected(bool connected);
+/** Clear the selected-machine cloud reachability snapshot while the state lock is already held. */
+void clear_cloud_machine_status_locked(void);
 /** Clear the cached cloud access token while the state lock is already held. */
 void clear_cached_cloud_access_token_locked(void);
 /** Clear the cached cloud access token. */
 void clear_cached_cloud_access_token(void);
+/** Clear the selected-machine cloud reachability snapshot. */
+void clear_cloud_machine_status(void);
+/** Replace the selected-machine cloud reachability snapshot. */
+void set_cloud_machine_status(const lm_ctrl_cloud_machine_status_t *status);
+/** Merge any known reachability fields into the selected-machine cloud snapshot. */
+void merge_cloud_machine_status(const lm_ctrl_cloud_machine_status_t *status);
 /** Store the cached cloud access token with its derived expiry deadline. */
 void store_cached_cloud_access_token(const char *access_token);
 /** Copy the cached cloud access token if it is still valid. */

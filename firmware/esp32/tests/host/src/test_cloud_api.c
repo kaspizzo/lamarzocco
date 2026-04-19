@@ -69,9 +69,9 @@ static int test_parse_access_token_success_and_invalid_payload(void) {
 static int test_parse_customer_fleet_filters_invalid_entries(void) {
   static const char *response_body =
     "["
-      "{\"serialNumber\":\"LM123\",\"name\":\"Kitchen Micra\",\"modelName\":\"Micra\",\"bleAuthToken\":\"abc\"},"
+      "{\"serialNumber\":\"LM123\",\"name\":\"Kitchen Micra\",\"modelName\":\"Micra\",\"bleAuthToken\":\"abc\",\"connected\":true,\"offlineMode\":false},"
       "{\"name\":\"Ignored Missing Serial\"},"
-      "{\"serialNumber\":\"LM456\",\"name\":\"Studio Mini\",\"modelName\":\"Mini\",\"bleAuthToken\":\"def\"}"
+      "{\"serialNumber\":\"LM456\",\"name\":\"Studio Mini\",\"modelName\":\"Mini\",\"bleAuthToken\":\"def\",\"connected\":false,\"offlineMode\":true}"
     "]";
   lm_ctrl_cloud_machine_t machines[4];
   size_t machine_count = 0;
@@ -85,9 +85,33 @@ static int test_parse_customer_fleet_filters_invalid_entries(void) {
   ASSERT_STREQ("Kitchen Micra", machines[0].name);
   ASSERT_STREQ("Micra", machines[0].model);
   ASSERT_STREQ("abc", machines[0].communication_key);
+  ASSERT_TRUE(machines[0].cloud_status.connected_known);
+  ASSERT_TRUE(machines[0].cloud_status.connected);
+  ASSERT_TRUE(machines[0].cloud_status.offline_mode_known);
+  ASSERT_FALSE(machines[0].cloud_status.offline_mode);
   ASSERT_STREQ("LM456", machines[1].serial);
   ASSERT_STREQ("Studio Mini", machines[1].name);
+  ASSERT_TRUE(machines[1].cloud_status.connected_known);
+  ASSERT_FALSE(machines[1].cloud_status.connected);
+  ASSERT_TRUE(machines[1].cloud_status.offline_mode_known);
+  ASSERT_TRUE(machines[1].cloud_status.offline_mode);
 
+  return 0;
+}
+
+static int test_parse_dashboard_machine_status_extracts_online_signal(void) {
+  cJSON *root = cJSON_Parse("{\"connected\":true,\"offlineMode\":false}");
+  lm_ctrl_cloud_machine_status_t status = {0};
+
+  ASSERT_TRUE(root != NULL);
+  ASSERT_TRUE(lm_ctrl_cloud_parse_dashboard_machine_status(root, &status));
+  ASSERT_TRUE(status.connected_known);
+  ASSERT_TRUE(status.connected);
+  ASSERT_TRUE(status.offline_mode_known);
+  ASSERT_FALSE(status.offline_mode);
+  ASSERT_TRUE(lm_ctrl_cloud_machine_status_is_online(&status));
+
+  cJSON_Delete(root);
   return 0;
 }
 
@@ -117,6 +141,7 @@ static int test_parse_dashboard_values_extracts_machine_and_bbw_state(void) {
       &values,
       &loaded_mask,
       &feature_mask,
+      NULL,
       &brew_active,
       &brew_start_epoch_ms
     )
@@ -171,6 +196,7 @@ int run_cloud_api_tests(void) {
   RUN_TEST(test_generate_installation_populates_uuid_secret_and_private_key);
   RUN_TEST(test_parse_access_token_success_and_invalid_payload);
   RUN_TEST(test_parse_customer_fleet_filters_invalid_entries);
+  RUN_TEST(test_parse_dashboard_machine_status_extracts_online_signal);
   RUN_TEST(test_parse_dashboard_values_extracts_machine_and_bbw_state);
   RUN_TEST(test_parse_prebrew_widget_supports_both_widget_shapes);
   return 0;

@@ -6,12 +6,15 @@
 
 typedef enum {
   HTTP_EVENT_ERROR = 0,
-  HTTP_EVENT_ON_DATA = 1,
+  HTTP_EVENT_ON_HEADER = 1,
+  HTTP_EVENT_ON_DATA = 2,
 } esp_http_client_event_id_t;
 
 typedef struct esp_http_client_event {
   esp_http_client_event_id_t event_id;
   void *user_data;
+  const char *header_key;
+  const char *header_value;
   const void *data;
   int data_len;
 } esp_http_client_event_t;

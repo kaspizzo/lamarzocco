@@ -3,6 +3,7 @@
 int run_controller_state_tests(void);
 int run_controller_settings_tests(void);
 int run_cloud_api_tests(void);
+int run_controller_connectivity_tests(void);
 int run_cloud_machine_selection_tests(void);
 int run_machine_link_policy_tests(void);
 int run_storage_security_tests(void);
@@ -19,6 +20,9 @@ int main(void) {
     return 1;
   }
   if (run_cloud_api_tests() != 0) {
+    return 1;
+  }
+  if (run_controller_connectivity_tests() != 0) {
     return 1;
   }
   if (run_cloud_machine_selection_tests() != 0) {

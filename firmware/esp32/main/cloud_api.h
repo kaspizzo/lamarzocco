@@ -6,6 +6,7 @@
 
 #include "esp_err.h"
 
+#include "cloud_machine_status.h"
 #include "controller_state.h"
 #include "machine_link_types.h"
 
@@ -28,6 +29,7 @@ typedef struct {
   char name[64];
   char model[32];
   char communication_key[128];
+  lm_ctrl_cloud_machine_status_t cloud_status;
 } lm_ctrl_cloud_machine_t;
 
 /** Installation credentials needed to sign La Marzocco cloud requests. */
@@ -107,6 +109,11 @@ esp_err_t lm_ctrl_cloud_parse_customer_fleet(
   lm_ctrl_cloud_machine_t *machines,
   size_t max_machines,
   size_t *machine_count
+);
+/** Extract the selected-machine connectivity metadata from a dashboard JSON root object. */
+bool lm_ctrl_cloud_parse_dashboard_machine_status(
+  cJSON *root,
+  lm_ctrl_cloud_machine_status_t *status
 );
 
 /** Extract controller-facing values and feature flags from a dashboard JSON root object. */
