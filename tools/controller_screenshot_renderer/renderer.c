@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include "controller_connectivity.h"
 #include "controller_ui.h"
 #include "stubs.h"
 
@@ -116,8 +117,41 @@ static bool write_bmp(const char *path, const lv_img_dsc_t *image) {
   return true;
 }
 
+static void build_view(
+  const ctrl_state_t *state,
+  const host_stub_env_t *env,
+  const char *status_text,
+  lm_ctrl_ui_view_t *view
+) {
+  lm_ctrl_controller_access_t access = {0};
+
+  if (state == NULL || env == NULL || view == NULL) {
+    return;
+  }
+
+  memset(view, 0, sizeof(*view));
+  lm_ctrl_controller_compute_access(&env->wifi_info, &env->machine_info, state->feature_mask, &access);
+
+  view->language = env->wifi_info.language;
+  view->remote_path_state = access.remote_path_state;
+  view->ble_visible = env->machine_info.connected || env->machine_info.authenticated;
+  view->ble_authenticated = env->machine_info.authenticated;
+  view->readable_mask = access.readable_mask;
+  view->editable_mask = access.editable_mask;
+  view->preset_load_enabled = access.preset_load_enabled;
+  view->custom_logo = env->custom_logo;
+
+  if (status_text != NULL) {
+    snprintf(view->setup_status_text, sizeof(view->setup_status_text), "%s", status_text);
+  }
+  if (env->qr_payload[0] != '\0') {
+    snprintf(view->setup_qr_payload, sizeof(view->setup_qr_payload), "%s", env->qr_payload);
+  }
+}
+
 static bool render_to_bmp(const char *path, const ctrl_state_t *state, const host_stub_env_t *env, const char *status_text) {
   lm_ctrl_ui_t ui = {0};
+  lm_ctrl_ui_view_t view = {0};
   lv_img_dsc_t *snapshot = NULL;
   bool ok = false;
 
@@ -126,7 +160,8 @@ static bool render_to_bmp(const char *path, const ctrl_state_t *state, const hos
   }
 
   host_stub_set_env(env);
-  if (lm_ctrl_ui_init(&ui, state, status_text, dummy_action_cb, NULL) != ESP_OK) {
+  build_view(state, env, status_text, &view);
+  if (lm_ctrl_ui_init(&ui, state, &view, dummy_action_cb, NULL) != ESP_OK) {
     return false;
   }
 

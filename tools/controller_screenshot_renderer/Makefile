@@ -15,6 +15,7 @@ include $(LVGL_DIR)/src/misc/lv_misc.mk
 include $(LVGL_DIR)/src/widgets/lv_widgets.mk
 
 CSRCS += $(ROOT_DIR)/firmware/esp32/main/controller_ui.c
+CSRCS += $(ROOT_DIR)/firmware/esp32/main/controller_connectivity.c
 CSRCS += $(CURDIR)/renderer.c
 CSRCS += $(CURDIR)/stubs.c
 

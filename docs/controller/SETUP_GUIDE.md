@@ -13,6 +13,7 @@ Visual reference:
 - connect a La Marzocco cloud account
 - select the active machine and persist its binding
 - keep the default text header or store an optional custom header logo as a controller setting
+- explain the current connectivity indicators and recovery actions
 - optionally inspect BLE/cloud state in the simulator tooling
 
 ## Simulator flow
@@ -56,14 +57,23 @@ The current firmware provides a real local setup path:
 10. In **La Marzocco Cloud**, store the cloud account email/password and load the machine list.
 11. Select the active machine in **Select Machine** so the controller can persist the machine binding.
 12. The browser portal currently supports:
-   - cloud account storage
-   - Wi-Fi scan
-   - home Wi-Fi storage
-   - controller language selection (`English` by default)
-   - optional local SVG upload for the controller header logo
-   - machine loading and selection
+   - `Overview` with portal reachability, current IP, and stable `.local` URL
+   - `Controller` settings for hostname, language (`English` default), and optional local SVG header logo
+   - `Network` with Wi-Fi storage and scan
+   - `Cloud` account storage, machine loading/selection, and setup-AP provisioning import
+   - `Recipes` for controller preset editing
+   - `Advanced` controller tuning and factory reset
+   - `Diagnostics` for cloud heat debug and the optional remote screenshot route
 13. Swipe up on the main controller screen to reopen `Setup` later.
 14. Swipe down on the main controller screen to open `Presets`.
+
+## Connectivity indicators
+
+- The Bluetooth icon is shown when the controller currently has a BLE path to the machine.
+- A crossed Wi-Fi icon means the controller has network/account context but the selected machine is not currently reachable through cloud.
+- A solid Wi-Fi icon means the selected machine is reachable through cloud.
+- USB and battery indicators appear only when the controller reports USB power, charging, or low-battery state.
+- In the crossed-Wi-Fi state, local BLE control for temperature, steam, and status can stay available while cloud-only values such as prebrewing continue to wait for the remote path.
 
 ## Cloud account note
 
@@ -79,8 +89,9 @@ The current firmware provides a real local setup path:
 - Swipe up on the main screen to open `Setup`.
 - On the `Presets` screen, swipe up to return to the main screen.
 - On the `Setup` screen, swipe down to return to the main screen.
-- Long-press on the `Setup` screen to open the on-device reset flow.
-- The on-device long-press reset is a `Reset Network` flow, not a full `Factory Reset`.
+- Long-press on the `Setup` screen to open the on-device `Recovery` flow.
+- `Recovery` currently offers `Clear web password` and `Reset network`.
+- `Clear web password` removes the LAN portal password outside the setup AP and keeps the stored Wi-Fi, cloud, and machine-binding state.
 - `Reset Network` clears Wi-Fi, cloud credentials, and machine selection, then reboots back into setup mode.
 - Full `Factory Reset` is available in the setup portal under `Advanced`; it also erases presets and the optional custom logo.
 
