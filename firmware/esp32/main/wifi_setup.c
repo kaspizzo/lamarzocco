@@ -29,6 +29,7 @@
 #include "lwip/sockets.h"
 #include "cloud_live_updates.h"
 #include "cloud_session.h"
+#include "board_leds.h"
 #include "controller_settings.h"
 #include "setup_portal_routes.h"
 #include "storage_security.h"
@@ -119,6 +120,10 @@ static void delayed_restart_task(void *arg) {
   const int delay_ms = (int)(intptr_t)arg;
 
   vTaskDelay(pdMS_TO_TICKS(delay_ms > 0 ? delay_ms : 250));
+  if (lm_ctrl_leds_prepare_for_reset() != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to release LED ring before restart");
+  }
+  vTaskDelay(pdMS_TO_TICKS(20));
   esp_restart();
 }
 
@@ -126,6 +131,7 @@ static esp_err_t update_mdns_hostname(void);
 static esp_err_t start_dns_server(void);
 static void stop_dns_server(void);
 static esp_err_t disable_setup_ap(void);
+static esp_err_t restart_setup_portal_after_network_reset(void);
 
 static void fill_portal_ssid_locked(void) {
   uint8_t mac[6] = {0};
@@ -139,8 +145,8 @@ static void fill_portal_ssid_locked(void) {
 }
 
 static esp_err_t ensure_portal_password(void) {
-  char random_suffix[17];
-  char generated_password[65];
+  char random_suffix[9];
+  char generated_password[9];
   bool needs_password = false;
 
   lock_state();
@@ -150,8 +156,8 @@ static esp_err_t ensure_portal_password(void) {
     return ESP_OK;
   }
 
-  fill_random_hex(random_suffix, sizeof(random_suffix), 8);
-  snprintf(generated_password, sizeof(generated_password), "LMCTRL-%s", random_suffix);
+  fill_random_hex(random_suffix, sizeof(random_suffix), 4);
+  snprintf(generated_password, sizeof(generated_password), "%s", random_suffix);
   secure_zero(random_suffix, sizeof(random_suffix));
   ESP_RETURN_ON_ERROR(lm_ctrl_settings_save_portal_password(generated_password), TAG, "Failed to persist setup AP password");
   secure_zero(generated_password, sizeof(generated_password));
@@ -245,7 +251,7 @@ esp_err_t lm_ctrl_wifi_reset_network(void) {
     return ret;
   }
 
-  return lm_ctrl_wifi_schedule_reboot();
+  return restart_setup_portal_after_network_reset();
 }
 
 esp_err_t lm_ctrl_wifi_factory_reset(void) {
@@ -281,6 +287,44 @@ static esp_err_t configure_ap(void) {
 
   ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_APSTA), TAG, "Failed to set Wi-Fi mode for AP");
   ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &ap_config), TAG, "Failed to configure setup AP");
+  return ESP_OK;
+}
+
+static esp_err_t restart_setup_portal_after_network_reset(void) {
+  if (!s_state.initialized || !s_state.wifi_started) {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  esp_err_t ret = esp_wifi_disconnect();
+  if (ret != ESP_OK && ret != ESP_ERR_WIFI_NOT_STARTED && ret != ESP_ERR_WIFI_CONN) {
+    return ret;
+  }
+
+  ret = esp_wifi_set_mode(WIFI_MODE_STA);
+  if (ret != ESP_OK) {
+    return ret;
+  }
+
+  lock_state();
+  s_state.portal_running = false;
+  s_state.sta_connecting = false;
+  s_state.sta_connected = false;
+  s_state.sta_ip[0] = '\0';
+  mark_status_dirty_locked();
+  unlock_state();
+  stop_dns_server();
+
+  ESP_RETURN_ON_ERROR(ensure_portal_password(), TAG, "Failed to recreate setup AP password");
+  ESP_RETURN_ON_ERROR(configure_ap(), TAG, "Failed to reconfigure setup AP after network reset");
+  ESP_RETURN_ON_ERROR(lm_ctrl_setup_portal_start_http_server(), TAG, "Failed to ensure setup portal web server");
+
+  lock_state();
+  s_state.portal_running = true;
+  mark_status_dirty_locked();
+  unlock_state();
+
+  ESP_RETURN_ON_ERROR(start_dns_server(), TAG, "Failed to restart captive DNS after network reset");
+  ESP_LOGI(TAG, "Network reset completed; setup portal resumed on http://192.168.4.1");
   return ESP_OK;
 }
 

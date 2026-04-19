@@ -18,3 +18,5 @@ esp_err_t lm_ctrl_leds_set_status(lm_ctrl_led_status_t status);
 esp_err_t lm_ctrl_leds_indicate_rotation(int delta_steps);
 /** Advance time-based LED animations from the main loop. */
 void lm_ctrl_leds_tick(void);
+/** Release GPIO0 before reboot so the board does not strap into download mode. */
+esp_err_t lm_ctrl_leds_prepare_for_reset(void);

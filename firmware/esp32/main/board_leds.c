@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "driver/gpio.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -143,4 +144,34 @@ void lm_ctrl_leds_tick(void) {
     (void)render_leds();
   }
   motion_was_active = motion_active;
+}
+
+esp_err_t lm_ctrl_leds_prepare_for_reset(void) {
+  esp_err_t ret = ESP_OK;
+
+  if (s_strip != NULL) {
+    for (int i = 0; i < LM_CTRL_LED_RING_COUNT; ++i) {
+      ret = led_strip_set_pixel(s_strip, i, 0, 0, 0);
+      if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to clear LED pixel %d before reset: %s", i, esp_err_to_name(ret));
+        break;
+      }
+    }
+    if (ret == ESP_OK) {
+      ret = led_strip_refresh(s_strip);
+      if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to flush LED clear before reset: %s", esp_err_to_name(ret));
+      }
+    }
+    if (led_strip_del(s_strip) != ESP_OK) {
+      ESP_LOGW(TAG, "Failed to release LED strip before reset");
+    }
+    s_strip = NULL;
+  }
+
+  s_status = LM_CTRL_LED_STATUS_IDLE;
+  s_motion_index = 0;
+  s_motion_until_us = 0;
+  ESP_RETURN_ON_ERROR(gpio_reset_pin(LM_CTRL_LED_RING_GPIO), TAG, "Failed to reset LED GPIO");
+  return ESP_OK;
 }

@@ -19,6 +19,10 @@ typedef struct {
   ctrl_language_t language;
   bool wifi_visible;
   bool wifi_connected;
+  bool usb_visible;
+  bool battery_visible;
+  bool battery_charging;
+  bool battery_low;
   bool heat_visible;
   bool heat_arc_visible;
   bool steam_heat_eta_visible;
@@ -65,6 +69,8 @@ struct lm_ctrl_ui_s {
   lv_obj_t *title_text;
   lv_obj_t *title_image;
   lv_obj_t *wifi_icon;
+  lv_obj_t *usb_icon;
+  lv_obj_t *battery_icon;
   lv_obj_t *heat_icon;
   lv_obj_t *ble_icon;
   lv_obj_t *heat_arc;

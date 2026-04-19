@@ -40,6 +40,7 @@ typedef struct {
   ctrl_state_t state;
   char status[256];
   uint32_t last_wifi_status_version;
+  uint32_t last_power_status_version;
   uint32_t last_machine_status_version;
   uint32_t last_preset_version;
   int64_t last_cloud_probe_request_us;
@@ -56,6 +57,7 @@ void lm_ctrl_runtime_init(lm_ctrl_runtime_t *runtime);
 void lm_ctrl_runtime_bootstrap(lm_ctrl_runtime_t *runtime);
 void lm_ctrl_runtime_handle_input_event(lm_ctrl_runtime_t *runtime, const lm_ctrl_input_event_t *event, bool *needs_render);
 void lm_ctrl_runtime_handle_wifi_status_change(lm_ctrl_runtime_t *runtime, bool *needs_render);
+void lm_ctrl_runtime_handle_power_status_change(lm_ctrl_runtime_t *runtime, bool *needs_render);
 void lm_ctrl_runtime_handle_machine_status_change(lm_ctrl_runtime_t *runtime, bool *needs_render);
 void lm_ctrl_runtime_handle_preset_change(lm_ctrl_runtime_t *runtime, bool *needs_render);
 void lm_ctrl_runtime_tick(lm_ctrl_runtime_t *runtime, bool *needs_render);

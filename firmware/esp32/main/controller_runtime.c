@@ -15,6 +15,7 @@
 
 #include "board_haptic.h"
 #include "board_leds.h"
+#include "board_power.h"
 #include "machine_link.h"
 #include "machine_link_policy.h"
 #include "wifi_setup.h"
@@ -771,6 +772,7 @@ void lm_ctrl_runtime_bootstrap(lm_ctrl_runtime_t *runtime) {
   }
 
   runtime->last_wifi_status_version = lm_ctrl_wifi_status_version();
+  runtime->last_power_status_version = lm_ctrl_power_status_version();
   runtime->last_machine_status_version = lm_ctrl_machine_link_status_version();
   runtime->last_preset_version = ctrl_state_preset_version();
   maybe_request_cloud_probe(&runtime->last_cloud_probe_request_us);
@@ -961,6 +963,24 @@ void lm_ctrl_runtime_handle_wifi_status_change(lm_ctrl_runtime_t *runtime, bool 
   }
 }
 
+void lm_ctrl_runtime_handle_power_status_change(lm_ctrl_runtime_t *runtime, bool *needs_render) {
+  uint32_t power_status_version;
+
+  if (runtime == NULL) {
+    return;
+  }
+
+  power_status_version = lm_ctrl_power_status_version();
+  if (power_status_version == runtime->last_power_status_version) {
+    return;
+  }
+
+  runtime->last_power_status_version = power_status_version;
+  if (needs_render != NULL) {
+    *needs_render = true;
+  }
+}
+
 void lm_ctrl_runtime_handle_machine_status_change(lm_ctrl_runtime_t *runtime, bool *needs_render) {
   uint32_t machine_status_version;
 
@@ -1055,6 +1075,7 @@ const char *lm_ctrl_runtime_status(const lm_ctrl_runtime_t *runtime) {
 
 void lm_ctrl_runtime_build_ui_view(const lm_ctrl_runtime_t *runtime, lm_ctrl_ui_view_t *view) {
   lm_ctrl_wifi_info_t wifi_info = {0};
+  lm_ctrl_power_info_t power_info = {0};
   lm_ctrl_machine_link_info_t machine_info = {0};
 
   if (runtime == NULL || view == NULL) {
@@ -1063,11 +1084,16 @@ void lm_ctrl_runtime_build_ui_view(const lm_ctrl_runtime_t *runtime, lm_ctrl_ui_
 
   memset(view, 0, sizeof(*view));
   lm_ctrl_wifi_get_info(&wifi_info);
+  lm_ctrl_power_get_info(&power_info);
   lm_ctrl_machine_link_get_info(&machine_info);
 
   view->language = wifi_info.language;
   view->wifi_visible = wifi_info.sta_connected || wifi_info.sta_connecting;
   view->wifi_connected = wifi_info.sta_connected;
+  view->usb_visible = power_info.usb_connected;
+  view->battery_visible = power_info.low || power_info.charging;
+  view->battery_charging = power_info.charging;
+  view->battery_low = power_info.low;
   view->heat_visible =
     wifi_info.heat_display_enabled &&
     runtime->heat_state.heating &&
