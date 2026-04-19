@@ -645,7 +645,7 @@ static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *v
   } icon_slot_t;
   icon_slot_t slots[5];
   size_t visible_count = 0;
-  const int step = 34;
+  const int step = 28;
   const int y = 48;
 
   if (ui == NULL || view == NULL) {
