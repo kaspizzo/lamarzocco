@@ -6,6 +6,7 @@
 #include "esp_lv_adapter.h"
 #include "nvs.h"
 
+#include "cloud_machine_selection.h"
 #include "wifi_setup_internal.h"
 
 static const char *TAG = "lm_ctrl_settings";
@@ -383,6 +384,40 @@ exit:
   return ret;
 }
 
+bool lm_ctrl_settings_get_effective_selected_machine(lm_ctrl_cloud_machine_t *machine) {
+  lm_ctrl_cloud_machine_t resolved_machine = {0};
+  bool auto_selected = false;
+  bool has_machine = false;
+
+  lock_state();
+  has_machine = lm_ctrl_cloud_resolve_effective_machine_selection(
+    &s_state.selected_machine,
+    s_state.has_machine_selection,
+    s_state.fleet,
+    s_state.fleet_count,
+    &resolved_machine,
+    &auto_selected
+  );
+  if (has_machine && auto_selected) {
+    s_state.selected_machine = resolved_machine;
+    s_state.has_machine_selection = true;
+    mark_status_dirty_locked();
+  }
+  unlock_state();
+
+  if (!has_machine) {
+    if (machine != NULL) {
+      memset(machine, 0, sizeof(*machine));
+    }
+    return false;
+  }
+
+  if (machine != NULL) {
+    *machine = resolved_machine;
+  }
+  return true;
+}
+
 esp_err_t lm_ctrl_settings_reset_network(void) {
   nvs_handle_t handle = 0;
   esp_err_t ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
@@ -490,18 +525,21 @@ esp_err_t lm_ctrl_settings_factory_reset(void) {
 }
 
 bool lm_ctrl_settings_get_machine_binding(lm_ctrl_machine_binding_t *binding) {
+  lm_ctrl_cloud_machine_t machine = {0};
+
   if (binding == NULL) {
     return false;
   }
 
-  lock_state();
   memset(binding, 0, sizeof(*binding));
-  binding->configured = s_state.has_machine_selection;
-  copy_text(binding->serial, sizeof(binding->serial), s_state.selected_machine.serial);
-  copy_text(binding->name, sizeof(binding->name), s_state.selected_machine.name);
-  copy_text(binding->model, sizeof(binding->model), s_state.selected_machine.model);
-  copy_text(binding->communication_key, sizeof(binding->communication_key), s_state.selected_machine.communication_key);
-  unlock_state();
+  if (!lm_ctrl_settings_get_effective_selected_machine(&machine)) {
+    return false;
+  }
 
+  binding->configured = true;
+  copy_text(binding->serial, sizeof(binding->serial), machine.serial);
+  copy_text(binding->name, sizeof(binding->name), machine.name);
+  copy_text(binding->model, sizeof(binding->model), machine.model);
+  copy_text(binding->communication_key, sizeof(binding->communication_key), machine.communication_key);
   return binding->configured;
 }

@@ -34,6 +34,8 @@ esp_err_t lm_ctrl_settings_clear_controller_logo(void);
 esp_err_t lm_ctrl_settings_save_cloud_credentials(const char *username, const char *password, bool *credentials_changed);
 /** Persist the selected cloud machine binding used by BLE and cloud command paths. */
 esp_err_t lm_ctrl_settings_save_machine_selection(const lm_ctrl_cloud_machine_t *machine);
+/** Copy the effective machine selection, auto-falling back to the only fleet entry when unambiguous. */
+bool lm_ctrl_settings_get_effective_selected_machine(lm_ctrl_cloud_machine_t *machine);
 /** Clear Wi-Fi, cloud, installation, and machine-binding settings while keeping other controller state. */
 esp_err_t lm_ctrl_settings_reset_network(void);
 /** Clear all persisted controller settings, including presets and custom logo data. */

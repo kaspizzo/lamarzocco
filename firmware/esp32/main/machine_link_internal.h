@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "machine_link.h"
+#include "machine_link_policy.h"
 
 #include "cJSON.h"
 #include "esp_check.h"
@@ -45,7 +46,6 @@
 #define LM_CTRL_MACHINE_CLOUD_ACK_TIMEOUT_US (12LL * 1000LL * 1000LL)
 #define LM_CTRL_MACHINE_WORKER_IDLE_WAIT_MS 500
 #define LM_CTRL_MACHINE_MAX_PENDING_CLOUD_COMMANDS 8
-#define LM_CTRL_MACHINE_ENABLE_CLOUD_FALLBACK 0
 #define LM_CTRL_BLE_VERBOSE_DIAGNOSTICS 0
 #define LM_CTRL_MACHINE_FIELD_BLE_MASK   (LM_CTRL_MACHINE_FIELD_TEMPERATURE | LM_CTRL_MACHINE_FIELD_STEAM | LM_CTRL_MACHINE_FIELD_STANDBY)
 
@@ -80,9 +80,11 @@ typedef struct {
   char target_token[128];
   ctrl_values_t desired_values;
   ctrl_values_t reported_values;
+  ctrl_values_t remote_values;
   uint32_t pending_mask;
   uint32_t inflight_cloud_mask;
   uint32_t loaded_mask;
+  uint32_t remote_loaded_mask;
   uint32_t feature_mask;
   char status_text[LM_CTRL_MACHINE_STATUS_TEXT_LEN];
   uint32_t status_version;
@@ -173,6 +175,8 @@ ctrl_steam_level_t snapshot_preferred_steam_level(void);
 void set_statusf(const char *fmt, ...);
 void clear_connection_state_locked(void);
 void snapshot_desired_values(ctrl_values_t *values);
+void snapshot_remote_values(ctrl_values_t *values, uint32_t *loaded_mask);
+bool snapshot_ble_write_ready(void);
 uint32_t snapshot_pending_mask(void);
 void mark_field_complete(uint32_t field_mask, const ctrl_values_t *sent_values);
 void clear_pending_mask(uint32_t field_mask);

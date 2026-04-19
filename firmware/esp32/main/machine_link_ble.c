@@ -3,6 +3,7 @@
  */
 #include "machine_link_internal.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -21,12 +22,106 @@ typedef enum {
 } lm_ctrl_adv_match_t;
 
 static const char *TAG = "lm_ble";
+#if LM_CTRL_BLE_VERBOSE_DIAGNOSTICS
+static uint8_t s_scan_log_budget = 0;
+#endif
 
 static bool addr_equal(const ble_addr_t *left, const ble_addr_t *right) {
   if (left == NULL || right == NULL) {
     return false;
   }
   return left->type == right->type && memcmp(left->val, right->val, sizeof(left->val)) == 0;
+}
+
+static bool contains_ascii_token_ignore_case(const char *text, const char *token) {
+  size_t text_len;
+  size_t token_len;
+  size_t index;
+  size_t inner;
+
+  if (text == NULL || token == NULL) {
+    return false;
+  }
+
+  text_len = strlen(text);
+  token_len = strlen(token);
+  if (token_len == 0 || text_len < token_len) {
+    return false;
+  }
+
+  for (index = 0; index <= (text_len - token_len); ++index) {
+    for (inner = 0; inner < token_len; ++inner) {
+      unsigned char lhs = (unsigned char)text[index + inner];
+      unsigned char rhs = (unsigned char)token[inner];
+
+      if (toupper(lhs) != toupper(rhs)) {
+        break;
+      }
+    }
+    if (inner == token_len) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+#if LM_CTRL_BLE_VERBOSE_DIAGNOSTICS
+static const char *adv_match_label(lm_ctrl_adv_match_t match_type) {
+  switch (match_type) {
+    case LM_CTRL_ADV_MATCH_EXACT:
+      return "exact";
+    case LM_CTRL_ADV_MATCH_FALLBACK:
+      return "fallback";
+    case LM_CTRL_ADV_MATCH_NONE:
+    default:
+      return "none";
+  }
+}
+#endif
+
+static void log_scan_observation(const struct ble_gap_disc_desc *disc, lm_ctrl_adv_match_t match_type) {
+#if LM_CTRL_BLE_VERBOSE_DIAGNOSTICS
+  struct ble_hs_adv_fields fields = {0};
+  char local_name[40];
+  size_t name_len = 0;
+
+  if (disc == NULL || s_scan_log_budget == 0) {
+    return;
+  }
+
+  local_name[0] = '\0';
+  if (ble_hs_adv_parse_fields(&fields, disc->data, disc->length_data) == 0 && fields.name_len > 0) {
+    name_len = fields.name_len;
+    if (name_len >= sizeof(local_name)) {
+      name_len = sizeof(local_name) - 1;
+    }
+    memcpy(local_name, fields.name, name_len);
+    local_name[name_len] = '\0';
+  }
+
+  if (local_name[0] == '\0' && disc->rssi < -70) {
+    return;
+  }
+
+  ESP_LOGI(
+    TAG,
+    "BLE scan saw addr=%02x:%02x:%02x:%02x:%02x:%02x rssi=%d name=%s match=%s",
+    disc->addr.val[5],
+    disc->addr.val[4],
+    disc->addr.val[3],
+    disc->addr.val[2],
+    disc->addr.val[1],
+    disc->addr.val[0],
+    disc->rssi,
+    local_name[0] != '\0' ? local_name : "<no-name>",
+    adv_match_label(match_type)
+  );
+  s_scan_log_budget--;
+#else
+  (void)disc;
+  (void)match_type;
+#endif
 }
 
 static lm_ctrl_adv_match_t advertisement_match_type(
@@ -63,9 +158,9 @@ static lm_ctrl_adv_match_t advertisement_match_type(
   memcpy(local_name, fields.name, name_len);
   local_name[name_len] = '\0';
 
-  is_lm_model = strncmp(local_name, "MICRA", 5) == 0 ||
-                strncmp(local_name, "MINI", 4) == 0 ||
-                strncmp(local_name, "GS3", 3) == 0;
+  is_lm_model = contains_ascii_token_ignore_case(local_name, "MICRA") ||
+                contains_ascii_token_ignore_case(local_name, "MINI") ||
+                contains_ascii_token_ignore_case(local_name, "GS3");
   has_serial = strstr(local_name, target_serial) != NULL;
 
   if (!is_lm_model && !has_serial) {
@@ -1003,24 +1098,16 @@ esp_err_t send_power_command(bool enabled) {
         set_statusf("BLE power verified via machineMode: %s", enabled ? LM_CTRL_MACHINE_MODE_BREWING : LM_CTRL_MACHINE_MODE_STANDBY);
         return ESP_OK;
       }
-      if (LM_CTRL_MACHINE_ENABLE_CLOUD_FALLBACK) {
-        ESP_LOGW(TAG, "BLE power verification failed, using cloud fallback.");
-        return send_power_command_cloud(enabled);
-      }
-      set_statusf("BLE power verification failed; cloud fallback disabled.");
-      return ESP_FAIL;
+      ESP_LOGW(TAG, "BLE power verification failed, using cloud fallback.");
+      return send_power_command_cloud(enabled);
     }
     set_statusf("BLE power command rejected: %s", message[0] != '\0' ? message : response);
     return ESP_FAIL;
   }
 
   if (verify_machine_mode_via_ble(enabled) != ESP_OK) {
-    if (LM_CTRL_MACHINE_ENABLE_CLOUD_FALLBACK) {
-      ESP_LOGW(TAG, "BLE power success response could not be verified, using cloud fallback.");
-      return send_power_command_cloud(enabled);
-    }
-    set_statusf("BLE power response ok, but mode verify failed for %s.", expected_mode);
-    return ESP_FAIL;
+    ESP_LOGW(TAG, "BLE power success response could not be verified, using cloud fallback.");
+    return send_power_command_cloud(enabled);
   }
 
   set_statusf(
@@ -1078,14 +1165,10 @@ static esp_err_t send_steam_enable_command(bool enabled, ctrl_steam_level_t desi
         set_statusf("BLE steam verified via boilers: %s", enabled ? "on" : "off");
         return ESP_OK;
       }
-      if (LM_CTRL_MACHINE_ENABLE_CLOUD_FALLBACK) {
-        ESP_LOGW(TAG, "BLE steam verification failed, using cloud fallback.");
-        return steam_cloud_result_to_esp_err(send_steam_command_cloud(
-          enabled ? desired_level : CTRL_STEAM_LEVEL_OFF
-        ));
-      }
-      set_statusf("BLE steam verification failed; cloud fallback disabled.");
-      return ESP_FAIL;
+      ESP_LOGW(TAG, "BLE steam verification failed, using cloud fallback.");
+      return steam_cloud_result_to_esp_err(send_steam_command_cloud(
+        enabled ? desired_level : CTRL_STEAM_LEVEL_OFF
+      ));
     }
     set_statusf("BLE steam command rejected: %s", message[0] != '\0' ? message : response);
     return ESP_FAIL;
@@ -1182,12 +1265,8 @@ esp_err_t send_temperature_command(float temperature_c) {
         set_statusf("BLE temperature verified via boilers: %.1f C", (double)temperature_c);
         return ESP_OK;
       }
-      if (LM_CTRL_MACHINE_ENABLE_CLOUD_FALLBACK) {
-        ESP_LOGW(TAG, "BLE temperature verification failed, using cloud fallback.");
-        return send_temperature_command_cloud(temperature_c);
-      }
-      set_statusf("BLE temperature verification failed; cloud fallback disabled.");
-      return ESP_FAIL;
+      ESP_LOGW(TAG, "BLE temperature verification failed, using cloud fallback.");
+      return send_temperature_command_cloud(temperature_c);
     }
     set_statusf("BLE temperature command rejected: %s", message[0] != '\0' ? message : response);
     return ESP_FAIL;
@@ -1299,6 +1378,9 @@ static esp_err_t start_scan(void) {
   s_link.fallback_matches = 0;
   s_link.fallback_addr_valid = false;
   portEXIT_CRITICAL(&s_link_lock);
+#if LM_CTRL_BLE_VERBOSE_DIAGNOSTICS
+  s_scan_log_budget = 12;
+#endif
 
   rc = ble_hs_id_infer_auto(0, &own_addr_type);
   if (rc != 0) {
@@ -1312,7 +1394,7 @@ static esp_err_t start_scan(void) {
   disc_params.filter_duplicates = 1;
   disc_params.passive = 0;
 
-  rc = ble_gap_disc(own_addr_type, BLE_HS_FOREVER, &disc_params, ble_gap_event, NULL);
+  rc = ble_gap_disc(own_addr_type, LM_CTRL_MACHINE_SCAN_TIMEOUT_MS, &disc_params, ble_gap_event, NULL);
   if (rc != 0) {
     portENTER_CRITICAL(&s_link_lock);
     s_link.scanning = false;
@@ -1437,7 +1519,10 @@ esp_err_t ensure_connected_and_authenticated(const lm_ctrl_machine_binding_t *bi
   ESP_RETURN_ON_ERROR(start_scan(), TAG, "BLE scan start failed");
 
   ESP_RETURN_ON_ERROR(
-      wait_for_conn_sem_interruptible(pdMS_TO_TICKS(LM_CTRL_MACHINE_SCAN_TIMEOUT_MS), "BLE machine scan timed out."),
+      wait_for_conn_sem_interruptible(
+        pdMS_TO_TICKS(LM_CTRL_MACHINE_SCAN_TIMEOUT_MS + LM_CTRL_MACHINE_CONNECT_TIMEOUT_MS),
+        "BLE machine discovery/connect timed out."
+      ),
       TAG,
       "BLE connect wait failed"
     );
@@ -1501,6 +1586,7 @@ int ble_gap_event(struct ble_gap_event *event, void *arg) {
   switch (event->type) {
     case BLE_GAP_EVENT_DISC:
       match_type = advertisement_match_type(&event->disc, matched_name, sizeof(matched_name));
+      log_scan_observation(&event->disc, match_type);
       if (match_type == LM_CTRL_ADV_MATCH_EXACT) {
         ESP_LOGI(
           TAG,

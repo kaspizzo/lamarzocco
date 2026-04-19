@@ -15,6 +15,7 @@
 #include "board_haptic.h"
 #include "board_leds.h"
 #include "machine_link.h"
+#include "machine_link_policy.h"
 #include "wifi_setup.h"
 
 static const char *TAG = "lm_ctrl_runtime";
@@ -43,6 +44,19 @@ static bool should_defer_machine_send(uint32_t field_mask) {
   return field_mask != LM_CTRL_MACHINE_FIELD_NONE &&
          (field_mask & deferred_mask) != 0 &&
          (field_mask & ~deferred_mask) == 0;
+}
+
+static bool has_local_ble_binding(lm_ctrl_machine_binding_t *binding) {
+  lm_ctrl_machine_binding_t local_binding = {0};
+
+  if (binding == NULL) {
+    binding = &local_binding;
+  }
+
+  return lm_ctrl_wifi_get_machine_binding(binding) &&
+         binding->configured &&
+         binding->serial[0] != '\0' &&
+         binding->communication_key[0] != '\0';
 }
 
 static void note_local_value_hold(
@@ -413,10 +427,7 @@ static void maybe_request_value_sync(const ctrl_state_t *state) {
 
   lm_ctrl_wifi_get_info(&wifi_info);
   lm_ctrl_machine_link_get_info(&machine_info);
-  local_ble_available = lm_ctrl_wifi_get_machine_binding(&binding) &&
-                        binding.configured &&
-                        binding.serial[0] != '\0' &&
-                        binding.communication_key[0] != '\0';
+  local_ble_available = has_local_ble_binding(&binding);
   if (machine_info.sync_pending) {
     return;
   }
@@ -439,7 +450,9 @@ static void maybe_request_value_sync(const ctrl_state_t *state) {
 static void maybe_request_periodic_value_refresh(int64_t *last_ble_request_us, int64_t *last_cloud_request_us) {
   lm_ctrl_wifi_info_t wifi_info;
   lm_ctrl_machine_link_info_t machine_info = {0};
+  lm_ctrl_machine_binding_t binding = {0};
   const int64_t now_us = esp_timer_get_time();
+  bool local_ble_available;
   bool can_refresh_ble;
   bool can_refresh_cloud;
 
@@ -449,7 +462,11 @@ static void maybe_request_periodic_value_refresh(int64_t *last_ble_request_us, i
 
   lm_ctrl_wifi_get_info(&wifi_info);
   lm_ctrl_machine_link_get_info(&machine_info);
-  can_refresh_ble = machine_info.authenticated;
+  local_ble_available = has_local_ble_binding(&binding);
+  can_refresh_ble = lm_ctrl_machine_should_request_periodic_ble_sync(
+    local_ble_available,
+    machine_info.authenticated
+  );
   can_refresh_cloud = wifi_info.cloud_connected && wifi_info.has_machine_selection;
 
   if (!can_refresh_ble) {

@@ -732,9 +732,14 @@ esp_err_t lm_ctrl_wifi_start_portal(void) {
 }
 
 void lm_ctrl_wifi_get_info(lm_ctrl_wifi_info_t *info) {
+  lm_ctrl_cloud_machine_t effective_machine = {0};
+  bool has_effective_machine = false;
+
   if (info == NULL) {
     return;
   }
+
+  has_effective_machine = lm_ctrl_settings_get_effective_selected_machine(&effective_machine);
 
   lock_state();
   memset(info, 0, sizeof(*info));
@@ -745,7 +750,7 @@ void lm_ctrl_wifi_get_info(lm_ctrl_wifi_info_t *info) {
   info->language = s_state.language;
   info->has_cloud_credentials = s_state.has_cloud_credentials;
   info->cloud_connected = s_state.cloud_connected;
-  info->has_machine_selection = s_state.has_machine_selection;
+  info->has_machine_selection = has_effective_machine;
   info->has_custom_logo = s_state.has_custom_logo;
   copy_text(info->portal_ssid, sizeof(info->portal_ssid), s_state.portal_ssid);
   copy_text(info->portal_password, sizeof(info->portal_password), s_state.portal_password);
@@ -753,9 +758,9 @@ void lm_ctrl_wifi_get_info(lm_ctrl_wifi_info_t *info) {
   copy_text(info->hostname, sizeof(info->hostname), s_state.hostname);
   copy_text(info->sta_ip, sizeof(info->sta_ip), s_state.sta_ip);
   copy_text(info->cloud_username, sizeof(info->cloud_username), s_state.cloud_username);
-  copy_text(info->machine_name, sizeof(info->machine_name), s_state.selected_machine.name);
-  copy_text(info->machine_model, sizeof(info->machine_model), s_state.selected_machine.model);
-  copy_text(info->machine_serial, sizeof(info->machine_serial), s_state.selected_machine.serial);
+  copy_text(info->machine_name, sizeof(info->machine_name), has_effective_machine ? effective_machine.name : "");
+  copy_text(info->machine_model, sizeof(info->machine_model), has_effective_machine ? effective_machine.model : "");
+  copy_text(info->machine_serial, sizeof(info->machine_serial), has_effective_machine ? effective_machine.serial : "");
   unlock_state();
 }
 

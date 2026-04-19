@@ -7,6 +7,7 @@
 #include "cJSON.h"
 
 #include "cloud_auth_internal.h"
+#include "controller_settings.h"
 
 static void append_text(char *buffer, size_t buffer_size, const char *text) {
   size_t used;
@@ -150,6 +151,7 @@ static esp_err_t fetch_dashboard_root(cJSON **out_root, char *error_text, size_t
   esp_err_t ret;
   lm_ctrl_cloud_http_header_t headers[5];
   lm_ctrl_cloud_request_auth_t auth = {0};
+  lm_ctrl_cloud_machine_t selected_machine = {0};
 
   if (out_root == NULL) {
     return ESP_ERR_INVALID_ARG;
@@ -159,8 +161,9 @@ static esp_err_t fetch_dashboard_root(cJSON **out_root, char *error_text, size_t
   lock_state();
   copy_text(username, sizeof(username), s_state.cloud_username);
   copy_text(password, sizeof(password), s_state.cloud_password);
-  copy_text(serial, sizeof(serial), s_state.selected_machine.serial);
   unlock_state();
+  (void)lm_ctrl_settings_get_effective_selected_machine(&selected_machine);
+  copy_text(serial, sizeof(serial), selected_machine.serial);
 
   if (username[0] == '\0' || password[0] == '\0' || serial[0] == '\0') {
     if (error_text != NULL && error_text_size > 0) {
