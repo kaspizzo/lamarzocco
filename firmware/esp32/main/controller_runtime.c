@@ -319,6 +319,14 @@ static void set_status_from_action(const ctrl_state_t *state, ctrl_action_t acti
         language == CTRL_LANGUAGE_DE ? "Controller-Setup wird geladen." : "Controller setup is loading."
       );
       break;
+    case CTRL_ACTION_CLEAR_WEB_PASSWORD:
+      snprintf(
+        status,
+        status_size,
+        "%s",
+        language == CTRL_LANGUAGE_DE ? "Web-Passwort wird geloescht." : "Web password is being cleared."
+      );
+      break;
     case CTRL_ACTION_RESET_NETWORK:
       snprintf(
         status,
@@ -546,6 +554,7 @@ void lm_ctrl_runtime_handle_input_event(
     .preset_slot = -1,
   };
   bool should_persist_state = false;
+  bool preserve_status = false;
 
   if (runtime == NULL || event == NULL) {
     return;
@@ -628,6 +637,7 @@ void lm_ctrl_runtime_handle_input_event(
       ctrl_open_setup(&runtime->state);
       if (lm_ctrl_wifi_start_portal() != ESP_OK) {
         snprintf(runtime->status, sizeof(runtime->status), "Could not start the setup portal.");
+        preserve_status = true;
       }
       sync_led_status_from_connectivity();
       (void)lm_ctrl_haptic_click();
@@ -642,8 +652,16 @@ void lm_ctrl_runtime_handle_input_event(
       break;
     case LM_CTRL_EVENT_CONFIRM_SETUP_RESET:
       action = ctrl_confirm_setup_reset(&runtime->state);
-      if (action.type == CTRL_ACTION_RESET_NETWORK && lm_ctrl_wifi_reset_network() != ESP_OK) {
+      if (action.type == CTRL_ACTION_CLEAR_WEB_PASSWORD) {
+        if (lm_ctrl_wifi_clear_web_admin_password() != ESP_OK) {
+          snprintf(runtime->status, sizeof(runtime->status), "Could not clear the web password.");
+          action.type = CTRL_ACTION_NONE;
+          preserve_status = true;
+        }
+      } else if (action.type == CTRL_ACTION_RESET_NETWORK && lm_ctrl_wifi_reset_network() != ESP_OK) {
         snprintf(runtime->status, sizeof(runtime->status), "Could not reset network settings.");
+        action.type = CTRL_ACTION_NONE;
+        preserve_status = true;
       }
       (void)lm_ctrl_haptic_click();
       break;
@@ -659,7 +677,9 @@ void lm_ctrl_runtime_handle_input_event(
     ESP_LOGW(TAG, "Failed to persist controller state");
   }
 
-  set_status_from_action(&runtime->state, action, runtime->status, sizeof(runtime->status));
+  if (!preserve_status) {
+    set_status_from_action(&runtime->state, action, runtime->status, sizeof(runtime->status));
+  }
   log_state(&runtime->state);
   if (needs_render != NULL) {
     *needs_render = true;

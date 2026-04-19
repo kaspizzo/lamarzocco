@@ -183,6 +183,16 @@ static ctrl_steam_level_t clamp_steam_level_index(int value) {
   return (ctrl_steam_level_t)value;
 }
 
+static ctrl_recovery_action_t clamp_recovery_action_index(int value) {
+  if (value <= (int)CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD) {
+    return CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD;
+  }
+  if (value >= (int)CTRL_RECOVERY_ACTION_RESET_NETWORK) {
+    return CTRL_RECOVERY_ACTION_RESET_NETWORK;
+  }
+  return (ctrl_recovery_action_t)value;
+}
+
 static void copy_values(ctrl_values_t *dst, const ctrl_values_t *src) {
   if (dst == NULL || src == NULL) {
     return;
@@ -730,7 +740,7 @@ void ctrl_state_init(ctrl_state_t *state) {
   state->temperature_step_c = CTRL_TEMPERATURE_STEP_DEFAULT_C;
   state->time_step_s = CTRL_TIME_STEP_DEFAULT_S;
   state->reset_progress = 0;
-  state->reset_confirm_yes = false;
+  state->recovery_action = CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD;
 
   for (int preset_index = 0; preset_index < CTRL_PRESET_MAX_COUNT; ++preset_index) {
     set_default_preset(&state->presets[preset_index], preset_index, &state->values);
@@ -889,7 +899,7 @@ void ctrl_rotate(ctrl_state_t *state, int delta_steps) {
     }
     if (progress >= CTRL_RESET_ARM_STEPS) {
       state->reset_progress = CTRL_RESET_ARM_STEPS;
-      state->reset_confirm_yes = false;
+      state->recovery_action = CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD;
       state->screen = CTRL_SCREEN_SETUP_RESET_CONFIRM;
       return;
     }
@@ -899,11 +909,7 @@ void ctrl_rotate(ctrl_state_t *state, int delta_steps) {
   }
 
   if (state->screen == CTRL_SCREEN_SETUP_RESET_CONFIRM) {
-    if (delta_steps > 0) {
-      state->reset_confirm_yes = true;
-    } else if (delta_steps < 0) {
-      state->reset_confirm_yes = false;
-    }
+    state->recovery_action = clamp_recovery_action_index((int)state->recovery_action + delta_steps);
     return;
   }
 
@@ -1014,7 +1020,7 @@ void ctrl_open_setup(ctrl_state_t *state) {
   }
 
   state->reset_progress = 0;
-  state->reset_confirm_yes = false;
+  state->recovery_action = CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD;
   state->screen = CTRL_SCREEN_SETUP;
 }
 
@@ -1024,7 +1030,7 @@ void ctrl_open_setup_reset(ctrl_state_t *state) {
   }
 
   state->reset_progress = 0;
-  state->reset_confirm_yes = false;
+  state->recovery_action = CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD;
   state->screen = CTRL_SCREEN_SETUP_RESET_ARM;
 }
 
@@ -1034,7 +1040,7 @@ void ctrl_cancel_setup_reset(ctrl_state_t *state) {
   }
 
   state->reset_progress = 0;
-  state->reset_confirm_yes = false;
+  state->recovery_action = CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD;
   state->screen = CTRL_SCREEN_SETUP;
 }
 
@@ -1044,7 +1050,7 @@ void ctrl_close_overlay(ctrl_state_t *state) {
   }
 
   state->reset_progress = 0;
-  state->reset_confirm_yes = false;
+  state->recovery_action = CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD;
   state->screen = CTRL_SCREEN_MAIN;
 }
 
@@ -1054,14 +1060,21 @@ ctrl_action_t ctrl_confirm_setup_reset(ctrl_state_t *state) {
   }
 
   state->reset_progress = 0;
-  if (!state->reset_confirm_yes) {
+  {
+    const ctrl_recovery_action_t recovery_action = state->recovery_action;
+    state->recovery_action = CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD;
     state->screen = CTRL_SCREEN_SETUP;
-    return make_action(CTRL_ACTION_NONE, CTRL_FOCUS_TEMPERATURE, -1);
-  }
 
-  state->reset_confirm_yes = false;
-  state->screen = CTRL_SCREEN_SETUP;
-  return make_action(CTRL_ACTION_RESET_NETWORK, CTRL_FOCUS_TEMPERATURE, -1);
+    switch (recovery_action) {
+      case CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD:
+        return make_action(CTRL_ACTION_CLEAR_WEB_PASSWORD, CTRL_FOCUS_TEMPERATURE, -1);
+      case CTRL_RECOVERY_ACTION_RESET_NETWORK:
+        return make_action(CTRL_ACTION_RESET_NETWORK, CTRL_FOCUS_TEMPERATURE, -1);
+      case CTRL_RECOVERY_ACTION_COUNT:
+      default:
+        return make_action(CTRL_ACTION_NONE, CTRL_FOCUS_TEMPERATURE, -1);
+    }
+  }
 }
 
 ctrl_action_t ctrl_load_preset(ctrl_state_t *state) {
@@ -1171,7 +1184,7 @@ const char *ctrl_screen_name(ctrl_screen_t screen) {
     case CTRL_SCREEN_SETUP_RESET_ARM:
       return "Setup Reset Arm";
     case CTRL_SCREEN_SETUP_RESET_CONFIRM:
-      return "Setup Reset Confirm";
+      return "Setup Recovery";
     default:
       return "Unknown";
   }

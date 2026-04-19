@@ -2,10 +2,12 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "cloud_api.h"
 #include "controller_state.h"
 #include "esp_err.h"
+#include "wifi_setup_types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,9 +36,30 @@ esp_err_t lm_ctrl_settings_clear_controller_logo(void);
 esp_err_t lm_ctrl_settings_save_cloud_credentials(const char *username, const char *password, bool *credentials_changed);
 /** Persist the selected cloud machine binding used by BLE and cloud command paths. */
 esp_err_t lm_ctrl_settings_save_machine_selection(const lm_ctrl_cloud_machine_t *machine);
-/** Clear Wi-Fi, cloud, installation, and machine-binding settings while keeping other controller state. */
+/** Persist or replace the device-local cloud provisioning bundle used for signed requests. */
+esp_err_t lm_ctrl_settings_save_cloud_provisioning(
+  const char *installation_id,
+  const uint8_t *secret,
+  const uint8_t *private_key_der,
+  size_t private_key_der_len
+);
+/** Ensure that device-local cloud provisioning exists, generating fresh per-device material if needed. */
+esp_err_t lm_ctrl_settings_ensure_cloud_provisioning(void);
+/** Persist the cloud-installation registration state cached for the current provisioning bundle. */
+esp_err_t lm_ctrl_settings_set_cloud_installation_registered(bool registered);
+/** Persist the setup-AP password shown on the on-device setup screen and QR code. */
+esp_err_t lm_ctrl_settings_save_portal_password(const char *password);
+/** Persist a LAN admin password hash and enable authenticated web access outside the setup AP. */
+esp_err_t lm_ctrl_settings_save_web_admin_password(const char *password);
+/** Disable LAN web auth and clear the persisted admin password hash. */
+esp_err_t lm_ctrl_settings_clear_web_admin_password(void);
+/** Verify a candidate LAN admin password against the persisted hash. */
+bool lm_ctrl_settings_verify_web_admin_password(const char *password);
+/** Persist whether the remote debug screenshot endpoint is enabled. */
+esp_err_t lm_ctrl_settings_set_debug_screenshot_enabled(bool enabled);
+/** Clear Wi-Fi, cloud-account, and machine-binding settings while keeping device provisioning and other controller state. */
 esp_err_t lm_ctrl_settings_reset_network(void);
-/** Clear all persisted controller settings, including presets and custom logo data. */
+/** Clear all persisted controller settings, including device provisioning, presets, and custom logo data. */
 esp_err_t lm_ctrl_settings_factory_reset(void);
 /** Copy the active machine binding into the supplied output structure. */
 bool lm_ctrl_settings_get_machine_binding(lm_ctrl_machine_binding_t *binding);

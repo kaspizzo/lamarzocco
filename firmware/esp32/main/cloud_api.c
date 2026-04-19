@@ -22,6 +22,7 @@
 #include "mbedtls/pk.h"
 #include "mbedtls/private/sha256.h"
 #include "machine_link_types.h"
+#include "psa/crypto.h"
 
 static const char *TAG = "lm_cloud_api";
 
@@ -49,6 +50,15 @@ static void copy_text(char *dst, size_t dst_size, const char *src) {
   dst[len] = '\0';
 }
 
+static void secure_zero(void *ptr, size_t len) {
+  volatile uint8_t *cursor = (volatile uint8_t *)ptr;
+
+  while (cursor != NULL && len > 0) {
+    *cursor++ = 0;
+    --len;
+  }
+}
+
 static esp_err_t sha256_bytes(const uint8_t *data, size_t data_len, uint8_t output[32]) {
   if (data == NULL || output == NULL) {
     return ESP_ERR_INVALID_ARG;
@@ -73,6 +83,160 @@ static esp_err_t base64_encode_bytes(const uint8_t *data, size_t data_len, char 
 
   output[output_len] = '\0';
   return ESP_OK;
+}
+
+static void format_uuid_v4(char buffer[37]) {
+  uint8_t random_bytes[16] = {0};
+
+  if (buffer == NULL) {
+    return;
+  }
+
+  esp_fill_random(random_bytes, sizeof(random_bytes));
+  random_bytes[6] = (uint8_t)((random_bytes[6] & 0x0FU) | 0x40U);
+  random_bytes[8] = (uint8_t)((random_bytes[8] & 0x3FU) | 0x80U);
+  snprintf(
+    buffer,
+    37,
+    "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+    random_bytes[0], random_bytes[1], random_bytes[2], random_bytes[3],
+    random_bytes[4], random_bytes[5],
+    random_bytes[6], random_bytes[7],
+    random_bytes[8], random_bytes[9],
+    random_bytes[10], random_bytes[11], random_bytes[12], random_bytes[13], random_bytes[14], random_bytes[15]
+  );
+  secure_zero(random_bytes, sizeof(random_bytes));
+}
+
+esp_err_t lm_ctrl_cloud_generate_installation_secret(
+  const char *installation_id,
+  const uint8_t *public_key_der,
+  size_t public_key_der_len,
+  uint8_t secret[32]
+) {
+  uint8_t installation_hash[32];
+  char public_key_b64[256];
+  char installation_hash_b64[64];
+  char secret_input[384];
+
+  if (installation_id == NULL ||
+      installation_id[0] == '\0' ||
+      public_key_der == NULL ||
+      public_key_der_len == 0 ||
+      secret == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  if (sha256_bytes((const uint8_t *)installation_id, strlen(installation_id), installation_hash) != ESP_OK) {
+    return ESP_FAIL;
+  }
+  if (base64_encode_bytes(public_key_der, public_key_der_len, public_key_b64, sizeof(public_key_b64)) != ESP_OK ||
+      base64_encode_bytes(installation_hash, sizeof(installation_hash), installation_hash_b64, sizeof(installation_hash_b64)) != ESP_OK) {
+    secure_zero(installation_hash, sizeof(installation_hash));
+    secure_zero(public_key_b64, sizeof(public_key_b64));
+    secure_zero(installation_hash_b64, sizeof(installation_hash_b64));
+    return ESP_FAIL;
+  }
+
+  snprintf(
+    secret_input,
+    sizeof(secret_input),
+    "%s.%s.%s",
+    installation_id,
+    public_key_b64,
+    installation_hash_b64
+  );
+  if (sha256_bytes((const uint8_t *)secret_input, strlen(secret_input), secret) != ESP_OK) {
+    secure_zero(installation_hash, sizeof(installation_hash));
+    secure_zero(public_key_b64, sizeof(public_key_b64));
+    secure_zero(installation_hash_b64, sizeof(installation_hash_b64));
+    secure_zero(secret_input, sizeof(secret_input));
+    return ESP_FAIL;
+  }
+
+  secure_zero(installation_hash, sizeof(installation_hash));
+  secure_zero(public_key_b64, sizeof(public_key_b64));
+  secure_zero(installation_hash_b64, sizeof(installation_hash_b64));
+  secure_zero(secret_input, sizeof(secret_input));
+  return ESP_OK;
+}
+
+esp_err_t lm_ctrl_cloud_generate_installation(lm_ctrl_cloud_installation_t *installation) {
+  mbedtls_pk_context pk;
+  psa_key_attributes_t key_attributes = PSA_KEY_ATTRIBUTES_INIT;
+  psa_key_id_t key_id = 0;
+  unsigned char private_key_der[sizeof(installation->private_key_der)];
+  unsigned char public_key_der[160];
+  const unsigned char *private_key_ptr;
+  const unsigned char *public_key_ptr;
+  int private_key_der_len = 0;
+  int public_key_der_len = 0;
+  psa_status_t psa_status = PSA_SUCCESS;
+  esp_err_t ret = ESP_FAIL;
+
+  if (installation == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  memset(installation, 0, sizeof(*installation));
+  format_uuid_v4(installation->installation_id);
+
+  psa_status = psa_crypto_init();
+  if (psa_status != PSA_SUCCESS) {
+    ret = ESP_FAIL;
+    goto exit;
+  }
+
+  mbedtls_pk_init(&pk);
+  psa_set_key_usage_flags(&key_attributes, PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_SIGN_HASH);
+  psa_set_key_algorithm(&key_attributes, PSA_ALG_ECDSA(PSA_ALG_SHA_256));
+  psa_set_key_type(&key_attributes, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+  psa_set_key_bits(&key_attributes, 256);
+
+  psa_status = psa_generate_key(&key_attributes, &key_id);
+  if (psa_status != PSA_SUCCESS) {
+    ret = ESP_FAIL;
+    goto exit;
+  }
+  if (mbedtls_pk_wrap_psa(&pk, key_id) != 0) {
+    ret = ESP_FAIL;
+    goto exit;
+  }
+
+  private_key_der_len = mbedtls_pk_write_key_der(&pk, private_key_der, sizeof(private_key_der));
+  if (private_key_der_len <= 0 || (size_t)private_key_der_len > sizeof(private_key_der)) {
+    ret = ESP_FAIL;
+    goto exit;
+  }
+  private_key_ptr = private_key_der + sizeof(private_key_der) - (size_t)private_key_der_len;
+  memcpy(installation->private_key_der, private_key_ptr, (size_t)private_key_der_len);
+  installation->private_key_der_len = (size_t)private_key_der_len;
+
+  public_key_der_len = mbedtls_pk_write_pubkey_der(&pk, public_key_der, sizeof(public_key_der));
+  if (public_key_der_len <= 0 || (size_t)public_key_der_len > sizeof(public_key_der)) {
+    ret = ESP_FAIL;
+    goto exit;
+  }
+  public_key_ptr = public_key_der + sizeof(public_key_der) - (size_t)public_key_der_len;
+  ret = lm_ctrl_cloud_generate_installation_secret(
+    installation->installation_id,
+    public_key_ptr,
+    (size_t)public_key_der_len,
+    installation->secret
+  );
+
+exit:
+  psa_reset_key_attributes(&key_attributes);
+  mbedtls_pk_free(&pk);
+  if (key_id != 0) {
+    (void)psa_destroy_key(key_id);
+  }
+  secure_zero(private_key_der, sizeof(private_key_der));
+  secure_zero(public_key_der, sizeof(public_key_der));
+  if (ret != ESP_OK) {
+    secure_zero(installation, sizeof(*installation));
+  }
+  return ret;
 }
 
 static esp_err_t http_buffer_append(lm_ctrl_http_buffer_t *buffer, const char *data, size_t data_len) {

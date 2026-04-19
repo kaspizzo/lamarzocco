@@ -31,6 +31,7 @@
 #include "cloud_session.h"
 #include "controller_settings.h"
 #include "setup_portal_routes.h"
+#include "storage_security.h"
 #include "wifi_setup_internal.h"
 #include "mdns.h"
 
@@ -137,23 +138,24 @@ static void fill_portal_ssid_locked(void) {
   snprintf(s_state.portal_ssid, sizeof(s_state.portal_ssid), "LM-CTRL-%02X%02X", mac[4], mac[5]);
 }
 
-static void fill_portal_password_locked(void) {
-  uint8_t mac[6] = {0};
+static esp_err_t ensure_portal_password(void) {
+  char random_suffix[17];
+  char generated_password[65];
+  bool needs_password = false;
 
-  if (esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP) != ESP_OK) {
-    copy_text(s_state.portal_password, sizeof(s_state.portal_password), LM_CTRL_PORTAL_PASSWORD_FALLBACK);
-    return;
+  lock_state();
+  needs_password = s_state.portal_password[0] == '\0';
+  unlock_state();
+  if (!needs_password) {
+    return ESP_OK;
   }
 
-  snprintf(
-    s_state.portal_password,
-    sizeof(s_state.portal_password),
-    "LMCTRL-%02X%02X%02X%02X",
-    mac[2],
-    mac[3],
-    mac[4],
-    mac[5]
-  );
+  fill_random_hex(random_suffix, sizeof(random_suffix), 8);
+  snprintf(generated_password, sizeof(generated_password), "LMCTRL-%s", random_suffix);
+  secure_zero(random_suffix, sizeof(random_suffix));
+  ESP_RETURN_ON_ERROR(lm_ctrl_settings_save_portal_password(generated_password), TAG, "Failed to persist setup AP password");
+  secure_zero(generated_password, sizeof(generated_password));
+  return ESP_OK;
 }
 
 esp_err_t lm_ctrl_wifi_store_credentials(const char *ssid, const char *password, const char *hostname, ctrl_language_t language) {
@@ -195,6 +197,31 @@ esp_err_t lm_ctrl_wifi_save_controller_logo(uint8_t schema_version, const uint8_
 
 esp_err_t lm_ctrl_wifi_clear_controller_logo(void) {
   return lm_ctrl_settings_clear_controller_logo();
+}
+
+esp_err_t lm_ctrl_wifi_save_cloud_provisioning(
+  const char *installation_id,
+  const uint8_t *secret,
+  const uint8_t *private_key_der,
+  size_t private_key_der_len
+) {
+  return lm_ctrl_settings_save_cloud_provisioning(installation_id, secret, private_key_der, private_key_der_len);
+}
+
+esp_err_t lm_ctrl_wifi_save_web_admin_password(const char *password) {
+  return lm_ctrl_settings_save_web_admin_password(password);
+}
+
+esp_err_t lm_ctrl_wifi_clear_web_admin_password(void) {
+  return lm_ctrl_settings_clear_web_admin_password();
+}
+
+bool lm_ctrl_wifi_verify_web_admin_password(const char *password) {
+  return lm_ctrl_settings_verify_web_admin_password(password);
+}
+
+esp_err_t lm_ctrl_wifi_set_debug_screenshot_enabled(bool enabled) {
+  return lm_ctrl_settings_set_debug_screenshot_enabled(enabled);
 }
 
 esp_err_t lm_ctrl_wifi_schedule_reboot(void) {
@@ -636,10 +663,17 @@ esp_err_t lm_ctrl_wifi_init(void) {
     return ESP_ERR_NO_MEM;
   }
 
-  fill_portal_ssid_locked();
-  fill_portal_password_locked();
+  ESP_RETURN_ON_ERROR(lm_ctrl_secure_storage_init(), TAG, "Failed to initialize encrypted controller storage");
   ret = lm_ctrl_settings_load();
   ESP_RETURN_ON_ERROR(ret, TAG, "Failed to load Wi-Fi credentials");
+  ret = lm_ctrl_settings_ensure_cloud_provisioning();
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "Cloud provisioning auto-generation unavailable: %s", esp_err_to_name(ret));
+  }
+  lock_state();
+  fill_portal_ssid_locked();
+  unlock_state();
+  ESP_RETURN_ON_ERROR(ensure_portal_password(), TAG, "Failed to create setup AP password");
 
   ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "Failed to init esp-netif");
   ret = esp_event_loop_create_default();
@@ -747,6 +781,9 @@ void lm_ctrl_wifi_get_info(lm_ctrl_wifi_info_t *info) {
   info->cloud_connected = s_state.cloud_connected;
   info->has_machine_selection = s_state.has_machine_selection;
   info->has_custom_logo = s_state.has_custom_logo;
+  info->has_cloud_provisioning = s_state.has_cloud_provisioning;
+  info->debug_screenshot_enabled = s_state.debug_screenshot_enabled;
+  info->web_auth_mode = s_state.web_auth_mode;
   copy_text(info->portal_ssid, sizeof(info->portal_ssid), s_state.portal_ssid);
   copy_text(info->portal_password, sizeof(info->portal_password), s_state.portal_password);
   copy_text(info->sta_ssid, sizeof(info->sta_ssid), s_state.sta_ssid);

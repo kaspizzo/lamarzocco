@@ -1,7 +1,9 @@
 #include <stdio.h>
 
 int run_controller_state_tests(void);
+int run_controller_settings_tests(void);
 int run_cloud_api_tests(void);
+int run_storage_security_tests(void);
 int run_setup_portal_page_tests(void);
 int run_setup_portal_route_tests(void);
 
@@ -11,7 +13,13 @@ int main(void) {
   if (run_controller_state_tests() != 0) {
     return 1;
   }
+  if (run_controller_settings_tests() != 0) {
+    return 1;
+  }
   if (run_cloud_api_tests() != 0) {
+    return 1;
+  }
+  if (run_storage_security_tests() != 0) {
     return 1;
   }
   if (run_setup_portal_page_tests() != 0) {
