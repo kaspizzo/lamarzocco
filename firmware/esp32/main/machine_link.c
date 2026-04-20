@@ -559,6 +559,10 @@ void update_heat_info(const lm_ctrl_machine_heat_info_t *info) {
 bool should_skip_ble_attempt(void) {
   int64_t last_failure_us;
 
+  if (!machine_link_ble_transport_enabled()) {
+    return true;
+  }
+
   portENTER_CRITICAL(&s_link_lock);
   last_failure_us = s_link.last_ble_failure_us;
   portEXIT_CRITICAL(&s_link_lock);
@@ -820,6 +824,24 @@ esp_err_t lm_ctrl_machine_link_init(const lm_ctrl_machine_link_deps_t *deps) {
     return ESP_OK;
   }
 
+  portENTER_CRITICAL(&s_link_lock);
+  s_deps = *deps;
+  s_link.initialized = true;
+  portEXIT_CRITICAL(&s_link_lock);
+
+  if (xTaskCreate(machine_link_worker, "lm_ble_worker", LM_CTRL_MACHINE_WORKER_STACK_SIZE, NULL, 5, &s_link.worker_task) != pdPASS) {
+    portENTER_CRITICAL(&s_link_lock);
+    s_link.initialized = false;
+    s_link.worker_task = NULL;
+    portEXIT_CRITICAL(&s_link_lock);
+    return ESP_ERR_NO_MEM;
+  }
+
+  if (!machine_link_ble_transport_enabled()) {
+    set_statusf("BLE transport disabled in build configuration.");
+    return ESP_OK;
+  }
+
   s_link.conn_sem = xSemaphoreCreateBinary();
   s_link.op_sem = xSemaphoreCreateBinary();
   s_link.mtu_sem = xSemaphoreCreateBinary();
@@ -842,14 +864,7 @@ esp_err_t lm_ctrl_machine_link_init(const lm_ctrl_machine_link_deps_t *deps) {
   ble_hs_cfg.sync_cb = machine_link_on_sync;
   ble_hs_cfg.store_status_cb = ble_store_util_status_rr;
   ble_store_config_init();
-
-  xTaskCreate(machine_link_worker, "lm_ble_worker", LM_CTRL_MACHINE_WORKER_STACK_SIZE, NULL, 5, &s_link.worker_task);
   nimble_port_freertos_init(machine_link_host_task);
-
-  portENTER_CRITICAL(&s_link_lock);
-  s_deps = *deps;
-  s_link.initialized = true;
-  portEXIT_CRITICAL(&s_link_lock);
 
   set_statusf("BLE transport initialized.");
   return ESP_OK;
@@ -901,6 +916,12 @@ esp_err_t lm_ctrl_machine_link_request_sync(void) {
 esp_err_t lm_ctrl_machine_link_request_sync_mode(uint32_t sync_flags) {
   if (!s_link.initialized) {
     return ESP_ERR_INVALID_STATE;
+  }
+  if (!machine_link_ble_transport_enabled()) {
+    sync_flags &= ~LM_CTRL_MACHINE_SYNC_BLE;
+  }
+  if (sync_flags == LM_CTRL_MACHINE_SYNC_NONE) {
+    return ESP_OK;
   }
   if (sync_flags == LM_CTRL_MACHINE_SYNC_NONE) {
     return ESP_ERR_INVALID_ARG;

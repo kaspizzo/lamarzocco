@@ -42,6 +42,10 @@ static void reset_heat_state(lm_ctrl_runtime_heat_state_t *heat_state) {
   };
 }
 
+static void reset_shot_timer_state(lm_ctrl_runtime_shot_timer_state_t *shot_timer_state) {
+  lm_ctrl_shot_timer_reset(shot_timer_state);
+}
+
 static void clear_heat_refresh(lm_ctrl_runtime_heat_refresh_t *heat_refresh) {
   if (heat_refresh == NULL) {
     return;
@@ -116,6 +120,21 @@ static uint16_t heat_state_progress_permille(const lm_ctrl_runtime_heat_state_t 
   }
 
   return (uint16_t)((remaining_us * 1000LL) / heat_state->duration_us);
+}
+
+static void maybe_refresh_shot_timer(lm_ctrl_runtime_t *runtime, bool *needs_render) {
+  lm_ctrl_shot_timer_info_t shot_timer = {0};
+
+  if (runtime == NULL) {
+    return;
+  }
+
+  if (lm_ctrl_wifi_get_shot_timer_info(&shot_timer) &&
+      lm_ctrl_shot_timer_update(&runtime->shot_timer_state, &shot_timer)) {
+    if (needs_render != NULL) {
+      *needs_render = true;
+    }
+  }
 }
 
 static bool initialize_heat_state_deadline(
@@ -553,6 +572,8 @@ static void sync_led_status_from_connectivity(void) {
 static void maybe_request_cloud_probe(int64_t *last_request_us) {
   lm_ctrl_wifi_info_t wifi_info;
   const int64_t now_us = esp_timer_get_time();
+  esp_err_t probe_ret = ESP_ERR_INVALID_STATE;
+  esp_err_t live_ret = ESP_ERR_INVALID_STATE;
 
   if (last_request_us == NULL) {
     return;
@@ -568,7 +589,9 @@ static void maybe_request_cloud_probe(int64_t *last_request_us) {
     return;
   }
 
-  if (lm_ctrl_wifi_request_cloud_probe() == ESP_OK) {
+  probe_ret = lm_ctrl_wifi_request_cloud_probe();
+  live_ret = lm_ctrl_wifi_request_live_updates();
+  if (probe_ret == ESP_OK || live_ret == ESP_OK) {
     *last_request_us = now_us;
   }
 }
@@ -707,6 +730,7 @@ void lm_ctrl_runtime_init(lm_ctrl_runtime_t *runtime) {
 
   memset(runtime, 0, sizeof(*runtime));
   reset_heat_state(&runtime->heat_state);
+  reset_shot_timer_state(&runtime->shot_timer_state);
   ctrl_state_init(&runtime->state);
   if (ctrl_state_load(&runtime->state) != ESP_OK) {
     ESP_LOGW(TAG, "Falling back to default controller values");
@@ -888,6 +912,11 @@ void lm_ctrl_runtime_handle_input_event(
       }
       (void)lm_ctrl_haptic_click();
       break;
+    case LM_CTRL_EVENT_DISMISS_SHOT_TIMER:
+      if (lm_ctrl_shot_timer_dismiss(&runtime->shot_timer_state)) {
+        (void)lm_ctrl_haptic_click();
+      }
+      break;
     case LM_CTRL_EVENT_CLOSE_SCREEN:
       ctrl_close_overlay(&runtime->state);
       (void)lm_ctrl_haptic_click();
@@ -1021,6 +1050,7 @@ void lm_ctrl_runtime_tick(lm_ctrl_runtime_t *runtime, bool *needs_render) {
       *needs_render = true;
     }
   }
+  maybe_refresh_shot_timer(runtime, needs_render);
 }
 
 const ctrl_state_t *lm_ctrl_runtime_state(const lm_ctrl_runtime_t *runtime) {
@@ -1068,6 +1098,17 @@ void lm_ctrl_runtime_build_ui_view(const lm_ctrl_runtime_t *runtime, lm_ctrl_ui_
   view->preset_load_enabled = access.preset_load_enabled;
   view->heat_progress_permille = heat_state_progress_permille(&runtime->heat_state);
   view->custom_logo = wifi_info.has_custom_logo ? lm_ctrl_wifi_get_custom_logo() : NULL;
+  view->shot_timer_visible = lm_ctrl_shot_timer_visible(&runtime->shot_timer_state);
+  view->shot_timer_dismissable = lm_ctrl_shot_timer_dismissable(&runtime->shot_timer_state);
+  if (view->shot_timer_visible) {
+    snprintf(
+      view->shot_timer_text,
+      sizeof(view->shot_timer_text),
+      "%u:%02u",
+      (unsigned int)(runtime->shot_timer_state.seconds / 60U),
+      (unsigned int)(runtime->shot_timer_state.seconds % 60U)
+    );
+  }
   if (view->heat_arc_visible) {
     int32_t remaining_s = heat_state_remaining_seconds(&runtime->heat_state);
     snprintf(

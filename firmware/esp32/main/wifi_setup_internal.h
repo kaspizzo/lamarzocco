@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-#define LM_CTRL_ENABLE_CLOUD_LIVE_UPDATES 0
+#define LM_CTRL_ENABLE_CLOUD_LIVE_UPDATES 1
 
 #define LM_CTRL_WIFI_NAMESPACE "wifi"
 #define LM_CTRL_WIFI_KEY_SSID "ssid"

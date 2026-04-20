@@ -119,7 +119,7 @@ static int test_parse_dashboard_values_extracts_machine_and_bbw_state(void) {
   static const char *response_body =
     "{"
       "\"widgets\":["
-        "{\"code\":\"CMMachineStatus\",\"output\":{\"mode\":\"BrewingMode\",\"brewingStartTime\":1700000000123}},"
+        "{\"code\":\"CMMachineStatus\",\"output\":{\"status\":\"Brewing\",\"mode\":\"BrewingMode\",\"brewingStartTime\":1700000000123}},"
         "{\"code\":\"CMCoffeeBoiler\",\"output\":{\"targetTemperature\":94.5}},"
         "{\"code\":\"CMSteamBoilerLevel\",\"output\":{\"enabled\":true,\"targetLevel\":\"Level3\"}},"
         "{\"code\":\"CMPreExtraction\",\"output\":{\"In\":{\"seconds\":{\"PreBrewing\":1.5}},\"Out\":{\"seconds\":{\"PreBrewing\":2.5}}}},"
@@ -162,6 +162,78 @@ static int test_parse_dashboard_values_extracts_machine_and_bbw_state(void) {
   ASSERT_FLOAT_EQ(33.4f, values.bbw_dose_2_g, 0.0001f);
   ASSERT_TRUE(brew_active);
   ASSERT_EQ_I64(1700000000123LL, brew_start_epoch_ms);
+
+  cJSON_Delete(root);
+  return 0;
+}
+
+static int test_parse_dashboard_values_uses_brewing_status_without_timestamp(void) {
+  static const char *response_body =
+    "{"
+      "\"widgets\":["
+        "{\"code\":\"CMMachineStatus\",\"output\":{\"status\":\"Brewing\",\"mode\":\"BrewingMode\",\"brewingStartTime\":null}}"
+      "]"
+    "}";
+  cJSON *root = cJSON_Parse(response_body);
+  ctrl_values_t values = {0};
+  uint32_t loaded_mask = 0;
+  uint32_t feature_mask = 0;
+  bool brew_active = false;
+  int64_t brew_start_epoch_ms = 123;
+
+  ASSERT_TRUE(root != NULL);
+  ASSERT_EQ_INT(
+    ESP_OK,
+    lm_ctrl_cloud_parse_dashboard_root_values(
+      root,
+      &values,
+      &loaded_mask,
+      &feature_mask,
+      NULL,
+      &brew_active,
+      &brew_start_epoch_ms
+    )
+  );
+  ASSERT_TRUE((loaded_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0);
+  ASSERT_FALSE(values.standby_on);
+  ASSERT_TRUE(brew_active);
+  ASSERT_EQ_I64(0LL, brew_start_epoch_ms);
+
+  cJSON_Delete(root);
+  return 0;
+}
+
+static int test_parse_dashboard_values_does_not_treat_brewing_mode_as_live_shot_by_itself(void) {
+  static const char *response_body =
+    "{"
+      "\"widgets\":["
+        "{\"code\":\"CMMachineStatus\",\"output\":{\"status\":\"PoweredOn\",\"mode\":\"BrewingMode\",\"brewingStartTime\":null}}"
+      "]"
+    "}";
+  cJSON *root = cJSON_Parse(response_body);
+  ctrl_values_t values = {0};
+  uint32_t loaded_mask = 0;
+  uint32_t feature_mask = 0;
+  bool brew_active = true;
+  int64_t brew_start_epoch_ms = 123;
+
+  ASSERT_TRUE(root != NULL);
+  ASSERT_EQ_INT(
+    ESP_OK,
+    lm_ctrl_cloud_parse_dashboard_root_values(
+      root,
+      &values,
+      &loaded_mask,
+      &feature_mask,
+      NULL,
+      &brew_active,
+      &brew_start_epoch_ms
+    )
+  );
+  ASSERT_TRUE((loaded_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0);
+  ASSERT_FALSE(values.standby_on);
+  ASSERT_FALSE(brew_active);
+  ASSERT_EQ_I64(0LL, brew_start_epoch_ms);
 
   cJSON_Delete(root);
   return 0;
@@ -282,6 +354,8 @@ int run_cloud_api_tests(void) {
   RUN_TEST(test_parse_customer_fleet_filters_invalid_entries);
   RUN_TEST(test_parse_dashboard_machine_status_extracts_online_signal);
   RUN_TEST(test_parse_dashboard_values_extracts_machine_and_bbw_state);
+  RUN_TEST(test_parse_dashboard_values_uses_brewing_status_without_timestamp);
+  RUN_TEST(test_parse_dashboard_values_does_not_treat_brewing_mode_as_live_shot_by_itself);
   RUN_TEST(test_parse_prebrew_widget_supports_both_widget_shapes);
   RUN_TEST(test_parse_dashboard_values_prefers_latest_ready_time_across_heating_boilers);
   RUN_TEST(test_parse_dashboard_values_falls_back_to_coffee_eta_when_steam_is_not_heating);

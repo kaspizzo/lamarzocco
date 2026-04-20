@@ -811,12 +811,10 @@ static void append_ws_header_line(char *buffer, size_t buffer_size, const char *
   if (buffer == NULL || buffer_size == 0 || name == NULL || value == NULL) {
     return;
   }
-  if (buffer[0] != '\0') {
-    append_text(buffer, buffer_size, "\r\n");
-  }
   append_text(buffer, buffer_size, name);
   append_text(buffer, buffer_size, ": ");
   append_text(buffer, buffer_size, value);
+  append_text(buffer, buffer_size, "\r\n");
 }
 
 esp_err_t lm_ctrl_cloud_session_build_websocket_headers(char *buffer, size_t buffer_size) {

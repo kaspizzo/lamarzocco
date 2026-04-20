@@ -47,6 +47,7 @@
 #define LM_CTRL_MACHINE_WORKER_IDLE_WAIT_MS 500
 #define LM_CTRL_MACHINE_MAX_PENDING_CLOUD_COMMANDS 8
 #define LM_CTRL_BLE_VERBOSE_DIAGNOSTICS 0
+#define LM_CTRL_ENABLE_BLE_TRANSPORT 1
 #define LM_CTRL_MACHINE_FIELD_BLE_MASK   (LM_CTRL_MACHINE_FIELD_TEMPERATURE | LM_CTRL_MACHINE_FIELD_STEAM | LM_CTRL_MACHINE_FIELD_STANDBY)
 
 #define LM_CTRL_MACHINE_UUID_READ "0a0b7847-e12b-09a8-b04b-8e0922a9abab"
@@ -138,6 +139,11 @@ extern lm_ctrl_machine_link_state_t s_link;
 extern lm_ctrl_pending_cloud_command_t s_pending_cloud_commands[LM_CTRL_MACHINE_MAX_PENDING_CLOUD_COMMANDS];
 extern lm_ctrl_machine_link_deps_t s_deps;
 extern portMUX_TYPE s_link_lock;
+
+/* Build-time switch that can disable BLE transport while keeping the rest of the link stack alive. */
+static inline bool machine_link_ble_transport_enabled(void) {
+  return LM_CTRL_ENABLE_BLE_TRANSPORT != 0;
+}
 
 #if LM_CTRL_BLE_VERBOSE_DIAGNOSTICS
 #define BLE_VERBOSE_LOGI(...) ESP_LOGI(TAG, __VA_ARGS__)

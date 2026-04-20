@@ -27,11 +27,14 @@ typedef struct {
   bool heat_arc_visible;
   bool ble_visible;
   bool ble_authenticated;
+  bool shot_timer_visible;
+  bool shot_timer_dismissable;
   uint32_t readable_mask;
   uint32_t editable_mask;
   bool preset_load_enabled;
   uint16_t heat_progress_permille;
   const lv_img_dsc_t *custom_logo;
+  char shot_timer_text[24];
   char heat_eta_text[16];
   char setup_status_text[LM_CTRL_UI_STATUS_TEXT_LEN];
   char setup_qr_payload[LM_CTRL_UI_SETUP_QR_LEN];
@@ -49,6 +52,7 @@ typedef enum {
   LM_CTRL_UI_ACTION_OPEN_SETUP_RESET,
   LM_CTRL_UI_ACTION_CANCEL_SETUP_RESET,
   LM_CTRL_UI_ACTION_CONFIRM_SETUP_RESET,
+  LM_CTRL_UI_ACTION_DISMISS_SHOT_TIMER,
 } lm_ctrl_ui_action_t;
 
 /** Callback invoked when the UI needs the main loop to handle a touch action. */
@@ -83,6 +87,9 @@ struct lm_ctrl_ui_s {
   lv_obj_t *focus;
   lv_obj_t *value;
   lv_obj_t *hint;
+  lv_obj_t *shot_timer_card;
+  lv_obj_t *shot_timer_title;
+  lv_obj_t *shot_timer_value;
   lv_obj_t *power_left_button;
   lv_obj_t *power_left_title;
   lv_obj_t *power_left_value;
@@ -114,6 +121,8 @@ struct lm_ctrl_ui_s {
   ctrl_focus_t rendered_focus;
   ctrl_screen_t rendered_screen;
   uint32_t rendered_feature_mask;
+  bool rendered_shot_timer_visible;
+  bool rendered_shot_timer_dismissable;
   lm_ctrl_ui_action_cb_t action_cb;
   void *action_user_data;
   lm_ctrl_ui_binding_t bindings[LM_CTRL_UI_BINDING_COUNT];
