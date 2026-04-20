@@ -11,6 +11,7 @@
 
 #include "esp_log.h"
 #include "extra/libs/qrcode/lv_qrcode.h"
+#include "lm_ctrl_fonts.h"
 #include "machine_link_types.h"
 
 static const char *TAG = "lm_ui";
@@ -24,6 +25,12 @@ static const lv_color_t COLOR_ACTIVE = LV_COLOR_MAKE(0xFF, 0xC6, 0x85);
 static const lv_color_t COLOR_BUTTON = LV_COLOR_MAKE(0x3A, 0x2A, 0x21);
 static const char *BATTERY_CHARGING_SYMBOL = LV_SYMBOL_BATTERY_FULL LV_SYMBOL_CHARGE;
 static const char *ICON_SLASH_SYMBOL = "/";
+
+#define UI_FONT_14 (&lm_ctrl_font_montserrat_14)
+#define UI_FONT_16 (&lm_ctrl_font_montserrat_16)
+#define UI_FONT_20 (&lm_ctrl_font_montserrat_20)
+#define UI_FONT_28 (&lm_ctrl_font_montserrat_28)
+#define UI_FONT_40 (&lm_ctrl_font_montserrat_40)
 
 static const ctrl_focus_t MAIN_PAGE_ORDER[LM_CTRL_UI_MAIN_PAGE_COUNT] = {
   CTRL_FOCUS_TEMPERATURE,
@@ -309,7 +316,7 @@ static void format_main_unavailable_placeholder(
         hint_size,
         "%s",
         language == CTRL_LANGUAGE_DE
-          ? "Maschine offline.\nCloud-Werte nicht verfuegbar."
+          ? "Maschine offline.\nCloud-Werte nicht verfügbar."
           : "Machine offline.\nCloud values unavailable."
       );
       break;
@@ -343,7 +350,7 @@ static void format_main_value(
         hint_size,
         "%s",
         language == CTRL_LANGUAGE_DE
-          ? "Die Kaffeeboiler-Einstellung regelt die Wassertemperatur fuer die Espresso-Zubereitung."
+          ? "Die Kaffeeboiler-Einstellung regelt die Wassertemperatur für die Espresso-Zubereitung."
           : "The coffee boiler setting controls the brewing water temperature."
       );
       break;
@@ -354,7 +361,7 @@ static void format_main_value(
         hint_size,
         "%s",
         language == CTRL_LANGUAGE_DE
-          ? "An-Zeit: Dauer des Pumpenimpulses waehrend Prebrewing."
+          ? "An-Zeit: Dauer des Pumpenimpulses während Prebrewing."
           : "On-time: pump pulse duration during prebrewing."
       );
       break;
@@ -380,7 +387,7 @@ static void format_main_value(
         snprintf(
           hint,
           hint_size,
-          language == CTRL_LANGUAGE_DE ? "Aufheizen laeuft.\nBereit in %s." : "Heating up.\nReady in %s.",
+          language == CTRL_LANGUAGE_DE ? "Aufheizen läuft.\nBereit in %s." : "Heating up.\nReady in %s.",
           view->heat_eta_text
         );
       } else {
@@ -415,7 +422,7 @@ static void format_main_value(
         snprintf(
           hint,
           hint_size,
-          language == CTRL_LANGUAGE_DE ? "Aufheizen laeuft.\nBereit in %s." : "Heating up.\nReady in %s.",
+          language == CTRL_LANGUAGE_DE ? "Aufheizen läuft.\nBereit in %s." : "Heating up.\nReady in %s.",
           view->heat_eta_text
         );
       }
@@ -427,7 +434,7 @@ static void format_main_value(
         hint_size,
         "%s",
         language == CTRL_LANGUAGE_DE
-          ? "Aktiven Brew-by-Weight\nModus waehlen."
+          ? "Aktiven Brew-by-Weight\nModus wählen."
           : "Select the active\nbrew-by-weight mode."
       );
       break;
@@ -438,7 +445,7 @@ static void format_main_value(
         hint_size,
         "%s",
         language == CTRL_LANGUAGE_DE
-          ? "Zielgewicht fuer\nBBW Dosis 1."
+          ? "Zielgewicht für\nBBW Dosis 1."
           : "Target weight for\nBBW dose 1."
       );
       break;
@@ -449,7 +456,7 @@ static void format_main_value(
         hint_size,
         "%s",
         language == CTRL_LANGUAGE_DE
-          ? "Zielgewicht fuer\nBBW Dosis 2."
+          ? "Zielgewicht für\nBBW Dosis 2."
           : "Target weight for\nBBW dose 2."
       );
       break;
@@ -548,7 +555,7 @@ static lv_obj_t *create_button(
 
   lv_obj_t *label = lv_label_create(button);
   lv_obj_center(label);
-  lv_obj_set_style_text_font(label, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_font(label, UI_FONT_16, 0);
   lv_obj_add_flag(label, LV_OBJ_FLAG_GESTURE_BUBBLE);
   if (out_label != NULL) {
     *out_label = label;
@@ -892,13 +899,13 @@ static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, con
   if (state->screen == CTRL_SCREEN_SETUP_RESET_ARM) {
     lv_obj_align(ui->setup_title, LV_ALIGN_TOP_MID, 0, 24);
     lv_obj_align(ui->setup_body, LV_ALIGN_BOTTOM_MID, 0, -6);
-    set_label_text(ui->setup_title, language == CTRL_LANGUAGE_DE ? "Zuruecksetzen" : "Reset", COLOR_ACTIVE);
+    set_label_text(ui->setup_title, language == CTRL_LANGUAGE_DE ? "Zurücksetzen" : "Reset", COLOR_ACTIVE);
     snprintf(
       reset_body,
       sizeof(reset_body),
       "%s\n\n%s",
       language == CTRL_LANGUAGE_DE
-        ? "Einmal im Uhrzeigersinn drehen, um die Wiederherstellung zu oeffnen."
+        ? "Einmal im Uhrzeigersinn drehen, um die Wiederherstellung zu öffnen."
         : "Rotate clockwise once to open recovery.",
       language == CTRL_LANGUAGE_DE
         ? "Nach unten wischen zum Abbrechen."
@@ -923,19 +930,19 @@ static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, con
       sizeof(recovery_actions),
       "%s %s\n%s %s",
       state->recovery_action == CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD ? ">" : " ",
-      language == CTRL_LANGUAGE_DE ? "Web-Passwort loeschen" : "Clear web password",
+      language == CTRL_LANGUAGE_DE ? "Web-Passwort löschen" : "Clear web password",
       state->recovery_action == CTRL_RECOVERY_ACTION_RESET_NETWORK ? ">" : " ",
-      language == CTRL_LANGUAGE_DE ? "Netzwerk zuruecksetzen" : "Reset network"
+      language == CTRL_LANGUAGE_DE ? "Netzwerk zurücksetzen" : "Reset network"
     );
     set_label_text(
       ui->setup_body,
       language == CTRL_LANGUAGE_DE
-        ? "Aktion mit dem Drehknopf waehlen."
+        ? "Aktion mit dem Drehknopf wählen."
         : "Rotate to choose the recovery action.",
       COLOR_TEXT
     );
     set_label_text(ui->setup_action_list, recovery_actions, COLOR_TEXT);
-    set_label_text(ui->setup_secondary_label, language == CTRL_LANGUAGE_DE ? "Zurueck" : "Back", COLOR_TEXT);
+    set_label_text(ui->setup_secondary_label, language == CTRL_LANGUAGE_DE ? "Zurück" : "Back", COLOR_TEXT);
     set_label_text(ui->setup_primary_label, language == CTRL_LANGUAGE_DE ? "Start" : "Run", COLOR_BG);
     style_action_button(ui->setup_secondary_button, ui->setup_secondary_label, false);
     style_action_button(ui->setup_primary_button, ui->setup_primary_label, true);
@@ -998,7 +1005,7 @@ esp_err_t lm_ctrl_ui_init(
 
   ui->title_text = lv_label_create(ui->screen);
   lv_obj_set_width(ui->title_text, 170);
-  lv_obj_set_style_text_font(ui->title_text, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_font(ui->title_text, UI_FONT_16, 0);
   lv_obj_set_style_text_letter_space(ui->title_text, 2, 0);
   lv_obj_set_style_text_align(ui->title_text, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_align(ui->title_text, LV_ALIGN_TOP_MID, 0, 18);
@@ -1008,35 +1015,35 @@ esp_err_t lm_ctrl_ui_init(
   set_hidden(ui->title_image, true);
 
   ui->wifi_icon = lv_label_create(ui->screen);
-  lv_obj_set_style_text_font(ui->wifi_icon, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(ui->wifi_icon, UI_FONT_14, 0);
   lv_obj_align(ui->wifi_icon, LV_ALIGN_TOP_MID, -68, 48);
 
   ui->wifi_slash_icon = lv_label_create(ui->screen);
-  lv_obj_set_style_text_font(ui->wifi_slash_icon, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(ui->wifi_slash_icon, UI_FONT_20, 0);
   lv_obj_align(ui->wifi_slash_icon, LV_ALIGN_TOP_MID, -68, 47);
   set_hidden(ui->wifi_slash_icon, true);
 
   ui->usb_icon = lv_label_create(ui->screen);
-  lv_obj_set_style_text_font(ui->usb_icon, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(ui->usb_icon, UI_FONT_14, 0);
   lv_obj_align(ui->usb_icon, LV_ALIGN_TOP_MID, 34, 48);
   set_hidden(ui->usb_icon, true);
 
   ui->battery_icon = lv_label_create(ui->screen);
-  lv_obj_set_style_text_font(ui->battery_icon, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(ui->battery_icon, UI_FONT_14, 0);
   lv_obj_align(ui->battery_icon, LV_ALIGN_TOP_MID, 68, 48);
   set_hidden(ui->battery_icon, true);
 
   ui->heat_icon = lv_label_create(ui->screen);
-  lv_obj_set_style_text_font(ui->heat_icon, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(ui->heat_icon, UI_FONT_14, 0);
   lv_obj_align(ui->heat_icon, LV_ALIGN_TOP_MID, -34, 48);
   set_hidden(ui->heat_icon, true);
 
   ui->ble_icon = lv_label_create(ui->screen);
-  lv_obj_set_style_text_font(ui->ble_icon, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(ui->ble_icon, UI_FONT_14, 0);
   lv_obj_align(ui->ble_icon, LV_ALIGN_TOP_MID, 0, 48);
 
   ui->page_label = lv_label_create(ui->screen);
-  lv_obj_set_style_text_font(ui->page_label, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(ui->page_label, UI_FONT_14, 0);
   lv_obj_align(ui->page_label, LV_ALIGN_TOP_MID, 0, 46);
 
   ui->heat_arc = lv_arc_create(ui->screen);
@@ -1060,14 +1067,14 @@ esp_err_t lm_ctrl_ui_init(
   ui->main_card = create_panel(ui->screen, 280, 192);
 
   ui->focus = lv_label_create(ui->main_card);
-  lv_obj_set_style_text_font(ui->focus, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(ui->focus, UI_FONT_20, 0);
   lv_obj_set_style_text_align(ui->focus, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_width(ui->focus, 230);
   lv_obj_align(ui->focus, LV_ALIGN_TOP_MID, 0, 22);
   lv_obj_add_flag(ui->focus, LV_OBJ_FLAG_GESTURE_BUBBLE);
 
   ui->value = lv_label_create(ui->main_card);
-  lv_obj_set_style_text_font(ui->value, &lv_font_montserrat_40, 0);
+  lv_obj_set_style_text_font(ui->value, UI_FONT_40, 0);
   lv_obj_align(ui->value, LV_ALIGN_CENTER, 0, -6);
   lv_obj_add_flag(ui->value, LV_OBJ_FLAG_GESTURE_BUBBLE);
 
@@ -1075,7 +1082,7 @@ esp_err_t lm_ctrl_ui_init(
   lv_obj_set_width(ui->hint, 226);
   lv_label_set_long_mode(ui->hint, LV_LABEL_LONG_WRAP);
   lv_obj_set_style_text_align(ui->hint, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_style_text_font(ui->hint, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(ui->hint, UI_FONT_14, 0);
   lv_obj_align(ui->hint, LV_ALIGN_BOTTOM_MID, 0, -18);
   lv_obj_add_flag(ui->hint, LV_OBJ_FLAG_GESTURE_BUBBLE);
 
@@ -1088,10 +1095,10 @@ esp_err_t lm_ctrl_ui_init(
   bind_button(ui, BIND_POWER_STEAM, ui->power_left_button, LM_CTRL_UI_ACTION_TOGGLE_FOCUS, CTRL_FOCUS_STEAM);
 
   ui->power_left_title = lv_label_create(ui->power_left_button);
-  lv_obj_set_style_text_font(ui->power_left_title, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_font(ui->power_left_title, UI_FONT_16, 0);
   lv_obj_align(ui->power_left_title, LV_ALIGN_TOP_MID, 0, 12);
   ui->power_left_value = lv_label_create(ui->power_left_button);
-  lv_obj_set_style_text_font(ui->power_left_value, &lv_font_montserrat_28, 0);
+  lv_obj_set_style_text_font(ui->power_left_value, UI_FONT_28, 0);
   lv_obj_align(ui->power_left_value, LV_ALIGN_BOTTOM_MID, 0, -12);
 
   ui->power_right_button = lv_btn_create(ui->main_card);
@@ -1103,35 +1110,35 @@ esp_err_t lm_ctrl_ui_init(
   bind_button(ui, BIND_POWER_STANDBY, ui->power_right_button, LM_CTRL_UI_ACTION_TOGGLE_FOCUS, CTRL_FOCUS_STANDBY);
 
   ui->power_right_title = lv_label_create(ui->power_right_button);
-  lv_obj_set_style_text_font(ui->power_right_title, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_font(ui->power_right_title, UI_FONT_16, 0);
   lv_obj_align(ui->power_right_title, LV_ALIGN_TOP_MID, 0, 12);
   ui->power_right_value = lv_label_create(ui->power_right_button);
-  lv_obj_set_style_text_font(ui->power_right_value, &lv_font_montserrat_28, 0);
+  lv_obj_set_style_text_font(ui->power_right_value, UI_FONT_28, 0);
   lv_obj_align(ui->power_right_value, LV_ALIGN_BOTTOM_MID, 0, -12);
 
   ui->power_hint = lv_label_create(ui->main_card);
   lv_obj_set_width(ui->power_hint, 228);
   lv_label_set_long_mode(ui->power_hint, LV_LABEL_LONG_WRAP);
   lv_obj_set_style_text_align(ui->power_hint, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_style_text_font(ui->power_hint, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(ui->power_hint, UI_FONT_14, 0);
   lv_obj_align(ui->power_hint, LV_ALIGN_BOTTOM_MID, 0, -14);
 
   ui->presets_card = create_panel(ui->screen, 282, 196);
   ui->presets_title = lv_label_create(ui->presets_card);
-  lv_obj_set_style_text_font(ui->presets_title, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(ui->presets_title, UI_FONT_20, 0);
   lv_obj_align(ui->presets_title, LV_ALIGN_TOP_MID, 0, 14);
 
   ui->presets_name = lv_label_create(ui->presets_card);
   lv_obj_set_width(ui->presets_name, 230);
   lv_label_set_long_mode(ui->presets_name, LV_LABEL_LONG_DOT);
-  lv_obj_set_style_text_font(ui->presets_name, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(ui->presets_name, UI_FONT_14, 0);
   lv_obj_set_style_text_align(ui->presets_name, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_align(ui->presets_name, LV_ALIGN_TOP_MID, 0, 40);
 
   ui->presets_body = lv_label_create(ui->presets_card);
   lv_obj_set_width(ui->presets_body, 226);
   lv_label_set_long_mode(ui->presets_body, LV_LABEL_LONG_WRAP);
-  lv_obj_set_style_text_font(ui->presets_body, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_font(ui->presets_body, UI_FONT_16, 0);
   lv_obj_set_style_text_align(ui->presets_body, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_align(ui->presets_body, LV_ALIGN_TOP_MID, 0, 68);
 
@@ -1145,7 +1152,7 @@ esp_err_t lm_ctrl_ui_init(
   ui->setup_card = create_panel(ui->screen, 282, 252);
   lv_obj_add_event_cb(ui->setup_card, handle_setup_long_press, LV_EVENT_LONG_PRESSED, ui);
   ui->setup_title = lv_label_create(ui->setup_card);
-  lv_obj_set_style_text_font(ui->setup_title, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(ui->setup_title, UI_FONT_20, 0);
   lv_obj_align(ui->setup_title, LV_ALIGN_TOP_MID, 0, 24);
 
   ui->setup_qr = lv_qrcode_create(ui->setup_card, 112, COLOR_BG, lv_color_white());
@@ -1159,7 +1166,7 @@ esp_err_t lm_ctrl_ui_init(
   ui->setup_body = lv_label_create(ui->setup_card);
   lv_obj_set_width(ui->setup_body, 236);
   lv_label_set_long_mode(ui->setup_body, LV_LABEL_LONG_WRAP);
-  lv_obj_set_style_text_font(ui->setup_body, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(ui->setup_body, UI_FONT_14, 0);
   lv_obj_set_style_text_align(ui->setup_body, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_align_to(ui->setup_body, ui->setup_qr, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
   lv_obj_add_event_cb(ui->setup_body, handle_setup_long_press, LV_EVENT_LONG_PRESSED, ui);
@@ -1167,7 +1174,7 @@ esp_err_t lm_ctrl_ui_init(
   ui->setup_action_list = lv_label_create(ui->setup_card);
   lv_obj_set_width(ui->setup_action_list, 236);
   lv_label_set_long_mode(ui->setup_action_list, LV_LABEL_LONG_WRAP);
-  lv_obj_set_style_text_font(ui->setup_action_list, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(ui->setup_action_list, UI_FONT_14, 0);
   lv_obj_set_style_text_align(ui->setup_action_list, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_align(ui->setup_action_list, LV_ALIGN_TOP_MID, 0, 102);
   lv_obj_add_event_cb(ui->setup_action_list, handle_setup_long_press, LV_EVENT_LONG_PRESSED, ui);

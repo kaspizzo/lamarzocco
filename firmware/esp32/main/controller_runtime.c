@@ -501,7 +501,7 @@ static void set_status_from_action(const ctrl_state_t *state, ctrl_action_t acti
         status,
         status_size,
         "%s",
-        language == CTRL_LANGUAGE_DE ? "Web-Passwort wird geloescht." : "Web password is being cleared."
+        language == CTRL_LANGUAGE_DE ? "Web-Passwort wird gelöscht." : "Web password is being cleared."
       );
       break;
     case CTRL_ACTION_RESET_NETWORK:
@@ -509,7 +509,7 @@ static void set_status_from_action(const ctrl_state_t *state, ctrl_action_t acti
         status,
         status_size,
         "%s",
-        language == CTRL_LANGUAGE_DE ? "Netzwerk-Reset wird ausgefuehrt." : "Network reset in progress."
+        language == CTRL_LANGUAGE_DE ? "Netzwerk-Reset wird ausgeführt." : "Network reset in progress."
       );
       break;
     case CTRL_ACTION_NONE:

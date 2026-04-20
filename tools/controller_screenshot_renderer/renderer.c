@@ -308,6 +308,55 @@ static int generate_setup_screens(const char *output_dir) {
   return 0;
 }
 
+static int generate_german_screens(const char *output_dir) {
+  host_stub_env_t env = base_env();
+  ctrl_state_t state = base_state();
+  char path[512];
+
+  env.wifi_info.language = CTRL_LANGUAGE_DE;
+
+  snprintf(path, sizeof(path), "%s/boiler-de.bmp", output_dir);
+  if (!render_to_bmp(path, &state, &env, NULL)) {
+    return 1;
+  }
+
+  state.focus = CTRL_FOCUS_INFUSE;
+  state.loaded_mask = 0;
+  env.machine_info.connected = false;
+  env.machine_info.authenticated = false;
+  env.wifi_info.sta_connected = true;
+  env.wifi_info.cloud_connected = false;
+  env.wifi_info.has_cloud_credentials = true;
+  env.wifi_info.has_machine_selection = true;
+  env.wifi_info.machine_cloud_online = false;
+
+  snprintf(path, sizeof(path), "%s/infuse-offline-de.bmp", output_dir);
+  if (!render_to_bmp(path, &state, &env, NULL)) {
+    return 1;
+  }
+
+  env = base_env();
+  env.wifi_info.language = CTRL_LANGUAGE_DE;
+  state = base_state();
+  state.screen = CTRL_SCREEN_SETUP_RESET_ARM;
+  state.reset_progress = 12;
+
+  snprintf(path, sizeof(path), "%s/setup-reset-arm-de.bmp", output_dir);
+  if (!render_to_bmp(path, &state, &env, NULL)) {
+    return 1;
+  }
+
+  state.screen = CTRL_SCREEN_SETUP_RESET_CONFIRM;
+  state.recovery_action = CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD;
+
+  snprintf(path, sizeof(path), "%s/recovery-de.bmp", output_dir);
+  if (!render_to_bmp(path, &state, &env, NULL)) {
+    return 1;
+  }
+
+  return 0;
+}
+
 int main(void) {
   static lv_color_t display_buffer[360 * 360];
   static lv_disp_draw_buf_t draw_buf;
@@ -337,7 +386,9 @@ int main(void) {
     lv_timer_handler();
   }
 
-  if (generate_main_screens(output_dir) != 0 || generate_setup_screens(output_dir) != 0) {
+  if (generate_main_screens(output_dir) != 0 ||
+      generate_setup_screens(output_dir) != 0 ||
+      generate_german_screens(output_dir) != 0) {
     fprintf(stderr, "Failed to render controller screenshots.\n");
     return 1;
   }
