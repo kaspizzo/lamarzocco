@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "controller_shot_timer.h"
 #include "controller_state.h"
 #include "controller_ui.h"
 #include "input.h"
@@ -35,6 +36,8 @@ typedef struct {
   int64_t next_request_us;
 } lm_ctrl_runtime_heat_refresh_t;
 
+typedef lm_ctrl_shot_timer_state_t lm_ctrl_runtime_shot_timer_state_t;
+
 /** Runtime-owned controller state, status text, and sync bookkeeping. */
 typedef struct {
   ctrl_state_t state;
@@ -50,6 +53,7 @@ typedef struct {
   lm_ctrl_runtime_delayed_machine_send_t delayed_machine_send;
   lm_ctrl_runtime_heat_state_t heat_state;
   lm_ctrl_runtime_heat_refresh_t heat_refresh;
+  lm_ctrl_runtime_shot_timer_state_t shot_timer_state;
 } lm_ctrl_runtime_t;
 
 void lm_ctrl_runtime_init(lm_ctrl_runtime_t *runtime);

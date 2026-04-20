@@ -19,6 +19,46 @@
 #include "wifi_setup_internal.h"
 
 static const char *TAG = "lm_cloud_live";
+static bool stomp_command_matches(const char *command, const char *expected) {
+  size_t expected_len;
+
+  if (command == NULL || expected == NULL) {
+    return false;
+  }
+
+  expected_len = strlen(expected);
+  return strncmp(command, expected, expected_len) == 0 &&
+         (command[expected_len] == '\0' ||
+          command[expected_len] == '\n' ||
+          command[expected_len] == '\r');
+}
+
+static const char *websocket_event_name(int32_t event_id) {
+  switch (event_id) {
+    case WEBSOCKET_EVENT_ERROR:
+      return "ERROR";
+#if WS_TRANSPORT_HEADER_CALLBACK_SUPPORT
+    case WEBSOCKET_EVENT_HEADER_RECEIVED:
+      return "HEADER_RECEIVED";
+#endif
+    case WEBSOCKET_EVENT_CONNECTED:
+      return "CONNECTED";
+    case WEBSOCKET_EVENT_DISCONNECTED:
+      return "DISCONNECTED";
+    case WEBSOCKET_EVENT_DATA:
+      return "DATA";
+    case WEBSOCKET_EVENT_CLOSED:
+      return "CLOSED";
+    case WEBSOCKET_EVENT_BEFORE_CONNECT:
+      return "BEFORE_CONNECT";
+    case WEBSOCKET_EVENT_BEGIN:
+      return "BEGIN";
+    case WEBSOCKET_EVENT_FINISH:
+      return "FINISH";
+    default:
+      return "UNKNOWN";
+  }
+}
 
 static void append_text(char *buffer, size_t buffer_size, const char *text) {
   size_t used;
@@ -157,6 +197,7 @@ static void build_stomp_frame(
 }
 
 static bool parse_stomp_frame(char *frame, const char **command, char **body) {
+  char *command_end;
   char *separator;
   char *nul;
 
@@ -173,7 +214,12 @@ static bool parse_stomp_frame(char *frame, const char **command, char **body) {
   if (separator == NULL) {
     return false;
   }
+  command_end = strchr(frame, '\n');
+  if (command_end == NULL || command_end > separator) {
+    return false;
+  }
 
+  *command_end = '\0';
   *separator = '\0';
   *command = frame;
   *body = separator + 2;
@@ -272,6 +318,8 @@ static void handle_cloud_dashboard_message(const char *message) {
     return;
   }
 
+  ESP_LOGI(TAG, "Cloud websocket dashboard message received");
+
   update_count = parse_dashboard_command_updates(root, updates, LM_CTRL_CLOUD_COMMAND_UPDATE_MAX);
   if (lm_ctrl_cloud_parse_dashboard_machine_status(root, &machine_status)) {
     merge_cloud_machine_status(&machine_status);
@@ -301,6 +349,7 @@ static void send_cloud_ws_connect_frame(esp_websocket_client_handle_t client) {
   char frame[1536];
   lm_ctrl_cloud_http_header_t headers[4];
   size_t frame_len;
+  int sent_len;
 
   if (client == NULL) {
     return;
@@ -316,7 +365,9 @@ static void send_cloud_ws_connect_frame(esp_websocket_client_handle_t client) {
   headers[3] = (lm_ctrl_cloud_http_header_t){ .name = "Authorization", .value = auth_header };
   build_stomp_frame(frame, sizeof(frame), "CONNECT", headers, 4, NULL);
   frame_len = strnlen(frame, sizeof(frame) - 1) + 1;
-  (void)esp_websocket_client_send_text(client, frame, frame_len, portMAX_DELAY);
+  ESP_LOGI(TAG, "Cloud websocket transport connected; sending STOMP CONNECT len=%u", (unsigned)frame_len);
+  sent_len = esp_websocket_client_send_text(client, frame, frame_len, portMAX_DELAY);
+  ESP_LOGI(TAG, "Cloud websocket STOMP CONNECT send returned %d", sent_len);
 }
 
 static void send_cloud_ws_subscribe_frame(esp_websocket_client_handle_t client) {
@@ -325,6 +376,7 @@ static void send_cloud_ws_subscribe_frame(esp_websocket_client_handle_t client) 
   char frame[512];
   lm_ctrl_cloud_http_header_t headers[4];
   size_t frame_len;
+  int sent_len;
 
   if (client == NULL) {
     return;
@@ -347,7 +399,9 @@ static void send_cloud_ws_subscribe_frame(esp_websocket_client_handle_t client) 
   headers[3] = (lm_ctrl_cloud_http_header_t){ .name = "content-length", .value = "0" };
   build_stomp_frame(frame, sizeof(frame), "SUBSCRIBE", headers, 4, NULL);
   frame_len = strnlen(frame, sizeof(frame) - 1) + 1;
-  (void)esp_websocket_client_send_text(client, frame, frame_len, portMAX_DELAY);
+  ESP_LOGI(TAG, "Cloud websocket STOMP connected; subscribing to %s len=%u", destination, (unsigned)frame_len);
+  sent_len = esp_websocket_client_send_text(client, frame, frame_len, portMAX_DELAY);
+  ESP_LOGI(TAG, "Cloud websocket SUBSCRIBE send returned %d", sent_len);
 }
 
 static void cloud_ws_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
@@ -355,6 +409,21 @@ static void cloud_ws_event_handler(void *handler_args, esp_event_base_t base, in
   esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
 
   (void)base;
+  if (data != NULL) {
+    ESP_LOGI(
+      TAG,
+      "Cloud websocket event=%s(%ld) data_len=%d payload_len=%d offset=%d opcode=%u fin=%d",
+      websocket_event_name(event_id),
+      (long)event_id,
+      data->data_len,
+      data->payload_len,
+      data->payload_offset,
+      (unsigned)data->op_code,
+      data->fin ? 1 : 0
+    );
+  } else {
+    ESP_LOGI(TAG, "Cloud websocket event=%s(%ld)", websocket_event_name(event_id), (long)event_id);
+  }
 
   if (event_id == WEBSOCKET_EVENT_CONNECTED) {
     lock_state();
@@ -368,6 +437,7 @@ static void cloud_ws_event_handler(void *handler_args, esp_event_base_t base, in
   }
 
   if (event_id == WEBSOCKET_EVENT_DISCONNECTED) {
+    ESP_LOGW(TAG, "Cloud websocket disconnected");
     set_cloud_websocket_connected(false, false);
     set_brew_timer_state(false, 0);
     lm_ctrl_machine_link_handle_cloud_websocket_disconnect();
@@ -409,17 +479,23 @@ static void cloud_ws_event_handler(void *handler_args, esp_event_base_t base, in
     lock_state();
     copy_text(frame_copy, LM_CTRL_CLOUD_WS_FRAME_MAX, s_state.cloud_ws_frame);
     unlock_state();
+    ESP_LOGI(TAG, "Cloud websocket raw frame: %s", frame_copy);
 
     if (!parse_stomp_frame(frame_copy, &command, &body) || command == NULL) {
+      ESP_LOGW(TAG, "Cloud websocket frame parse failed");
       free(frame_copy);
       return;
     }
+    ESP_LOGI(TAG, "Cloud websocket STOMP command=%s", command);
 
-    if (strcmp(command, "CONNECTED") == 0) {
+    if (stomp_command_matches(command, "CONNECTED")) {
       set_cloud_websocket_connected(true, true);
-      send_cloud_ws_subscribe_frame(client);
-    } else if (strcmp(command, "MESSAGE") == 0) {
+    } else if (stomp_command_matches(command, "ERROR")) {
+      ESP_LOGW(TAG, "Cloud websocket STOMP ERROR body: %s", body != NULL ? body : "");
+    } else if (stomp_command_matches(command, "MESSAGE")) {
       handle_cloud_dashboard_message(body);
+    } else {
+      ESP_LOGI(TAG, "Cloud websocket unhandled STOMP command=%s body=%s", command, body != NULL ? body : "");
     }
 
     free(frame_copy);
@@ -433,13 +509,14 @@ static void cloud_websocket_task(void *arg) {
   char ws_headers[LM_CTRL_CLOUD_WS_HEADER_BUFFER_LEN];
 
   (void)arg;
+  ESP_LOGI(TAG, "Cloud websocket worker starting");
 
   while (true) {
     esp_websocket_client_config_t ws_config = {
       .uri = LM_CTRL_CLOUD_WS_URI,
       .headers = ws_headers,
-      .task_stack = 4096,
-      .buffer_size = 512,
+      .task_stack = 8192,
+      .buffer_size = 2048,
       .reconnect_timeout_ms = 0,
       .disable_auto_reconnect = true,
       .network_timeout_ms = 10000,
@@ -464,18 +541,21 @@ static void cloud_websocket_task(void *arg) {
 
     ret = lm_ctrl_cloud_session_fetch_access_token_cached(username, password, access_token, sizeof(access_token), NULL, 0);
     if (ret != ESP_OK) {
+      ESP_LOGW(TAG, "Cloud websocket access token fetch failed: %s", esp_err_to_name(ret));
       vTaskDelay(pdMS_TO_TICKS(5000));
       continue;
     }
 
     ret = lm_ctrl_cloud_session_build_websocket_headers(ws_headers, sizeof(ws_headers));
     if (ret != ESP_OK) {
+      ESP_LOGW(TAG, "Cloud websocket header signing failed: %s", esp_err_to_name(ret));
       vTaskDelay(pdMS_TO_TICKS(5000));
       continue;
     }
 
     client = esp_websocket_client_init(&ws_config);
     if (client == NULL) {
+      ESP_LOGW(TAG, "Cloud websocket client init failed");
       vTaskDelay(pdMS_TO_TICKS(5000));
       continue;
     }
@@ -488,16 +568,57 @@ static void cloud_websocket_task(void *arg) {
 
     (void)esp_websocket_register_events(client, WEBSOCKET_EVENT_ANY, cloud_ws_event_handler, client);
     ret = esp_websocket_client_start(client);
+    ESP_LOGI(TAG, "Cloud websocket client start returned %s", esp_err_to_name(ret));
     if (ret == ESP_OK) {
+      const int64_t connect_deadline_us = esp_timer_get_time() + (15LL * 1000LL * 1000LL);
+      bool saw_transport_connected = false;
+      bool subscribe_sent = false;
+
       while (true) {
         bool should_stop = false;
+        bool transport_connected = false;
+        bool stomp_connected = false;
+        bool client_connected = false;
 
         lock_state();
         should_stop = s_state.cloud_ws_stop_requested || !should_run_cloud_websocket_locked();
+        transport_connected = s_state.cloud_ws_transport_connected;
+        stomp_connected = s_state.cloud_ws_connected;
         unlock_state();
+        client_connected = esp_websocket_client_is_connected(client);
+        if (transport_connected) {
+          saw_transport_connected = true;
+        }
 
-        if (should_stop || !esp_websocket_client_is_connected(client)) {
+        if (should_stop) {
+          ESP_LOGW(
+            TAG,
+            "Cloud websocket worker loop exiting: should_stop=1 client_connected=%d transport_connected=%d stomp_connected=%d stop_requested=%d http_in_flight=%u",
+            client_connected ? 1 : 0,
+            transport_connected ? 1 : 0,
+            stomp_connected ? 1 : 0,
+            s_state.cloud_ws_stop_requested ? 1 : 0,
+            (unsigned)s_state.cloud_http_requests_in_flight
+          );
           break;
+        }
+        if (!client_connected) {
+          if (saw_transport_connected || esp_timer_get_time() >= connect_deadline_us) {
+            ESP_LOGW(
+              TAG,
+              "Cloud websocket worker loop exiting: should_stop=0 client_connected=0 transport_connected=%d stomp_connected=%d timeout=%d",
+              transport_connected ? 1 : 0,
+              stomp_connected ? 1 : 0,
+              esp_timer_get_time() >= connect_deadline_us ? 1 : 0
+            );
+            break;
+          }
+          vTaskDelay(pdMS_TO_TICKS(50));
+          continue;
+        }
+        if (stomp_connected && !subscribe_sent) {
+          send_cloud_ws_subscribe_frame(client);
+          subscribe_sent = true;
         }
         vTaskDelay(pdMS_TO_TICKS(250));
       }
@@ -546,6 +667,14 @@ void lm_ctrl_cloud_live_updates_stop(bool wait_for_stop) {
   task = s_state.cloud_ws_task;
   unlock_state();
 
+  ESP_LOGW(
+    TAG,
+    "Cloud websocket stop requested wait=%d client=%p task=%p",
+    wait_for_stop ? 1 : 0,
+    (void *)client,
+    (void *)task
+  );
+
   if (client != NULL && esp_websocket_client_is_connected(client)) {
     esp_websocket_client_stop(client);
   }
@@ -582,6 +711,8 @@ esp_err_t lm_ctrl_cloud_live_updates_ensure_task(void) {
     unlock_state();
     if (!should_run) {
       lm_ctrl_cloud_live_updates_stop(false);
+    } else {
+      ESP_LOGI(TAG, "Cloud websocket start deferred (probe/http in flight or already busy)");
     }
     return ESP_OK;
   }
@@ -600,6 +731,7 @@ esp_err_t lm_ctrl_cloud_live_updates_ensure_task(void) {
     s_state.cloud_ws_task = NULL;
     unlock_state();
   } else {
+    ESP_LOGI(TAG, "Cloud websocket worker scheduled");
     lm_ctrl_machine_link_set_live_updates_state(true, false);
   }
   return ret;

@@ -530,7 +530,7 @@ static void dispatch_action(lv_event_t *event) {
 static void handle_setup_long_press(lv_event_t *event) {
   lm_ctrl_ui_t *ui = lv_event_get_user_data(event);
 
-  if (ui == NULL || ui->rendered_screen != CTRL_SCREEN_SETUP) {
+  if (ui == NULL || ui->rendered_shot_timer_visible || ui->rendered_screen != CTRL_SCREEN_SETUP) {
     return;
   }
 
@@ -609,6 +609,15 @@ static void handle_screen_gesture(lv_event_t *event) {
   }
 
   dir = lv_indev_get_gesture_dir(indev);
+  if (ui->rendered_shot_timer_visible) {
+    if (ui->rendered_shot_timer_dismissable &&
+        (dir == LV_DIR_LEFT || dir == LV_DIR_RIGHT || dir == LV_DIR_TOP || dir == LV_DIR_BOTTOM)) {
+      dispatch_action_direct(ui, LM_CTRL_UI_ACTION_DISMISS_SHOT_TIMER, CTRL_FOCUS_TEMPERATURE);
+      lv_indev_wait_release(indev);
+    }
+    return;
+  }
+
   switch (ui->rendered_screen) {
     case CTRL_SCREEN_MAIN:
       if (dir == LV_DIR_LEFT) {
@@ -667,6 +676,7 @@ static void render_main_screen(
   set_hidden(ui->main_card, false);
   set_hidden(ui->presets_card, true);
   set_hidden(ui->setup_card, true);
+  set_hidden(ui->shot_timer_card, true);
   set_hidden(ui->setup_reset_arc, true);
   set_hidden(ui->heat_arc, view == NULL || !view->heat_arc_visible);
   set_hidden(ui->setup_secondary_button, true);
@@ -719,6 +729,33 @@ static void render_main_screen(
     style_page_dot(ui->page_dots[i], (int)i == page_index);
   }
 
+}
+
+static void render_shot_timer_screen(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *view) {
+  const ctrl_language_t language = view != NULL ? view->language : CTRL_LANGUAGE_EN;
+
+  if (ui == NULL || view == NULL) {
+    return;
+  }
+
+  set_hidden(ui->main_card, true);
+  set_hidden(ui->presets_card, true);
+  set_hidden(ui->setup_card, true);
+  set_hidden(ui->shot_timer_card, false);
+  set_hidden(ui->setup_reset_arc, true);
+  set_hidden(ui->heat_arc, true);
+  set_hidden(ui->page_label, true);
+  set_hidden(ui->setup_secondary_button, true);
+  set_hidden(ui->setup_primary_button, true);
+  set_hidden(ui->power_left_button, true);
+  set_hidden(ui->power_right_button, true);
+  set_hidden(ui->power_hint, true);
+  for (size_t i = 0; i < LM_CTRL_UI_MAIN_PAGE_COUNT; ++i) {
+    set_hidden(ui->page_dots[i], true);
+  }
+
+  set_label_text(ui->shot_timer_title, language == CTRL_LANGUAGE_DE ? "Shot-Timer" : "Shot Timer", COLOR_ACTIVE);
+  set_label_text(ui->shot_timer_value, view->shot_timer_text, COLOR_TEXT);
 }
 
 static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *view) {
@@ -841,6 +878,7 @@ static void render_presets_screen(
   set_hidden(ui->main_card, true);
   set_hidden(ui->presets_card, false);
   set_hidden(ui->setup_card, true);
+  set_hidden(ui->shot_timer_card, true);
   set_hidden(ui->setup_reset_arc, true);
   set_hidden(ui->heat_arc, true);
   set_hidden(ui->setup_secondary_button, true);
@@ -885,6 +923,7 @@ static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, con
   set_hidden(ui->main_card, true);
   set_hidden(ui->presets_card, true);
   set_hidden(ui->setup_card, false);
+  set_hidden(ui->shot_timer_card, true);
   set_hidden(ui->heat_arc, true);
   for (size_t i = 0; i < LM_CTRL_UI_MAIN_PAGE_COUNT; ++i) {
     set_hidden(ui->page_dots[i], true);
@@ -1086,6 +1125,17 @@ esp_err_t lm_ctrl_ui_init(
   lv_obj_align(ui->hint, LV_ALIGN_BOTTOM_MID, 0, -18);
   lv_obj_add_flag(ui->hint, LV_OBJ_FLAG_GESTURE_BUBBLE);
 
+  ui->shot_timer_card = create_panel(ui->screen, 280, 192);
+  ui->shot_timer_title = lv_label_create(ui->shot_timer_card);
+  lv_obj_set_width(ui->shot_timer_title, 230);
+  lv_obj_set_style_text_font(ui->shot_timer_title, UI_FONT_20, 0);
+  lv_obj_set_style_text_align(ui->shot_timer_title, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(ui->shot_timer_title, LV_ALIGN_TOP_MID, 0, 30);
+  ui->shot_timer_value = lv_label_create(ui->shot_timer_card);
+  lv_obj_set_style_text_font(ui->shot_timer_value, UI_FONT_40, 0);
+  lv_obj_set_style_text_align(ui->shot_timer_value, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(ui->shot_timer_value, LV_ALIGN_CENTER, 0, -6);
+
   ui->power_left_button = lv_btn_create(ui->main_card);
   lv_obj_set_size(ui->power_left_button, 110, 88);
   lv_obj_align(ui->power_left_button, LV_ALIGN_CENTER, -60, -6);
@@ -1237,7 +1287,15 @@ void lm_ctrl_ui_render(lm_ctrl_ui_t *ui, const ctrl_state_t *state, const lm_ctr
   ui->rendered_focus = state->focus;
   ui->rendered_screen = state->screen;
   ui->rendered_feature_mask = state->feature_mask;
+  ui->rendered_shot_timer_visible = view != NULL && view->shot_timer_visible;
+  ui->rendered_shot_timer_dismissable = view != NULL && view->shot_timer_dismissable;
   render_title(ui, view);
+
+  if (ui->rendered_shot_timer_visible) {
+    render_shot_timer_screen(ui, view);
+    render_connection_icons(ui, view);
+    return;
+  }
 
   switch (state->screen) {
     case CTRL_SCREEN_PRESETS:

@@ -19,6 +19,7 @@ typedef enum {
   LM_CTRL_EVENT_OPEN_SETUP_RESET,
   LM_CTRL_EVENT_CANCEL_SETUP_RESET,
   LM_CTRL_EVENT_CONFIRM_SETUP_RESET,
+  LM_CTRL_EVENT_DISMISS_SHOT_TIMER,
 } lm_ctrl_input_event_type_t;
 
 /** Normalized input event consumed by the main controller loop. */

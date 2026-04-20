@@ -860,6 +860,7 @@ static bool parse_machine_status_widget(
   bool *brew_active,
   int64_t *brew_start_epoch_ms
 ) {
+  cJSON *status_item;
   cJSON *mode_item;
   cJSON *brewing_start_item;
   bool active = false;
@@ -868,13 +869,16 @@ static bool parse_machine_status_widget(
     return false;
   }
 
+  status_item = cJSON_GetObjectItemCaseSensitive(output, "status");
   mode_item = cJSON_GetObjectItemCaseSensitive(output, "mode");
   brewing_start_item = cJSON_GetObjectItemCaseSensitive(output, "brewingStartTime");
 
   if (cJSON_IsString(mode_item) && mode_item->valuestring != NULL) {
     values->standby_on = strcmp(mode_item->valuestring, "StandBy") == 0;
     *loaded_mask |= LM_CTRL_MACHINE_FIELD_STANDBY;
-    active = strcmp(mode_item->valuestring, "BrewingMode") == 0;
+  }
+  if (cJSON_IsString(status_item) && status_item->valuestring != NULL) {
+    active = strcmp(status_item->valuestring, "Brewing") == 0;
   }
   if (cJSON_IsNumber(brewing_start_item) && brewing_start_item->valuedouble > 0) {
     active = true;
@@ -888,7 +892,7 @@ static bool parse_machine_status_widget(
     *brew_active = active;
   }
 
-  return cJSON_IsString(mode_item) || cJSON_IsNumber(brewing_start_item);
+  return cJSON_IsString(status_item) || cJSON_IsString(mode_item) || cJSON_IsNumber(brewing_start_item);
 }
 
 static bool parse_epoch_ms_item(cJSON *item, int64_t *epoch_ms) {

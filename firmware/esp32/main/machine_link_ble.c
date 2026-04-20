@@ -1040,6 +1040,9 @@ bool fetch_values_via_ble(
   values->steam_level = snapshot_preferred_steam_level();
   *loaded_mask = 0;
 
+  if (!machine_link_ble_transport_enabled()) {
+    return false;
+  }
   if (binding == NULL || binding->communication_key[0] == '\0') {
     return false;
   }
@@ -1497,6 +1500,10 @@ static bool refresh_binding(const lm_ctrl_machine_binding_t *binding) {
 esp_err_t ensure_connected_and_authenticated(const lm_ctrl_machine_binding_t *binding) {
   bool host_ready;
   bool connected;
+
+  if (!machine_link_ble_transport_enabled()) {
+    return ESP_ERR_NOT_SUPPORTED;
+  }
 
   if (!refresh_binding(binding)) {
     return ESP_ERR_INVALID_STATE;
