@@ -157,14 +157,12 @@ static bool initialize_heat_state_deadline(
 static void sync_heat_state(lm_ctrl_runtime_t *runtime) {
   lm_ctrl_machine_heat_info_t heat_info = {0};
   bool have_machine_eta = false;
-  bool have_steam_eta = false;
 
   if (runtime == NULL) {
     return;
   }
   if (!should_show_heat_display()) {
     reset_heat_state(&runtime->heat_state);
-    reset_heat_state(&runtime->steam_heat_state);
     clear_heat_refresh(&runtime->heat_refresh);
     return;
   }
@@ -173,16 +171,11 @@ static void sync_heat_state(lm_ctrl_runtime_t *runtime) {
 
   if (!heat_info.available || !heat_info.heating) {
     reset_heat_state(&runtime->heat_state);
-    reset_heat_state(&runtime->steam_heat_state);
     clear_heat_refresh(&runtime->heat_refresh);
     return;
   }
 
   runtime->heat_state.heating = heat_info.heating;
-  runtime->steam_heat_state.heating = heat_info.steam_heating;
-  if (!heat_info.steam_heating) {
-    reset_heat_state(&runtime->steam_heat_state);
-  }
   if (heat_info.eta_available && heat_info.ready_epoch_ms > 0) {
     have_machine_eta = initialize_heat_state_deadline(
       &runtime->heat_state,
@@ -190,14 +183,7 @@ static void sync_heat_state(lm_ctrl_runtime_t *runtime) {
       heat_info.ready_epoch_ms
     );
   }
-  if (heat_info.steam_eta_available && heat_info.steam_ready_epoch_ms > 0) {
-    have_steam_eta = initialize_heat_state_deadline(
-      &runtime->steam_heat_state,
-      heat_info.observed_epoch_ms,
-      heat_info.steam_ready_epoch_ms
-    );
-  }
-  if (have_machine_eta && (!heat_info.steam_heating || have_steam_eta)) {
+  if (have_machine_eta) {
     clear_heat_refresh(&runtime->heat_refresh);
   }
 }
@@ -686,13 +672,10 @@ static void maybe_request_fast_heat_refresh(lm_ctrl_runtime_t *runtime) {
   lm_ctrl_wifi_get_info(&wifi_info);
   if (!wifi_info.heat_display_enabled) {
     reset_heat_state(&runtime->heat_state);
-    reset_heat_state(&runtime->steam_heat_state);
     clear_heat_refresh(&runtime->heat_refresh);
     return;
   }
-  if (runtime->state.values.standby_on ||
-      (runtime->heat_state.deadline_local_us > 0 &&
-       (!runtime->steam_heat_state.heating || runtime->steam_heat_state.deadline_local_us > 0))) {
+  if (runtime->state.values.standby_on || runtime->heat_state.deadline_local_us > 0) {
     clear_heat_refresh(&runtime->heat_refresh);
     return;
   }
@@ -724,7 +707,6 @@ void lm_ctrl_runtime_init(lm_ctrl_runtime_t *runtime) {
 
   memset(runtime, 0, sizeof(*runtime));
   reset_heat_state(&runtime->heat_state);
-  reset_heat_state(&runtime->steam_heat_state);
   ctrl_state_init(&runtime->state);
   if (ctrl_state_load(&runtime->state) != ESP_OK) {
     ESP_LOGW(TAG, "Falling back to default controller values");
@@ -840,11 +822,9 @@ void lm_ctrl_runtime_handle_input_event(
         }
         if (event->focus == CTRL_FOCUS_STANDBY && runtime->state.values.standby_on) {
           reset_heat_state(&runtime->heat_state);
-          reset_heat_state(&runtime->steam_heat_state);
           clear_heat_refresh(&runtime->heat_refresh);
         } else if (waking_from_standby) {
           reset_heat_state(&runtime->heat_state);
-          reset_heat_state(&runtime->steam_heat_state);
           arm_heat_refresh(&runtime->heat_refresh, HEAT_REFRESH_INITIAL_DELAY_US);
         }
       }
@@ -1019,8 +999,6 @@ void lm_ctrl_runtime_handle_preset_change(lm_ctrl_runtime_t *runtime, bool *need
 void lm_ctrl_runtime_tick(lm_ctrl_runtime_t *runtime, bool *needs_render) {
   int32_t remaining_s;
   int32_t progress_permille;
-  int32_t steam_remaining_s;
-  int32_t steam_progress_permille;
 
   if (runtime == NULL) {
     return;
@@ -1033,24 +1011,12 @@ void lm_ctrl_runtime_tick(lm_ctrl_runtime_t *runtime, bool *needs_render) {
   maybe_flush_delayed_machine_send(&runtime->state, &runtime->delayed_machine_send, &runtime->local_value_hold);
   remaining_s = heat_state_remaining_seconds(&runtime->heat_state);
   progress_permille = (int32_t)heat_state_progress_permille(&runtime->heat_state);
-  steam_remaining_s = heat_state_remaining_seconds(&runtime->steam_heat_state);
-  steam_progress_permille = (int32_t)heat_state_progress_permille(&runtime->steam_heat_state);
   if (runtime->heat_state.heating &&
       runtime->heat_state.deadline_local_us > 0 &&
       (remaining_s != runtime->heat_state.last_rendered_remaining_s ||
        progress_permille != runtime->heat_state.last_rendered_progress_permille)) {
     runtime->heat_state.last_rendered_remaining_s = remaining_s;
     runtime->heat_state.last_rendered_progress_permille = progress_permille;
-    if (needs_render != NULL) {
-      *needs_render = true;
-    }
-  }
-  if (runtime->steam_heat_state.heating &&
-      runtime->steam_heat_state.deadline_local_us > 0 &&
-      (steam_remaining_s != runtime->steam_heat_state.last_rendered_remaining_s ||
-       steam_progress_permille != runtime->steam_heat_state.last_rendered_progress_permille)) {
-    runtime->steam_heat_state.last_rendered_remaining_s = steam_remaining_s;
-    runtime->steam_heat_state.last_rendered_progress_permille = steam_progress_permille;
     if (needs_render != NULL) {
       *needs_render = true;
     }
@@ -1095,10 +1061,6 @@ void lm_ctrl_runtime_build_ui_view(const lm_ctrl_runtime_t *runtime, lm_ctrl_ui_
     wifi_info.heat_display_enabled &&
     runtime->heat_state.duration_us > 0 &&
     view->heat_visible;
-  view->steam_heat_eta_visible =
-    wifi_info.heat_display_enabled &&
-    runtime->steam_heat_state.heating &&
-    heat_state_remaining_us(&runtime->steam_heat_state) > 0;
   view->ble_visible = machine_info.connected || machine_info.authenticated;
   view->ble_authenticated = machine_info.authenticated;
   view->readable_mask = access.readable_mask;
@@ -1111,16 +1073,6 @@ void lm_ctrl_runtime_build_ui_view(const lm_ctrl_runtime_t *runtime, lm_ctrl_ui_
     snprintf(
       view->heat_eta_text,
       sizeof(view->heat_eta_text),
-      "%d:%02d",
-      (int)(remaining_s / 60),
-      (int)(remaining_s % 60)
-    );
-  }
-  if (view->steam_heat_eta_visible) {
-    int32_t remaining_s = heat_state_remaining_seconds(&runtime->steam_heat_state);
-    snprintf(
-      view->steam_heat_eta_text,
-      sizeof(view->steam_heat_eta_text),
       "%d:%02d",
       (int)(remaining_s / 60),
       (int)(remaining_s % 60)

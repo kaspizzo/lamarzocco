@@ -25,7 +25,6 @@ typedef struct {
   bool battery_low;
   bool heat_visible;
   bool heat_arc_visible;
-  bool steam_heat_eta_visible;
   bool ble_visible;
   bool ble_authenticated;
   uint32_t readable_mask;
@@ -34,7 +33,6 @@ typedef struct {
   uint16_t heat_progress_permille;
   const lv_img_dsc_t *custom_logo;
   char heat_eta_text[16];
-  char steam_heat_eta_text[16];
   char setup_status_text[LM_CTRL_UI_STATUS_TEXT_LEN];
   char setup_qr_payload[LM_CTRL_UI_SETUP_QR_LEN];
 } lm_ctrl_ui_view_t;

@@ -376,12 +376,12 @@ static void format_main_value(
         "%s",
         ctrl_steam_level_label(state->values.steam_level)
       );
-      if (view != NULL && view->steam_heat_eta_visible && view->steam_heat_eta_text[0] != '\0') {
+      if (view != NULL && view->heat_arc_visible && view->heat_eta_text[0] != '\0') {
         snprintf(
           hint,
           hint_size,
-          language == CTRL_LANGUAGE_DE ? "Dampf heizt auf.\nBereit in %s." : "Steam heating.\nReady in %s.",
-          view->steam_heat_eta_text
+          language == CTRL_LANGUAGE_DE ? "Aufheizen laeuft.\nBereit in %s." : "Heating up.\nReady in %s.",
+          view->heat_eta_text
         );
       } else {
         snprintf(

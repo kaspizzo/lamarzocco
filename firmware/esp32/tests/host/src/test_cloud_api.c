@@ -191,6 +191,90 @@ static int test_parse_prebrew_widget_supports_both_widget_shapes(void) {
   return 0;
 }
 
+static int test_parse_dashboard_values_prefers_latest_ready_time_across_heating_boilers(void) {
+  static const char *response_body =
+    "{"
+      "\"widgets\":["
+        "{\"code\":\"CMCoffeeBoiler\",\"output\":{\"status\":\"HeatingUp\",\"readyStartTime\":1700000005000}},"
+        "{\"code\":\"CMSteamBoilerLevel\",\"output\":{\"status\":\"HeatingUp\",\"readyStartTime\":1700000015000}}"
+      "]"
+    "}";
+  cJSON *root = cJSON_Parse(response_body);
+  ctrl_values_t values = {0};
+  uint32_t loaded_mask = 0;
+  uint32_t feature_mask = 0;
+  lm_ctrl_machine_heat_info_t heat_info = {0};
+
+  ASSERT_TRUE(root != NULL);
+  ASSERT_EQ_INT(
+    ESP_OK,
+    lm_ctrl_cloud_parse_dashboard_root_values(
+      root,
+      &values,
+      &loaded_mask,
+      &feature_mask,
+      &heat_info,
+      NULL,
+      NULL
+    )
+  );
+  ASSERT_TRUE(heat_info.available);
+  ASSERT_TRUE(heat_info.heating);
+  ASSERT_TRUE(heat_info.eta_available);
+  ASSERT_TRUE(heat_info.coffee_heating);
+  ASSERT_TRUE(heat_info.steam_heating);
+  ASSERT_TRUE(heat_info.coffee_eta_available);
+  ASSERT_TRUE(heat_info.steam_eta_available);
+  ASSERT_EQ_I64(1700000015000LL, heat_info.ready_epoch_ms);
+  ASSERT_EQ_I64(1700000005000LL, heat_info.coffee_ready_epoch_ms);
+  ASSERT_EQ_I64(1700000015000LL, heat_info.steam_ready_epoch_ms);
+
+  cJSON_Delete(root);
+  return 0;
+}
+
+static int test_parse_dashboard_values_falls_back_to_coffee_eta_when_steam_is_not_heating(void) {
+  static const char *response_body =
+    "{"
+      "\"widgets\":["
+        "{\"code\":\"CMCoffeeBoiler\",\"output\":{\"status\":\"HeatingUp\",\"readyStartTime\":1700000005000}},"
+        "{\"code\":\"CMSteamBoilerLevel\",\"output\":{\"enabled\":false,\"status\":\"Ready\",\"readyStartTime\":1700000015000}}"
+      "]"
+    "}";
+  cJSON *root = cJSON_Parse(response_body);
+  ctrl_values_t values = {0};
+  uint32_t loaded_mask = 0;
+  uint32_t feature_mask = 0;
+  lm_ctrl_machine_heat_info_t heat_info = {0};
+
+  ASSERT_TRUE(root != NULL);
+  ASSERT_EQ_INT(
+    ESP_OK,
+    lm_ctrl_cloud_parse_dashboard_root_values(
+      root,
+      &values,
+      &loaded_mask,
+      &feature_mask,
+      &heat_info,
+      NULL,
+      NULL
+    )
+  );
+  ASSERT_TRUE(heat_info.available);
+  ASSERT_TRUE(heat_info.heating);
+  ASSERT_TRUE(heat_info.eta_available);
+  ASSERT_TRUE(heat_info.coffee_heating);
+  ASSERT_FALSE(heat_info.steam_heating);
+  ASSERT_TRUE(heat_info.coffee_eta_available);
+  ASSERT_FALSE(heat_info.steam_eta_available);
+  ASSERT_EQ_I64(1700000005000LL, heat_info.ready_epoch_ms);
+  ASSERT_EQ_I64(1700000005000LL, heat_info.coffee_ready_epoch_ms);
+  ASSERT_EQ_I64(0LL, heat_info.steam_ready_epoch_ms);
+
+  cJSON_Delete(root);
+  return 0;
+}
+
 int run_cloud_api_tests(void) {
   RUN_TEST(test_generate_installation_secret_matches_reference_vector);
   RUN_TEST(test_generate_installation_populates_uuid_secret_and_private_key);
@@ -199,5 +283,7 @@ int run_cloud_api_tests(void) {
   RUN_TEST(test_parse_dashboard_machine_status_extracts_online_signal);
   RUN_TEST(test_parse_dashboard_values_extracts_machine_and_bbw_state);
   RUN_TEST(test_parse_prebrew_widget_supports_both_widget_shapes);
+  RUN_TEST(test_parse_dashboard_values_prefers_latest_ready_time_across_heating_boilers);
+  RUN_TEST(test_parse_dashboard_values_falls_back_to_coffee_eta_when_steam_is_not_heating);
   return 0;
 }

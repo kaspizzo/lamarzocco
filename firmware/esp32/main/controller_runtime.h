@@ -49,7 +49,6 @@ typedef struct {
   lm_ctrl_runtime_local_value_hold_t local_value_hold;
   lm_ctrl_runtime_delayed_machine_send_t delayed_machine_send;
   lm_ctrl_runtime_heat_state_t heat_state;
-  lm_ctrl_runtime_heat_state_t steam_heat_state;
   lm_ctrl_runtime_heat_refresh_t heat_refresh;
 } lm_ctrl_runtime_t;
 
