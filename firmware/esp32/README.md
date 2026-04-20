@@ -19,10 +19,14 @@ The current target is a JC3636K718-style round controller board with:
   - coffee boiler
   - prebrewing on-time
   - prebrewing off-time
+  - brew by weight mode and dose targets when the selected machine reports BBW support
   - steam boiler
   - standby
+  - shot timer
   - presets
   - setup
+- `controller_shot_timer.[ch]`
+  small runtime-owned shot-timer state machine with `hidden`, `live`, and `sticky` modes
 - `input.[ch]`
   vendor-style polling for the physical outer ring
 - `board_display.[ch]`
@@ -97,6 +101,8 @@ The current target is a JC3636K718-style round controller board with:
 - Swipe left/right: next or previous main settings page
 - Swipe down: open presets
 - Swipe up: open Wi-Fi/cloud setup
+- Shot-timer screen while a shot is running: swipes stay blocked
+- Sticky shot-timer screen after a shot: any swipe dismisses the frozen final time
 - Presets screen: swipe up to return
 - Setup screen: swipe down to return
 - Setup screen: long-press to open the on-device network reset flow
@@ -113,6 +119,7 @@ They currently store and load:
 - coffee boiler temperature
 - prebrewing on-time
 - prebrewing off-time
+- brew-by-weight mode, dose 1, and dose 2 when the selected machine reports BBW support
 
 They do not store or restore:
 
@@ -139,6 +146,7 @@ The browser portal currently supports:
 - keeping the default text header or storing a user-provided custom logo as a controller setting
 - loading machines from the cloud account
 - selecting the active machine and storing the serial/BLE binding needed by the controller
+- editing brew-by-weight mode and dose targets when the selected machine reports BBW support through the cloud dashboard
 
 The cloud login path expects a direct La Marzocco account email/password. Accounts created only through Apple or Google sign-in are not expected to work with the current controller onboarding flow. A possible workaround is to create a second La Marzocco account with a normal email/password login and share machine access to that account in the official app.
 
@@ -147,9 +155,24 @@ The firmware does not ship an official vendor logo asset. By default, the displa
 ## Runtime sync behaviour
 
 - BLE is preferred whenever the controller has an authenticated local machine link.
-- Cloud is used for prebrewing writes and as a dashboard-value fallback.
+- Cloud websocket live updates run when Wi-Fi, cloud credentials, and a machine selection are available.
+- Cloud is used for prebrewing writes, websocket live updates, and as a dashboard-value fallback.
+- Brew by weight is currently cloud-only in this firmware: BBW values are read from the cloud dashboard and BBW writes go through cloud machine commands, not the local BLE transport.
 - The controller refreshes machine-facing values periodically while it stays online.
 - If a value has not been loaded yet, the UI shows placeholders instead of stale defaults.
+- The shot timer is driven only from cloud dashboard signals `status == Brewing` or `brewingStartTime > 0`.
+- `mode == BrewingMode` alone intentionally does not start the shot timer.
+
+## Brew By Weight status
+
+Current BBW implementation status:
+
+- The firmware parses BBW support, mode, and dose targets from the cloud dashboard widget `CMBrewByWeightDoses`.
+- The round controller UI exposes BBW mode, Dose 1, and Dose 2 pages only when the selected machine reports BBW support.
+- Controller presets store and restore BBW mode and doses when BBW is available for the selected machine.
+- The setup portal also exposes a dedicated BBW form when the selected machine reports BBW support.
+- BBW writes currently go through cloud machine commands, not the local BLE path.
+- In practice that means BBW is implemented, but it still depends on cloud reachability and on the selected machine exposing BBW through the dashboard.
 
 ## Internal architecture
 
@@ -159,6 +182,8 @@ The firmware is now split by responsibility instead of putting setup, persistenc
   bootstrap and top-level wiring only
 - `controller_runtime.[ch]`
   event loop coordination, sync cadence, and UI view-model assembly
+- `controller_shot_timer.[ch]`
+  shot-timer runtime state machine used by `controller_runtime`
 - `controller_ui.[ch]`
   LVGL rendering only, driven by `ctrl_state_t` plus `lm_ctrl_ui_view_t`
 - `machine_link_types.h`
@@ -202,6 +227,8 @@ Additional module notes:
 
 - The firmware currently targets a specific JC3636K718-style board family.
 - Some machine capabilities still depend on La Marzocco cloud/backend behaviour.
+- Brew by weight is only shown when the cloud dashboard exposes BBW support for the selected machine, and BBW changes require a live cloud path.
+- The shot timer only appears when the cloud dashboard exposes usable brewing fields. It is implemented for Micra/Linea Mini-style dashboard signals, but not yet confirmed on a real Micra or Linea Mini.
 - The setup flow and UI are optimized for this project, not for generic reuse across controller hardware.
 
 ## Build & flash quickstart
@@ -234,7 +261,7 @@ ESPPORT=/dev/cu.usbmodemXXXX ./dev.sh quick
 
 The `quick` command uses `idf.py app-flash monitor`, so only the app partition is reflashed after the initial full flash.
 
-`./dev.sh test` runs the host-side unit-test harness for the pure controller state machine, cloud JSON parsing, and setup portal HTML rendering seams. It does not exercise BLE, Wi-Fi drivers, or on-device ESP-IDF runtime tasks.
+`./dev.sh test` runs the host-side unit-test harness for the pure controller state machine, shot-timer state machine, cloud JSON parsing, and setup portal HTML rendering seams. It does not exercise BLE, Wi-Fi drivers, or on-device ESP-IDF runtime tasks.
 
 ### Windows
 

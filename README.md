@@ -53,12 +53,14 @@ The current ESP32 firmware supports:
   - steam boiler `Off / 1 / 2 / 3` level control from the controller screen
   - standby
 - cloud-backed prebrewing mode and timing changes
+- cloud-backed brew-by-weight mode and dose changes when the selected machine reports BBW support
 - on-device recovery actions for `Clear web password` and `Reset network`
 - periodic machine value refresh while the controller stays online
 - recipe presets for:
   - coffee boiler temperature
   - prebrewing on-time
   - prebrewing off-time
+  - brew-by-weight mode and dose targets when BBW is available
 
 The currently targeted hardware is a JC3636K718-style ESP32-S3 round controller board with:
 
@@ -99,6 +101,7 @@ If you want to flash the controller:
 - After home Wi-Fi is saved, the controller immediately tries to join that network. Once connected, the setup portal stays available again via the on-device setup gesture and the configured `http://<hostname>.local/` address.
 - The browser setup portal is currently split into `Overview`, `Controller`, `Network`, `Cloud`, `Recipes`, `Advanced`, and `Diagnostics`.
 - A crossed Wi-Fi icon means the controller has account/network context but the selected machine is not currently reachable through cloud. BLE control can still stay active in that state.
+- Brew by weight is currently a cloud-only path in the firmware: the UI and presets can expose it, but BBW writes still require cloud machine reachability.
 - The cloud login path expects a direct La Marzocco account email/password. Accounts created only through Apple or Google sign-in are not expected to work with the current controller login flow.
 - A possible workaround for Apple/Google-only accounts is to create a second La Marzocco account with a normal email/password login and grant that account access in the official app. Treat this as a best-effort workaround, not a guaranteed fix.
 - Main gestures are: swipe down for `Presets`, swipe up for `Setup`, and long-press on the setup screen to open `Recovery` for `Clear web password` or `Reset network`.
