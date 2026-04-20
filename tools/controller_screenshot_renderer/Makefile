@@ -16,6 +16,11 @@ include $(LVGL_DIR)/src/widgets/lv_widgets.mk
 
 CSRCS += $(ROOT_DIR)/firmware/esp32/main/controller_ui.c
 CSRCS += $(ROOT_DIR)/firmware/esp32/main/controller_connectivity.c
+CSRCS += $(ROOT_DIR)/firmware/esp32/main/fonts/lm_ctrl_font_montserrat_14.c
+CSRCS += $(ROOT_DIR)/firmware/esp32/main/fonts/lm_ctrl_font_montserrat_16.c
+CSRCS += $(ROOT_DIR)/firmware/esp32/main/fonts/lm_ctrl_font_montserrat_20.c
+CSRCS += $(ROOT_DIR)/firmware/esp32/main/fonts/lm_ctrl_font_montserrat_28.c
+CSRCS += $(ROOT_DIR)/firmware/esp32/main/fonts/lm_ctrl_font_montserrat_40.c
 CSRCS += $(CURDIR)/renderer.c
 CSRCS += $(CURDIR)/stubs.c
 
