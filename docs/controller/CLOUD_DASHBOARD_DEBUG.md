@@ -106,6 +106,14 @@ For something like shot-timer hunting, the usual flow is:
 3. `snapshot --code ... --output ...`
 4. compare standby, heating, brewing, and post-shot snapshots
 
+Current firmware expectation for shot detection:
+
+- `status == "Brewing"` starts a shot
+- `brewingStartTime > 0` starts a shot
+- `mode == "BrewingMode"` by itself is not enough
+
+So when validating raw dashboard payloads, always compare those fields together instead of treating `BrewingMode` alone as a reliable live-shot signal.
+
 ## Output interpretation
 
 Each snapshot includes:

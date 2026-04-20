@@ -60,8 +60,8 @@ The current firmware provides a real local setup path:
    - `Overview` with portal reachability, current IP, and stable `.local` URL
    - `Controller` settings for hostname, language (`English` default), and optional local SVG header logo
    - `Network` with Wi-Fi storage and scan
-   - `Cloud` account storage, machine loading/selection, and setup-AP provisioning import
-   - `Recipes` for controller preset editing
+   - `Cloud` account storage, machine loading/selection, setup-AP provisioning import, and brew-by-weight editing when the selected machine reports BBW support
+   - `Recipes` for controller preset editing, including BBW fields when the selected machine reports BBW support
    - `Advanced` controller tuning and factory reset
    - `Diagnostics` for cloud heat debug and the optional remote screenshot route
 13. Swipe up on the main controller screen to reopen `Setup` later.
@@ -73,7 +73,7 @@ The current firmware provides a real local setup path:
 - A crossed Wi-Fi icon means the controller has network/account context but the selected machine is not currently reachable through cloud.
 - A solid Wi-Fi icon means the selected machine is reachable through cloud.
 - USB and battery indicators appear only when the controller reports USB power, charging, or low-battery state.
-- In the crossed-Wi-Fi state, local BLE control for temperature, steam, and status can stay available while cloud-only values such as prebrewing continue to wait for the remote path.
+- In the crossed-Wi-Fi state, local BLE control for temperature, steam, and status can stay available while cloud-only values such as prebrewing and brew by weight continue to wait for the remote path.
 
 ## Cloud account note
 
@@ -85,6 +85,7 @@ The current firmware provides a real local setup path:
 ## On-device gestures and reset behaviour
 
 - Swipe left/right on the main screen to move between the main settings pages.
+- If the selected machine reports brew-by-weight support, the main page cycle also includes BBW mode, Dose 1, and Dose 2 pages.
 - Swipe down on the main screen to open `Presets`.
 - Swipe up on the main screen to open `Setup`.
 - On the `Presets` screen, swipe up to return to the main screen.

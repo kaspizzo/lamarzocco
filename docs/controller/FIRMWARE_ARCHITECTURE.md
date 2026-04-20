@@ -1,6 +1,6 @@
 # Controller Firmware Architecture
 
-Last updated: 2026-04-18
+Last updated: 2026-04-20
 
 ## Goal
 
@@ -12,6 +12,8 @@ Keep the ESP32 firmware split by responsibility so Wi-Fi/setup, persisted settin
   minimal bootstrap, hardware bring-up, and top-level event-loop wiring
 - `firmware/esp32/main/controller_runtime.[ch]`
   runtime coordinator for controller state, sync cadence, deferred sends, and UI view-model construction
+- `firmware/esp32/main/controller_shot_timer.[ch]`
+  small runtime-owned shot-timer state machine for live/sticky/hidden transitions
 - `firmware/esp32/main/controller_ui.[ch]`
   render-only LVGL UI; no direct Wi-Fi or cloud reads
 - `firmware/esp32/main/machine_link_types.h`
@@ -78,6 +80,6 @@ There is no JavaScript-style `JSDoc` tooling here, but the purpose is the same.
 
 There is now a lightweight host-side test harness behind `firmware/esp32/dev.sh test`.
 
-- It targets seams that are worth checking without ESP-IDF hardware drivers: `controller_state`, cloud JSON parsing in `cloud_api`, and setup portal rendering in `setup_portal_page`.
+- It targets seams that are worth checking without ESP-IDF hardware drivers: `controller_state`, `controller_shot_timer`, cloud JSON parsing in `cloud_api`, and setup portal rendering in `setup_portal_page`.
 - It does not try to fake BLE, Wi-Fi driver state, LVGL runtime, or full HTTP/TLS integration.
 - The goal is fast regression coverage for the refactored pure/module boundaries, not a full firmware simulator.
