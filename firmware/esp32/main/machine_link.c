@@ -56,7 +56,6 @@ static bool heat_hint_active_locked(void) {
 
   return true;
 }
-
 static lm_ctrl_machine_water_status_t preferred_water_status_locked(void) {
   if (s_link.ble_water_status.available) {
     return s_link.ble_water_status;
@@ -624,7 +623,6 @@ void set_local_heat_hint_active(bool active) {
   }
   portEXIT_CRITICAL(&s_link_lock);
 }
-
 void update_cloud_water_status(const lm_ctrl_machine_water_status_t *status) {
   lm_ctrl_machine_water_status_t previous_water_status;
   lm_ctrl_machine_water_status_t current_water_status;
