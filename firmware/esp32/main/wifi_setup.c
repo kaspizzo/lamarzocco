@@ -891,6 +891,13 @@ void lm_ctrl_wifi_get_info(lm_ctrl_wifi_info_t *info) {
   info->language = s_state.language;
   info->has_cloud_credentials = s_state.has_cloud_credentials;
   info->cloud_connected = s_state.cloud_connected;
+  info->cloud_probe_active = s_state.cloud_probe_task != NULL;
+  info->cloud_live_updates_active =
+    s_state.cloud_ws_task != NULL ||
+    s_state.cloud_ws_transport_connected ||
+    s_state.cloud_ws_connected;
+  info->cloud_ws_transport_connected = s_state.cloud_ws_transport_connected;
+  info->cloud_ws_connected = s_state.cloud_ws_connected;
   info->cloud_machine_status = s_state.cloud_machine_status;
   info->cloud_machine_status_known = lm_ctrl_cloud_machine_status_is_known(&s_state.cloud_machine_status);
   info->machine_cloud_online = lm_ctrl_cloud_machine_status_is_online(&s_state.cloud_machine_status);
@@ -900,6 +907,7 @@ void lm_ctrl_wifi_get_info(lm_ctrl_wifi_info_t *info) {
   info->heat_display_enabled = s_state.heat_display_enabled;
   info->debug_screenshot_enabled = s_state.debug_screenshot_enabled;
   info->web_auth_mode = s_state.web_auth_mode;
+  info->cloud_http_requests_in_flight = s_state.cloud_http_requests_in_flight;
   copy_text(info->portal_ssid, sizeof(info->portal_ssid), s_state.portal_ssid);
   copy_text(info->portal_password, sizeof(info->portal_password), s_state.portal_password);
   copy_text(info->sta_ssid, sizeof(info->sta_ssid), s_state.sta_ssid);
@@ -1034,7 +1042,8 @@ esp_err_t lm_ctrl_wifi_fetch_dashboard_values(
   ctrl_values_t *values,
   uint32_t *loaded_mask,
   uint32_t *feature_mask,
-  lm_ctrl_machine_heat_info_t *heat_info
+  lm_ctrl_machine_heat_info_t *heat_info,
+  lm_ctrl_machine_water_status_t *water_status
 ) {
-  return lm_ctrl_cloud_session_fetch_dashboard_values(values, loaded_mask, feature_mask, heat_info);
+  return lm_ctrl_cloud_session_fetch_dashboard_values(values, loaded_mask, feature_mask, heat_info, water_status);
 }

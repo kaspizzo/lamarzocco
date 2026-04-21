@@ -329,12 +329,14 @@ esp_err_t lm_ctrl_cloud_session_fetch_dashboard_values(
   ctrl_values_t *values,
   uint32_t *loaded_mask,
   uint32_t *feature_mask,
-  lm_ctrl_machine_heat_info_t *heat_info
+  lm_ctrl_machine_heat_info_t *heat_info,
+  lm_ctrl_machine_water_status_t *water_status
 ) {
   char error_text[160];
   cJSON *root = NULL;
   int64_t server_epoch_ms = 0;
   esp_err_t ret;
+  bool water_status_available = false;
 
   if (values == NULL || loaded_mask == NULL || feature_mask == NULL) {
     return ESP_ERR_INVALID_ARG;
@@ -350,8 +352,11 @@ esp_err_t lm_ctrl_cloud_session_fetch_dashboard_values(
   if (ret == ESP_OK && heat_info != NULL) {
     heat_info->observed_epoch_ms = server_epoch_ms;
   }
+  if (water_status != NULL) {
+    water_status_available = lm_ctrl_cloud_parse_dashboard_water_status(root, water_status);
+  }
   cJSON_Delete(root);
-  return ret;
+  return (ret == ESP_OK || water_status_available) ? ESP_OK : ret;
 }
 
 esp_err_t lm_ctrl_cloud_session_fetch_heat_debug_json(

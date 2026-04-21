@@ -18,7 +18,7 @@ extern "C" {
 typedef struct {
   char status_html[512];
   char machine_status[160];
-  char debug_status_html[768];
+  char debug_status_html[1024];
   char banner_html[256];
   char csrf_token_html[96];
   char ssid_html[96];

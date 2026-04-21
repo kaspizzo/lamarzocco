@@ -22,6 +22,7 @@ static const lv_color_t COLOR_RING = LV_COLOR_MAKE(0x92, 0x63, 0x33);
 static const lv_color_t COLOR_TEXT = LV_COLOR_MAKE(0xF4, 0xEF, 0xE7);
 static const lv_color_t COLOR_MUTED = LV_COLOR_MAKE(0xB7, 0xA0, 0x8B);
 static const lv_color_t COLOR_ACTIVE = LV_COLOR_MAKE(0xFF, 0xC6, 0x85);
+static const lv_color_t COLOR_WATER = LV_COLOR_MAKE(0x73, 0xC8, 0xFF);
 static const lv_color_t COLOR_BUTTON = LV_COLOR_MAKE(0x3A, 0x2A, 0x21);
 static const char *BATTERY_CHARGING_SYMBOL = LV_SYMBOL_BATTERY_FULL LV_SYMBOL_CHARGE;
 static const char *ICON_SLASH_SYMBOL = "/";
@@ -331,6 +332,21 @@ static void format_main_unavailable_placeholder(
       );
       break;
   }
+}
+
+static void format_no_water_hint(ctrl_language_t language, char *hint, size_t hint_size) {
+  if (hint == NULL || hint_size == 0) {
+    return;
+  }
+
+  snprintf(
+    hint,
+    hint_size,
+    "%s",
+    language == CTRL_LANGUAGE_DE
+      ? "Kein Wasser erkannt.\nTank prüfen und füllen."
+      : "No water detected.\nCheck and refill tank."
+  );
 }
 
 static void format_main_value(
@@ -705,6 +721,9 @@ static void render_main_screen(
   } else {
     format_main_unavailable_placeholder(state->focus, language, value, sizeof(value), hint, sizeof(hint));
   }
+  if (view != NULL && view->water_alert_visible) {
+    format_no_water_hint(language, hint, sizeof(hint));
+  }
   if (view != NULL && view->heat_arc_visible) {
     lv_arc_set_value(ui->heat_arc, view->heat_progress_permille);
   }
@@ -764,7 +783,7 @@ static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *v
     const char *symbol;
     lv_color_t color;
   } icon_slot_t;
-  icon_slot_t slots[5];
+  icon_slot_t slots[6];
   lm_ctrl_indicator_state_t wifi_indicator = LM_CTRL_INDICATOR_HIDDEN;
   bool wifi_crossed = false;
   size_t visible_count = 0;
@@ -782,6 +801,7 @@ static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *v
   set_hidden(ui->usb_icon, true);
   set_hidden(ui->battery_icon, true);
   set_hidden(ui->heat_icon, true);
+  set_hidden(ui->water_icon, true);
   set_hidden(ui->ble_icon, true);
 
   switch (wifi_indicator) {
@@ -810,6 +830,14 @@ static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *v
       .obj = ui->heat_icon,
       .symbol = LV_SYMBOL_CHARGE,
       .color = COLOR_ACTIVE,
+    };
+  }
+
+  if (view->water_alert_visible) {
+    slots[visible_count++] = (icon_slot_t){
+      .obj = ui->water_icon,
+      .symbol = LV_SYMBOL_TINT,
+      .color = COLOR_WATER,
     };
   }
 
@@ -1077,6 +1105,11 @@ esp_err_t lm_ctrl_ui_init(
   lv_obj_align(ui->heat_icon, LV_ALIGN_TOP_MID, -34, 48);
   set_hidden(ui->heat_icon, true);
 
+  ui->water_icon = lv_label_create(ui->screen);
+  lv_obj_set_style_text_font(ui->water_icon, UI_FONT_14, 0);
+  lv_obj_align(ui->water_icon, LV_ALIGN_TOP_MID, 0, 48);
+  set_hidden(ui->water_icon, true);
+
   ui->ble_icon = lv_label_create(ui->screen);
   lv_obj_set_style_text_font(ui->ble_icon, UI_FONT_14, 0);
   lv_obj_align(ui->ble_icon, LV_ALIGN_TOP_MID, 0, 48);
@@ -1269,6 +1302,7 @@ esp_err_t lm_ctrl_ui_init(
   lv_obj_move_foreground(ui->usb_icon);
   lv_obj_move_foreground(ui->battery_icon);
   lv_obj_move_foreground(ui->heat_icon);
+  lv_obj_move_foreground(ui->water_icon);
   lv_obj_move_foreground(ui->ble_icon);
   lv_obj_move_foreground(ui->page_label);
 

@@ -115,6 +115,11 @@ bool lm_ctrl_cloud_parse_dashboard_machine_status(
   cJSON *root,
   lm_ctrl_cloud_machine_status_t *status
 );
+/** Extract the dashboard no-water alarm state when present. */
+bool lm_ctrl_cloud_parse_dashboard_water_status(
+  cJSON *root,
+  lm_ctrl_machine_water_status_t *status
+);
 
 /** Extract controller-facing values and feature flags from a dashboard JSON root object. */
 esp_err_t lm_ctrl_cloud_parse_dashboard_root_values(

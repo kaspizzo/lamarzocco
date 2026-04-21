@@ -83,6 +83,8 @@ typedef struct {
   ctrl_values_t reported_values;
   ctrl_values_t remote_values;
   lm_ctrl_machine_heat_info_t heat_info;
+  lm_ctrl_machine_water_status_t cloud_water_status;
+  lm_ctrl_machine_water_status_t ble_water_status;
   uint32_t pending_mask;
   uint32_t inflight_cloud_mask;
   uint32_t loaded_mask;
@@ -197,14 +199,22 @@ void clear_ble_failure(void);
 void update_reported_values(const ctrl_values_t *values, uint32_t loaded_mask);
 void update_feature_mask(uint32_t feature_mask);
 void update_heat_info(const lm_ctrl_machine_heat_info_t *info);
+void update_cloud_water_status(const lm_ctrl_machine_water_status_t *status);
+void update_ble_water_status(const lm_ctrl_machine_water_status_t *status);
 bool should_skip_ble_attempt(void);
 
-bool fetch_values_via_ble(const lm_ctrl_machine_binding_t *binding, ctrl_values_t *values, uint32_t *loaded_mask);
+bool fetch_values_via_ble(
+  const lm_ctrl_machine_binding_t *binding,
+  ctrl_values_t *values,
+  uint32_t *loaded_mask,
+  lm_ctrl_machine_water_status_t *water_status
+);
 bool fetch_values_via_cloud(
   ctrl_values_t *values,
   uint32_t *loaded_mask,
   uint32_t *feature_mask,
-  lm_ctrl_machine_heat_info_t *heat_info
+  lm_ctrl_machine_heat_info_t *heat_info,
+  lm_ctrl_machine_water_status_t *water_status
 );
 esp_err_t ensure_connected_and_authenticated(const lm_ctrl_machine_binding_t *binding);
 const char *steam_level_cloud_code(ctrl_steam_level_t level);

@@ -750,6 +750,57 @@ bool lm_ctrl_cloud_parse_dashboard_machine_status(
   return parse_machine_status_fields(root, status);
 }
 
+bool lm_ctrl_cloud_parse_dashboard_water_status(
+  cJSON *root,
+  lm_ctrl_machine_water_status_t *status
+) {
+  cJSON *widgets;
+  cJSON *widget;
+
+  if (status == NULL) {
+    return false;
+  }
+
+  *status = (lm_ctrl_machine_water_status_t){0};
+  if (root == NULL) {
+    return false;
+  }
+
+  widgets = cJSON_GetObjectItemCaseSensitive(root, "widgets");
+  if (!cJSON_IsArray(widgets)) {
+    return false;
+  }
+
+  cJSON_ArrayForEach(widget, widgets) {
+    cJSON *code_item;
+    cJSON *output;
+    cJSON *alarm_item;
+
+    code_item = cJSON_GetObjectItemCaseSensitive(widget, "code");
+    output = cJSON_GetObjectItemCaseSensitive(widget, "output");
+    if (!cJSON_IsString(code_item) ||
+        code_item->valuestring == NULL ||
+        strcmp(code_item->valuestring, "CMNoWater") != 0 ||
+        !cJSON_IsObject(output)) {
+      continue;
+    }
+
+    alarm_item = cJSON_GetObjectItemCaseSensitive(output, "allarm");
+    if (!cJSON_IsBool(alarm_item)) {
+      alarm_item = cJSON_GetObjectItemCaseSensitive(output, "alarm");
+    }
+    if (!cJSON_IsBool(alarm_item)) {
+      continue;
+    }
+
+    status->available = true;
+    status->no_water = cJSON_IsTrue(alarm_item);
+    return true;
+  }
+
+  return false;
+}
+
 static bool parse_prebrew_widget_values(cJSON *widget, float *seconds_in, float *seconds_out) {
   cJSON *code_item;
   cJSON *output;

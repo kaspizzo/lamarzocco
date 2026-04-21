@@ -82,6 +82,9 @@ static int64_t current_epoch_ms(void) {
   if (gettimeofday(&tv, NULL) != 0) {
     return 0;
   }
+  if (tv.tv_sec < 1700000000) {
+    return 0;
+  }
 
   return ((int64_t)tv.tv_sec * 1000LL) + (tv.tv_usec / 1000LL);
 }
@@ -204,6 +207,8 @@ static void sync_heat_state(lm_ctrl_runtime_t *runtime) {
   }
   if (have_machine_eta) {
     clear_heat_refresh(&runtime->heat_refresh);
+  } else if (runtime->heat_refresh.until_us == 0) {
+    arm_heat_refresh(&runtime->heat_refresh, 0);
   }
 }
 
@@ -1091,6 +1096,7 @@ void lm_ctrl_runtime_build_ui_view(const lm_ctrl_runtime_t *runtime, lm_ctrl_ui_
     wifi_info.heat_display_enabled &&
     runtime->heat_state.duration_us > 0 &&
     view->heat_visible;
+  view->water_alert_visible = machine_info.water_status.available && machine_info.water_status.no_water;
   view->ble_visible = machine_info.connected || machine_info.authenticated;
   view->ble_authenticated = machine_info.authenticated;
   view->readable_mask = access.readable_mask;

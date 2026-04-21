@@ -115,6 +115,19 @@ static int test_parse_dashboard_machine_status_extracts_online_signal(void) {
   return 0;
 }
 
+static int test_parse_dashboard_water_status_extracts_no_water_alarm(void) {
+  cJSON *root = cJSON_Parse("{\"widgets\":[{\"code\":\"CMNoWater\",\"output\":{\"allarm\":true}}]}");
+  lm_ctrl_machine_water_status_t water_status = {0};
+
+  ASSERT_TRUE(root != NULL);
+  ASSERT_TRUE(lm_ctrl_cloud_parse_dashboard_water_status(root, &water_status));
+  ASSERT_TRUE(water_status.available);
+  ASSERT_TRUE(water_status.no_water);
+
+  cJSON_Delete(root);
+  return 0;
+}
+
 static int test_parse_dashboard_values_extracts_machine_and_bbw_state(void) {
   static const char *response_body =
     "{"
@@ -353,6 +366,7 @@ int run_cloud_api_tests(void) {
   RUN_TEST(test_parse_access_token_success_and_invalid_payload);
   RUN_TEST(test_parse_customer_fleet_filters_invalid_entries);
   RUN_TEST(test_parse_dashboard_machine_status_extracts_online_signal);
+  RUN_TEST(test_parse_dashboard_water_status_extracts_no_water_alarm);
   RUN_TEST(test_parse_dashboard_values_extracts_machine_and_bbw_state);
   RUN_TEST(test_parse_dashboard_values_uses_brewing_status_without_timestamp);
   RUN_TEST(test_parse_dashboard_values_does_not_treat_brewing_mode_as_live_shot_by_itself);

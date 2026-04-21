@@ -302,11 +302,13 @@ static void handle_cloud_dashboard_message(const char *message) {
   uint32_t loaded_mask = 0;
   uint32_t feature_mask = 0;
   lm_ctrl_machine_heat_info_t heat_info = {0};
+  lm_ctrl_machine_water_status_t water_status = {0};
   lm_ctrl_cloud_machine_status_t machine_status = {0};
   bool brew_active = false;
   int64_t brew_start_epoch_ms = 0;
   lm_ctrl_cloud_command_update_t updates[LM_CTRL_CLOUD_COMMAND_UPDATE_MAX] = {0};
   size_t update_count = 0;
+  bool parsed_values = false;
 
   if (message == NULL || message[0] == '\0') {
     return;
@@ -325,17 +327,31 @@ static void handle_cloud_dashboard_message(const char *message) {
     merge_cloud_machine_status(&machine_status);
   }
 
-  if (lm_ctrl_cloud_parse_dashboard_root_values(
-        root,
-        &values,
-        &loaded_mask,
-        &feature_mask,
-        &heat_info,
-        &brew_active,
-        &brew_start_epoch_ms
-      ) == ESP_OK) {
-    lm_ctrl_machine_link_apply_cloud_dashboard_values(&values, loaded_mask, feature_mask, &heat_info);
+  parsed_values = lm_ctrl_cloud_parse_dashboard_root_values(
+      root,
+      &values,
+      &loaded_mask,
+      &feature_mask,
+      &heat_info,
+      &brew_active,
+      &brew_start_epoch_ms
+    ) == ESP_OK;
+  (void)lm_ctrl_cloud_parse_dashboard_water_status(root, &water_status);
+
+  if (parsed_values) {
+    if (heat_info.available && heat_info.observed_epoch_ms == 0) {
+      heat_info.observed_epoch_ms = current_epoch_ms();
+    }
+    lm_ctrl_machine_link_apply_cloud_dashboard_values(
+      &values,
+      loaded_mask,
+      feature_mask,
+      &heat_info,
+      water_status.available ? &water_status : NULL
+    );
     set_brew_timer_state(brew_active, brew_start_epoch_ms);
+  } else if (water_status.available) {
+    lm_ctrl_machine_link_apply_cloud_dashboard_values(&values, 0, 0, NULL, &water_status);
   }
   if (update_count != 0) {
     lm_ctrl_machine_link_apply_cloud_command_updates(updates, update_count);

@@ -31,6 +31,10 @@ typedef struct {
   bool has_credentials;
   bool has_cloud_credentials;
   bool cloud_connected;
+  bool cloud_probe_active;
+  bool cloud_live_updates_active;
+  bool cloud_ws_transport_connected;
+  bool cloud_ws_connected;
   bool cloud_machine_status_known;
   bool machine_cloud_online;
   bool has_machine_selection;
@@ -53,6 +57,7 @@ typedef struct {
   char machine_name[64];
   char machine_model[32];
   char machine_serial[32];
+  uint8_t cloud_http_requests_in_flight;
 } lm_ctrl_wifi_info_t;
 
 /** Live brew timer state derived from cloud dashboard websocket updates. */

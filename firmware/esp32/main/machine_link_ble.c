@@ -975,6 +975,30 @@ static esp_err_t read_machine_mode_via_ble(bool *out_standby_on) {
   return ret;
 }
 
+static esp_err_t read_tank_status_via_ble(bool *out_tank_ok) {
+  char response[LM_CTRL_MACHINE_RESPONSE_MAX];
+  cJSON *root = NULL;
+  esp_err_t ret = ESP_FAIL;
+
+  if (out_tank_ok == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  ESP_RETURN_ON_ERROR(
+    request_machine_read_value(LM_CTRL_MACHINE_READ_TANK_STATUS, response, sizeof(response)),
+    TAG,
+    "tankStatus read failed"
+  );
+
+  root = cJSON_Parse(response);
+  if (cJSON_IsBool(root)) {
+    *out_tank_ok = cJSON_IsTrue(root);
+    ret = ESP_OK;
+  }
+  cJSON_Delete(root);
+  return ret;
+}
+
 static esp_err_t read_boilers_via_ble(
   float *out_temperature_c,
   ctrl_steam_level_t *out_steam_level,
@@ -1028,7 +1052,8 @@ static esp_err_t read_boilers_via_ble(
 bool fetch_values_via_ble(
   const lm_ctrl_machine_binding_t *binding,
   ctrl_values_t *values,
-  uint32_t *loaded_mask
+  uint32_t *loaded_mask,
+  lm_ctrl_machine_water_status_t *water_status
 ) {
   uint32_t local_loaded_mask = 0;
 
@@ -1039,6 +1064,9 @@ bool fetch_values_via_ble(
   *values = (ctrl_values_t){0};
   values->steam_level = snapshot_preferred_steam_level();
   *loaded_mask = 0;
+  if (water_status != NULL) {
+    *water_status = (lm_ctrl_machine_water_status_t){0};
+  }
 
   if (!machine_link_ble_transport_enabled()) {
     return false;
@@ -1060,8 +1088,16 @@ bool fetch_values_via_ble(
   if (read_boilers_via_ble(&values->temperature_c, &values->steam_level, values->steam_level) == ESP_OK) {
     local_loaded_mask |= LM_CTRL_MACHINE_FIELD_TEMPERATURE | LM_CTRL_MACHINE_FIELD_STEAM;
   }
+  if (water_status != NULL) {
+    bool tank_ok = false;
 
-  if (local_loaded_mask != 0) {
+    if (read_tank_status_via_ble(&tank_ok) == ESP_OK) {
+      water_status->available = true;
+      water_status->no_water = !tank_ok;
+    }
+  }
+
+  if (local_loaded_mask != 0 || (water_status != NULL && water_status->available)) {
     *loaded_mask = local_loaded_mask;
     clear_ble_failure();
     return true;
