@@ -42,6 +42,21 @@ static bool water_status_equal(const lm_ctrl_machine_water_status_t *lhs, const 
          lhs->no_water == rhs->no_water;
 }
 
+static bool heat_hint_active_locked(void) {
+  if (!s_link.local_heat_hint_active) {
+    return false;
+  }
+  if (s_link.local_heat_hint_until_us > 0 &&
+      esp_timer_get_time() >= s_link.local_heat_hint_until_us) {
+    s_link.local_heat_hint_active = false;
+    s_link.local_heat_hint_until_us = 0;
+    s_link.status_version++;
+    return false;
+  }
+
+  return true;
+}
+
 static lm_ctrl_machine_water_status_t preferred_water_status_locked(void) {
   if (s_link.ble_water_status.available) {
     return s_link.ble_water_status;
@@ -568,16 +583,44 @@ void update_feature_mask(uint32_t feature_mask) {
 }
 
 void update_heat_info(const lm_ctrl_machine_heat_info_t *info) {
+  bool hint_was_active = false;
+
   if (info == NULL) {
     return;
   }
 
   portENTER_CRITICAL(&s_link_lock);
-  if (!heat_info_equal(&s_link.heat_info, info)) {
+  hint_was_active = s_link.local_heat_hint_active || s_link.local_heat_hint_until_us != 0;
+  s_link.local_heat_hint_active = false;
+  s_link.local_heat_hint_until_us = 0;
+  if (hint_was_active || !heat_info_equal(&s_link.heat_info, info)) {
     s_link.heat_info = *info;
     s_link.status_version++;
   } else {
     s_link.heat_info = *info;
+  }
+  portEXIT_CRITICAL(&s_link_lock);
+}
+
+void set_local_heat_hint_active(bool active) {
+  bool changed = false;
+
+  portENTER_CRITICAL(&s_link_lock);
+  if (active) {
+    if (!s_link.local_heat_hint_active) {
+      changed = true;
+    }
+    s_link.local_heat_hint_active = true;
+    s_link.local_heat_hint_until_us = esp_timer_get_time() + (15LL * 1000LL * 1000LL);
+  } else {
+    if (s_link.local_heat_hint_active || s_link.local_heat_hint_until_us != 0) {
+      changed = true;
+    }
+    s_link.local_heat_hint_active = false;
+    s_link.local_heat_hint_until_us = 0;
+  }
+  if (changed) {
+    s_link.status_version++;
   }
   portEXIT_CRITICAL(&s_link_lock);
 }
@@ -1090,6 +1133,7 @@ void lm_ctrl_machine_link_get_info(lm_ctrl_machine_link_info_t *info) {
   info->authenticated = s_link.authenticated;
   info->pending_work = (s_link.pending_mask | s_link.inflight_cloud_mask) != 0;
   info->sync_pending = s_link.sync_request_flags != LM_CTRL_MACHINE_SYNC_NONE;
+  info->heat_hint_active = heat_hint_active_locked();
   info->pending_mask = s_link.pending_mask | s_link.inflight_cloud_mask;
   info->sync_flags = s_link.sync_request_flags;
   info->loaded_mask = s_link.loaded_mask;

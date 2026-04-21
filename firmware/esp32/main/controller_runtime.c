@@ -36,10 +36,9 @@ static void reset_heat_state(lm_ctrl_runtime_heat_state_t *heat_state) {
     return;
   }
 
-  *heat_state = (lm_ctrl_runtime_heat_state_t){
-    .last_rendered_remaining_s = -1,
-    .last_rendered_progress_permille = -1,
-  };
+  lm_ctrl_heat_session_reset(&heat_state->session);
+  heat_state->last_rendered_remaining_s = -1;
+  heat_state->last_rendered_progress_permille = -1;
 }
 
 static void reset_shot_timer_state(lm_ctrl_runtime_shot_timer_state_t *shot_timer_state) {
@@ -90,16 +89,9 @@ static int64_t current_epoch_ms(void) {
 }
 
 static int64_t heat_state_remaining_us(const lm_ctrl_runtime_heat_state_t *heat_state) {
-  const int64_t now_us = esp_timer_get_time();
-
-  if (heat_state == NULL || !heat_state->heating || heat_state->deadline_local_us <= 0) {
-    return 0;
-  }
-  if (heat_state->deadline_local_us <= now_us) {
-    return 0;
-  }
-
-  return heat_state->deadline_local_us - now_us;
+  return heat_state != NULL
+    ? lm_ctrl_heat_session_remaining_us(&heat_state->session, esp_timer_get_time())
+    : 0;
 }
 
 static int32_t heat_state_remaining_seconds(const lm_ctrl_runtime_heat_state_t *heat_state) {
@@ -108,21 +100,9 @@ static int32_t heat_state_remaining_seconds(const lm_ctrl_runtime_heat_state_t *
 }
 
 static uint16_t heat_state_progress_permille(const lm_ctrl_runtime_heat_state_t *heat_state) {
-  int64_t remaining_us;
-
-  if (heat_state == NULL || !heat_state->heating || heat_state->duration_us <= 0) {
-    return 0;
-  }
-
-  remaining_us = heat_state_remaining_us(heat_state);
-  if (remaining_us <= 0) {
-    return 0;
-  }
-  if (remaining_us >= heat_state->duration_us) {
-    return 1000;
-  }
-
-  return (uint16_t)((remaining_us * 1000LL) / heat_state->duration_us);
+  return heat_state != NULL
+    ? lm_ctrl_heat_session_progress_permille(&heat_state->session, esp_timer_get_time())
+    : 0;
 }
 
 static void maybe_refresh_shot_timer(lm_ctrl_runtime_t *runtime, bool *needs_render) {
@@ -140,40 +120,24 @@ static void maybe_refresh_shot_timer(lm_ctrl_runtime_t *runtime, bool *needs_ren
   }
 }
 
-static bool initialize_heat_state_deadline(
+static bool sync_heat_state_deadline(
   lm_ctrl_runtime_heat_state_t *heat_state,
   int64_t observed_epoch_ms,
   int64_t ready_epoch_ms
 ) {
-  int64_t remaining_us = 0;
-  int64_t now_epoch_ms = 0;
-  int64_t now_us = 0;
-
   if (heat_state == NULL || ready_epoch_ms <= 0) {
     return false;
   }
-  if (heat_state->deadline_local_us > 0) {
-    return true;
-  }
 
-  if (observed_epoch_ms > 0 && ready_epoch_ms > observed_epoch_ms) {
-    remaining_us = (ready_epoch_ms - observed_epoch_ms) * 1000LL;
-  } else {
-    now_epoch_ms = current_epoch_ms();
-    if (now_epoch_ms > 0 && ready_epoch_ms > now_epoch_ms) {
-      remaining_us = (ready_epoch_ms - now_epoch_ms) * 1000LL;
-    }
-  }
-  if (remaining_us <= 0) {
-    return false;
-  }
-
-  now_us = esp_timer_get_time();
-  heat_state->deadline_local_us = now_us + remaining_us;
-  heat_state->duration_us = remaining_us;
-  heat_state->last_rendered_remaining_s = -1;
-  heat_state->last_rendered_progress_permille = -1;
-  return true;
+  return lm_ctrl_heat_session_apply(
+    &heat_state->session,
+    true,
+    true,
+    esp_timer_get_time(),
+    current_epoch_ms(),
+    observed_epoch_ms,
+    ready_epoch_ms
+  );
 }
 
 static void sync_heat_state(lm_ctrl_runtime_t *runtime) {
@@ -197,13 +161,15 @@ static void sync_heat_state(lm_ctrl_runtime_t *runtime) {
     return;
   }
 
-  runtime->heat_state.heating = heat_info.heating;
+  runtime->heat_state.session.heating = heat_info.heating;
   if (heat_info.eta_available && heat_info.ready_epoch_ms > 0) {
-    have_machine_eta = initialize_heat_state_deadline(
+    have_machine_eta = sync_heat_state_deadline(
       &runtime->heat_state,
       heat_info.observed_epoch_ms,
       heat_info.ready_epoch_ms
     );
+  } else {
+    have_machine_eta = lm_ctrl_heat_session_has_eta(&runtime->heat_state.session);
   }
   if (have_machine_eta) {
     clear_heat_refresh(&runtime->heat_refresh);
@@ -703,7 +669,7 @@ static void maybe_request_fast_heat_refresh(lm_ctrl_runtime_t *runtime) {
     clear_heat_refresh(&runtime->heat_refresh);
     return;
   }
-  if (runtime->state.values.standby_on || runtime->heat_state.deadline_local_us > 0) {
+  if (runtime->state.values.standby_on || lm_ctrl_heat_session_has_eta(&runtime->heat_state.session)) {
     clear_heat_refresh(&runtime->heat_refresh);
     return;
   }
@@ -989,6 +955,7 @@ void lm_ctrl_runtime_handle_power_status_change(lm_ctrl_runtime_t *runtime, bool
 
 void lm_ctrl_runtime_handle_machine_status_change(lm_ctrl_runtime_t *runtime, bool *needs_render) {
   uint32_t machine_status_version;
+  lm_ctrl_machine_link_info_t machine_info = {0};
 
   if (runtime == NULL) {
     return;
@@ -1003,6 +970,12 @@ void lm_ctrl_runtime_handle_machine_status_change(lm_ctrl_runtime_t *runtime, bo
   sync_led_status_from_connectivity();
   merge_loaded_values(&runtime->state, &runtime->local_value_hold);
   sync_heat_state(runtime);
+  lm_ctrl_machine_link_get_info(&machine_info);
+  if (machine_info.heat_hint_active &&
+      !lm_ctrl_heat_session_has_eta(&runtime->heat_state.session) &&
+      runtime->heat_refresh.until_us == 0) {
+    arm_heat_refresh(&runtime->heat_refresh, 0);
+  }
   maybe_request_value_sync(&runtime->state);
   maybe_request_periodic_value_refresh(&runtime->last_ble_refresh_request_us, &runtime->last_cloud_refresh_request_us);
   if (needs_render != NULL) {
@@ -1045,8 +1018,8 @@ void lm_ctrl_runtime_tick(lm_ctrl_runtime_t *runtime, bool *needs_render) {
   maybe_flush_delayed_machine_send(&runtime->state, &runtime->delayed_machine_send, &runtime->local_value_hold);
   remaining_s = heat_state_remaining_seconds(&runtime->heat_state);
   progress_permille = (int32_t)heat_state_progress_permille(&runtime->heat_state);
-  if (runtime->heat_state.heating &&
-      runtime->heat_state.deadline_local_us > 0 &&
+  if (runtime->heat_state.session.heating &&
+      lm_ctrl_heat_session_has_eta(&runtime->heat_state.session) &&
       (remaining_s != runtime->heat_state.last_rendered_remaining_s ||
        progress_permille != runtime->heat_state.last_rendered_progress_permille)) {
     runtime->heat_state.last_rendered_remaining_s = remaining_s;
@@ -1090,11 +1063,10 @@ void lm_ctrl_runtime_build_ui_view(const lm_ctrl_runtime_t *runtime, lm_ctrl_ui_
   view->battery_low = power_info.low;
   view->heat_visible =
     wifi_info.heat_display_enabled &&
-    runtime->heat_state.heating &&
-    heat_state_remaining_us(&runtime->heat_state) > 0;
+    (runtime->heat_state.session.heating || machine_info.heat_hint_active);
   view->heat_arc_visible =
     wifi_info.heat_display_enabled &&
-    runtime->heat_state.duration_us > 0 &&
+    lm_ctrl_heat_session_has_eta(&runtime->heat_state.session) &&
     view->heat_visible;
   view->water_alert_visible = machine_info.water_status.available && machine_info.water_status.no_water;
   view->ble_visible = machine_info.connected || machine_info.authenticated;

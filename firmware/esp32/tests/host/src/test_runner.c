@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 int run_controller_state_tests(void);
+int run_controller_heat_session_tests(void);
 int run_controller_settings_tests(void);
 int run_cloud_api_tests(void);
 int run_controller_shot_timer_tests(void);
@@ -15,6 +16,9 @@ int main(void) {
   fprintf(stderr, "Running host-side firmware tests\n");
 
   if (run_controller_state_tests() != 0) {
+    return 1;
+  }
+  if (run_controller_heat_session_tests() != 0) {
     return 1;
   }
   if (run_controller_settings_tests() != 0) {

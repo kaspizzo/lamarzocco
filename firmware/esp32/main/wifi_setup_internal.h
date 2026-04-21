@@ -146,6 +146,8 @@ typedef struct {
   int64_t web_session_valid_until_us;
   char cloud_access_token[LM_CTRL_CLOUD_WS_TOKEN_LEN];
   int64_t cloud_access_token_valid_until_us;
+  int64_t cloud_server_epoch_ms;
+  int64_t cloud_server_epoch_captured_us;
   char cloud_ws_access_token[LM_CTRL_CLOUD_WS_TOKEN_LEN];
   char cloud_ws_frame[LM_CTRL_CLOUD_WS_FRAME_MAX];
   size_t cloud_ws_frame_len;
@@ -233,6 +235,10 @@ static inline void fill_random_hex(char *dst, size_t dst_size, size_t byte_count
 
 /** Return the current wall clock in milliseconds, or 0 if the clock is not usable yet. */
 int64_t current_epoch_ms(void);
+/** Note a trusted cloud/server UTC epoch and use it as a fallback time base. */
+void note_cloud_server_epoch_ms(int64_t server_epoch_ms);
+/** Return the best available UTC epoch in milliseconds from wall clock or cloud fallback. */
+int64_t current_cloud_epoch_ms(void);
 /** Persist Wi-Fi credentials and controller-local network settings. */
 esp_err_t lm_ctrl_wifi_store_credentials(const char *ssid, const char *password, const char *hostname, ctrl_language_t language);
 /** Apply the persisted station credentials to the active Wi-Fi driver. */

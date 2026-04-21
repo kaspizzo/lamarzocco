@@ -81,6 +81,7 @@ typedef struct {
   bool authenticated;
   bool pending_work;
   bool sync_pending;
+  bool heat_hint_active;
   uint32_t pending_mask;
   uint32_t sync_flags;
   uint32_t loaded_mask;

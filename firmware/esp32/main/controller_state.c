@@ -943,8 +943,8 @@ void ctrl_rotate(ctrl_state_t *state, int delta_steps) {
       state->values.steam_level = clamp_steam_level_index((int)state->values.steam_level + delta_steps);
       break;
     case CTRL_FOCUS_STANDBY:
-      if (delta_steps > 0) state->values.standby_on = true;
-      if (delta_steps < 0) state->values.standby_on = false;
+      if (delta_steps > 0) state->values.standby_on = false;
+      if (delta_steps < 0) state->values.standby_on = true;
       break;
     case CTRL_FOCUS_BBW_MODE:
       state->values.bbw_mode = cycle_bbw_mode(state->values.bbw_mode, delta_steps);

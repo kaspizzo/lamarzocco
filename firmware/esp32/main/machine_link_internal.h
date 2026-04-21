@@ -103,8 +103,10 @@ typedef struct {
   bool mtu_ready;
   bool cloud_live_updates_active;
   bool cloud_live_updates_connected;
+  bool local_heat_hint_active;
   uint32_t sync_request_flags;
   int64_t last_ble_failure_us;
+  int64_t local_heat_hint_until_us;
   ble_uuid_any_t read_uuid;
   ble_uuid_any_t write_uuid;
   ble_uuid_any_t auth_uuid;
@@ -199,6 +201,7 @@ void clear_ble_failure(void);
 void update_reported_values(const ctrl_values_t *values, uint32_t loaded_mask);
 void update_feature_mask(uint32_t feature_mask);
 void update_heat_info(const lm_ctrl_machine_heat_info_t *info);
+void set_local_heat_hint_active(bool active);
 void update_cloud_water_status(const lm_ctrl_machine_water_status_t *status);
 void update_ble_water_status(const lm_ctrl_machine_water_status_t *status);
 bool should_skip_ble_attempt(void);
