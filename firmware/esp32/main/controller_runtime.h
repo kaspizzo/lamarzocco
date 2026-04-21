@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "controller_heat_session.h"
 #include "controller_shot_timer.h"
 #include "controller_state.h"
 #include "controller_ui.h"
@@ -24,9 +25,7 @@ typedef struct {
 } lm_ctrl_runtime_delayed_machine_send_t;
 
 typedef struct {
-  bool heating;
-  int64_t deadline_local_us;
-  int64_t duration_us;
+  lm_ctrl_heat_session_t session;
   int32_t last_rendered_remaining_s;
   int32_t last_rendered_progress_permille;
 } lm_ctrl_runtime_heat_state_t;

@@ -1135,6 +1135,7 @@ esp_err_t send_power_command(bool enabled) {
       ESP_LOGW(TAG, "BLE power response missing, verifying via machineMode.");
       if (verify_machine_mode_via_ble(enabled) == ESP_OK) {
         set_statusf("BLE power verified via machineMode: %s", enabled ? LM_CTRL_MACHINE_MODE_BREWING : LM_CTRL_MACHINE_MODE_STANDBY);
+        set_local_heat_hint_active(enabled);
         return ESP_OK;
       }
       ESP_LOGW(TAG, "BLE power verification failed, using cloud fallback.");
@@ -1153,6 +1154,7 @@ esp_err_t send_power_command(bool enabled) {
     "BLE power verified: %s",
     message[0] != '\0' ? message : expected_mode
   );
+  set_local_heat_hint_active(enabled);
   return ESP_OK;
 }
 
@@ -1202,6 +1204,7 @@ static esp_err_t send_steam_enable_command(bool enabled, ctrl_steam_level_t desi
       ESP_LOGW(TAG, "BLE steam response missing, verifying via boilers.");
       if (verify_boiler_enabled_via_ble(LM_CTRL_MACHINE_BOILER_STEAM, enabled) == ESP_OK) {
         set_statusf("BLE steam verified via boilers: %s", enabled ? "on" : "off");
+        set_local_heat_hint_active(enabled);
         return ESP_OK;
       }
       ESP_LOGW(TAG, "BLE steam verification failed, using cloud fallback.");
@@ -1214,6 +1217,7 @@ static esp_err_t send_steam_enable_command(bool enabled, ctrl_steam_level_t desi
   }
 
   set_statusf("BLE steam command applied: %s", message[0] != '\0' ? message : (enabled ? "on" : "off"));
+  set_local_heat_hint_active(enabled);
   return ESP_OK;
 }
 

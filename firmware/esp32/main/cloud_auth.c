@@ -13,6 +13,7 @@
 #include "cloud_auth_internal.h"
 #include "cloud_live_updates.h"
 #include "controller_settings.h"
+#include "wifi_setup_internal.h"
 
 static const char *TAG = "lm_cloud_auth";
 
@@ -97,6 +98,9 @@ esp_err_t lm_ctrl_cloud_auth_http_request_capture(
   lm_ctrl_cloud_http_response_meta_t *response_meta
 ) {
   esp_err_t ret;
+  lm_ctrl_cloud_http_response_meta_t local_response_meta = {0};
+  lm_ctrl_cloud_http_response_meta_t *effective_response_meta =
+    response_meta != NULL ? response_meta : &local_response_meta;
 
   ESP_LOGI(
     TAG,
@@ -119,8 +123,11 @@ esp_err_t lm_ctrl_cloud_auth_http_request_capture(
     timeout_ms,
     response_body,
     status_code,
-    response_meta
+    effective_response_meta
   );
+  if (ret == ESP_OK && effective_response_meta->server_epoch_ms > 0) {
+    note_cloud_server_epoch_ms(effective_response_meta->server_epoch_ms);
+  }
   mark_cloud_http_request_finished();
   if (ret != ESP_OK) {
     ESP_LOGE(

@@ -82,6 +82,22 @@ static int test_rotate_uses_configured_steps_and_active_preset_count(void) {
   return 0;
 }
 
+static int test_rotate_status_maps_left_to_standby_and_right_to_on(void) {
+  ctrl_state_t state;
+
+  ctrl_state_init(&state);
+  ctrl_set_focus(&state, CTRL_FOCUS_STANDBY);
+
+  state.values.standby_on = false;
+  ctrl_rotate(&state, -1);
+  ASSERT_TRUE(state.values.standby_on);
+
+  ctrl_rotate(&state, +1);
+  ASSERT_FALSE(state.values.standby_on);
+
+  return 0;
+}
+
 static int test_save_and_load_preset_roundtrip(void) {
   ctrl_state_t state;
   ctrl_action_t action;
@@ -315,6 +331,7 @@ static int test_step_helpers_accept_supported_values_only(void) {
 int run_controller_state_tests(void) {
   RUN_TEST(test_rotate_clamps_and_updates_active_screen);
   RUN_TEST(test_rotate_uses_configured_steps_and_active_preset_count);
+  RUN_TEST(test_rotate_status_maps_left_to_standby_and_right_to_on);
   RUN_TEST(test_save_and_load_preset_roundtrip);
   RUN_TEST(test_setup_reset_flow_requires_arm_and_confirm);
   RUN_TEST(test_persist_and_reload_state_roundtrip);

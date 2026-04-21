@@ -13,6 +13,22 @@ static void rearm_ble_after_cloud_wakeup(void) {
   (void)lm_ctrl_machine_link_request_sync_mode(LM_CTRL_MACHINE_SYNC_BLE);
 }
 
+static bool should_fetch_cloud_dashboard(void) {
+  bool should_fetch = true;
+
+  portENTER_CRITICAL(&s_link_lock);
+  if (s_link.cloud_live_updates_active) {
+    /* The dashboard topic does not reliably send a retained snapshot on subscribe.
+     * Keep one-shot/fallback HTTP syncs alive until warmup state is seeded or an ETA becomes usable.
+     */
+    should_fetch = !s_link.heat_info.available ||
+                   (s_link.heat_info.heating && !s_link.heat_info.eta_available);
+  }
+  portEXIT_CRITICAL(&s_link_lock);
+
+  return should_fetch;
+}
+
 bool fetch_values_via_cloud(
   ctrl_values_t *values,
   uint32_t *loaded_mask,
@@ -24,7 +40,7 @@ bool fetch_values_via_cloud(
     return false;
   }
 
-  if (s_link.cloud_live_updates_active) {
+  if (!should_fetch_cloud_dashboard()) {
     return false;
   }
 
@@ -90,6 +106,7 @@ static lm_ctrl_cloud_send_result_t send_cloud_command(
 lm_ctrl_cloud_send_result_t send_power_command_cloud(bool enabled) {
   char payload[96];
   ctrl_values_t sent_values = {0};
+  lm_ctrl_cloud_send_result_t result;
 
   snprintf(
     payload,
@@ -99,7 +116,7 @@ lm_ctrl_cloud_send_result_t send_power_command_cloud(bool enabled) {
   );
   sent_values.standby_on = !enabled;
 
-  return send_cloud_command(
+  result = send_cloud_command(
     "CoffeeMachineChangeMode",
     payload,
     LM_CTRL_MACHINE_FIELD_STANDBY,
@@ -110,11 +127,16 @@ lm_ctrl_cloud_send_result_t send_power_command_cloud(bool enabled) {
     NULL,
     0
   );
+  if (result != LM_CTRL_CLOUD_SEND_FAILED) {
+    set_local_heat_hint_active(enabled);
+  }
+  return result;
 }
 
 static lm_ctrl_cloud_send_result_t send_steam_enable_command_cloud(bool enabled, ctrl_steam_level_t level) {
   char payload[80];
   ctrl_values_t sent_values = {0};
+  lm_ctrl_cloud_send_result_t result;
 
   snprintf(
     payload,
@@ -124,7 +146,7 @@ static lm_ctrl_cloud_send_result_t send_steam_enable_command_cloud(bool enabled,
   );
   sent_values.steam_level = enabled ? ctrl_steam_level_normalize(level) : CTRL_STEAM_LEVEL_OFF;
 
-  return send_cloud_command(
+  result = send_cloud_command(
     "CoffeeMachineSettingSteamBoilerEnabled",
     payload,
     LM_CTRL_MACHINE_FIELD_STEAM,
@@ -135,6 +157,10 @@ static lm_ctrl_cloud_send_result_t send_steam_enable_command_cloud(bool enabled,
     NULL,
     0
   );
+  if (result != LM_CTRL_CLOUD_SEND_FAILED) {
+    set_local_heat_hint_active(enabled);
+  }
+  return result;
 }
 
 static lm_ctrl_cloud_send_result_t send_steam_level_command_cloud(ctrl_steam_level_t level) {

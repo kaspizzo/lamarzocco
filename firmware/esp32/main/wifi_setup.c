@@ -146,6 +146,70 @@ int64_t current_epoch_ms(void) {
   return ((int64_t)tv.tv_sec * 1000LL) + (tv.tv_usec / 1000LL);
 }
 
+void note_cloud_server_epoch_ms(int64_t server_epoch_ms) {
+  const int64_t captured_us = esp_timer_get_time();
+  const int64_t current_ms = current_epoch_ms();
+  bool should_set_wall_clock = false;
+
+  if (server_epoch_ms <= 0) {
+    return;
+  }
+
+  lock_state();
+  s_state.cloud_server_epoch_ms = server_epoch_ms;
+  s_state.cloud_server_epoch_captured_us = captured_us;
+  unlock_state();
+
+  should_set_wall_clock = current_ms == 0;
+  if (!should_set_wall_clock && current_ms > 0) {
+    int64_t delta_ms = current_ms - server_epoch_ms;
+
+    if (delta_ms < 0) {
+      delta_ms = -delta_ms;
+    }
+    should_set_wall_clock = delta_ms > 2000LL;
+  }
+  if (should_set_wall_clock) {
+    struct timeval tv = {
+      .tv_sec = (time_t)(server_epoch_ms / 1000LL),
+      .tv_usec = (suseconds_t)((server_epoch_ms % 1000LL) * 1000LL),
+    };
+
+    if (settimeofday(&tv, NULL) == 0) {
+      ESP_LOGI(TAG, "Synchronized wall clock from cloud server date: %lld", (long long)server_epoch_ms);
+    } else {
+      ESP_LOGW(TAG, "Failed to set wall clock from cloud server date");
+    }
+  }
+}
+
+int64_t current_cloud_epoch_ms(void) {
+  int64_t epoch_ms = current_epoch_ms();
+  int64_t captured_epoch_ms = 0;
+  int64_t captured_us = 0;
+  int64_t now_us = 0;
+
+  if (epoch_ms > 0) {
+    return epoch_ms;
+  }
+
+  lock_state();
+  captured_epoch_ms = s_state.cloud_server_epoch_ms;
+  captured_us = s_state.cloud_server_epoch_captured_us;
+  unlock_state();
+
+  if (captured_epoch_ms <= 0 || captured_us <= 0) {
+    return 0;
+  }
+
+  now_us = esp_timer_get_time();
+  if (now_us <= captured_us) {
+    return captured_epoch_ms;
+  }
+
+  return captured_epoch_ms + ((now_us - captured_us) / 1000LL);
+}
+
 void clear_cached_cloud_access_token_locked(void) {
   s_state.cloud_access_token[0] = '\0';
   s_state.cloud_access_token_valid_until_us = 0;

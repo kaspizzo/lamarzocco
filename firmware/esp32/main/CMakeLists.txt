@@ -14,6 +14,7 @@ idf_component_register(
     "cloud_machine_api.c"
     "cloud_session.c"
     "controller_settings.c"
+    "controller_heat_session.c"
     "controller_runtime.c"
     "controller_state.c"
     "controller_connectivity.c"

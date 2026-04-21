@@ -96,7 +96,7 @@ static void set_cloud_websocket_connected(bool transport_connected, bool stomp_c
 
 static void set_brew_timer_state(bool brew_active, int64_t brew_start_epoch_ms) {
   const int64_t now_us = esp_timer_get_time();
-  const int64_t now_epoch_ms = current_epoch_ms();
+  const int64_t now_epoch_ms = current_cloud_epoch_ms();
   bool changed = false;
 
   lock_state();
@@ -296,6 +296,98 @@ static size_t parse_dashboard_command_updates(
   return count;
 }
 
+static void inspect_heat_widgets(cJSON *root, bool *coffee_present, bool *steam_present) {
+  cJSON *widgets;
+  cJSON *widget;
+
+  if (coffee_present != NULL) {
+    *coffee_present = false;
+  }
+  if (steam_present != NULL) {
+    *steam_present = false;
+  }
+  if (root == NULL) {
+    return;
+  }
+
+  widgets = cJSON_GetObjectItemCaseSensitive(root, "widgets");
+  if (!cJSON_IsArray(widgets)) {
+    return;
+  }
+
+  cJSON_ArrayForEach(widget, widgets) {
+    cJSON *code_item = cJSON_GetObjectItemCaseSensitive(widget, "code");
+
+    if (!cJSON_IsString(code_item) || code_item->valuestring == NULL) {
+      continue;
+    }
+    if (strcmp(code_item->valuestring, "CMCoffeeBoiler") == 0) {
+      if (coffee_present != NULL) {
+        *coffee_present = true;
+      }
+    } else if (strcmp(code_item->valuestring, "CMSteamBoilerLevel") == 0 ||
+               strcmp(code_item->valuestring, "CMSteamBoilerTemperature") == 0) {
+      if (steam_present != NULL) {
+        *steam_present = true;
+      }
+    }
+  }
+}
+
+static void recompute_heat_info(lm_ctrl_machine_heat_info_t *heat_info) {
+  if (heat_info == NULL) {
+    return;
+  }
+
+  heat_info->heating = heat_info->coffee_heating || heat_info->steam_heating;
+  heat_info->eta_available = heat_info->coffee_eta_available || heat_info->steam_eta_available;
+  heat_info->ready_epoch_ms = 0;
+  if (heat_info->coffee_eta_available && heat_info->coffee_ready_epoch_ms > heat_info->ready_epoch_ms) {
+    heat_info->ready_epoch_ms = heat_info->coffee_ready_epoch_ms;
+  }
+  if (heat_info->steam_eta_available && heat_info->steam_ready_epoch_ms > heat_info->ready_epoch_ms) {
+    heat_info->ready_epoch_ms = heat_info->steam_ready_epoch_ms;
+  }
+}
+
+static void merge_partial_heat_info(
+  lm_ctrl_machine_heat_info_t *heat_info,
+  bool coffee_present,
+  bool steam_present
+) {
+  lm_ctrl_machine_heat_info_t current_heat_info = {0};
+
+  if (heat_info == NULL || !heat_info->available) {
+    return;
+  }
+  if (coffee_present && steam_present) {
+    recompute_heat_info(heat_info);
+    return;
+  }
+
+  lm_ctrl_machine_link_get_heat_info(&current_heat_info);
+  if (!current_heat_info.available) {
+    recompute_heat_info(heat_info);
+    return;
+  }
+
+  if (!coffee_present) {
+    heat_info->coffee_heating = current_heat_info.coffee_heating;
+    heat_info->coffee_eta_available = current_heat_info.coffee_eta_available;
+    heat_info->coffee_ready_epoch_ms = current_heat_info.coffee_ready_epoch_ms;
+  }
+  if (!steam_present) {
+    heat_info->steam_heating = current_heat_info.steam_heating;
+    heat_info->steam_eta_available = current_heat_info.steam_eta_available;
+    heat_info->steam_ready_epoch_ms = current_heat_info.steam_ready_epoch_ms;
+  }
+  if (heat_info->observed_epoch_ms == 0) {
+    heat_info->observed_epoch_ms = current_heat_info.observed_epoch_ms;
+  }
+  heat_info->available = true;
+  recompute_heat_info(heat_info);
+}
+
 static void handle_cloud_dashboard_message(const char *message) {
   cJSON *root = NULL;
   ctrl_values_t values = {0};
@@ -306,6 +398,8 @@ static void handle_cloud_dashboard_message(const char *message) {
   lm_ctrl_cloud_machine_status_t machine_status = {0};
   bool brew_active = false;
   int64_t brew_start_epoch_ms = 0;
+  bool coffee_heat_present = false;
+  bool steam_heat_present = false;
   lm_ctrl_cloud_command_update_t updates[LM_CTRL_CLOUD_COMMAND_UPDATE_MAX] = {0};
   size_t update_count = 0;
   bool parsed_values = false;
@@ -326,6 +420,7 @@ static void handle_cloud_dashboard_message(const char *message) {
   if (lm_ctrl_cloud_parse_dashboard_machine_status(root, &machine_status)) {
     merge_cloud_machine_status(&machine_status);
   }
+  inspect_heat_widgets(root, &coffee_heat_present, &steam_heat_present);
 
   parsed_values = lm_ctrl_cloud_parse_dashboard_root_values(
       root,
@@ -339,8 +434,23 @@ static void handle_cloud_dashboard_message(const char *message) {
   (void)lm_ctrl_cloud_parse_dashboard_water_status(root, &water_status);
 
   if (parsed_values) {
+    if (heat_info.available) {
+      merge_partial_heat_info(&heat_info, coffee_heat_present, steam_heat_present);
+    }
     if (heat_info.available && heat_info.observed_epoch_ms == 0) {
-      heat_info.observed_epoch_ms = current_epoch_ms();
+      heat_info.observed_epoch_ms = current_cloud_epoch_ms();
+    }
+    if (heat_info.available) {
+      ESP_LOGI(
+        TAG,
+        "Cloud websocket heat update coffee_present=%d steam_present=%d heating=%d eta=%d ready=%lld observed=%lld",
+        coffee_heat_present ? 1 : 0,
+        steam_heat_present ? 1 : 0,
+        heat_info.heating ? 1 : 0,
+        heat_info.eta_available ? 1 : 0,
+        (long long)heat_info.ready_epoch_ms,
+        (long long)heat_info.observed_epoch_ms
+      );
     }
     lm_ctrl_machine_link_apply_cloud_dashboard_values(
       &values,
@@ -883,7 +993,7 @@ bool lm_ctrl_cloud_live_updates_get_shot_timer_info(lm_ctrl_shot_timer_info_t *i
   }
 
   if (brew_start_epoch_ms > 0) {
-    int64_t now_epoch_ms = current_epoch_ms();
+    int64_t now_epoch_ms = current_cloud_epoch_ms();
 
     if (now_epoch_ms > brew_start_epoch_ms) {
       elapsed_us = (now_epoch_ms - brew_start_epoch_ms) * 1000LL;
