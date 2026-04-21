@@ -96,9 +96,10 @@ static esp_err_t machine_link_fetch_dashboard_values(
   ctrl_values_t *values,
   uint32_t *loaded_mask,
   uint32_t *feature_mask,
-  lm_ctrl_machine_heat_info_t *heat_info
+  lm_ctrl_machine_heat_info_t *heat_info,
+  lm_ctrl_machine_water_status_t *water_status
 ) {
-  return lm_ctrl_wifi_fetch_dashboard_values(values, loaded_mask, feature_mask, heat_info);
+  return lm_ctrl_wifi_fetch_dashboard_values(values, loaded_mask, feature_mask, heat_info, water_status);
 }
 
 void app_main(void) {

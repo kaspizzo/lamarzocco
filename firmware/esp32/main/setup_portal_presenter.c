@@ -13,8 +13,8 @@ typedef struct {
   char status[256];
   char status_html[512];
   char machine_status[160];
-  char debug_status[512];
-  char debug_status_html[768];
+  char debug_status[640];
+  char debug_status_html[1024];
   char banner_html[256];
   char csrf_token_html[96];
   char ssid_html[96];
@@ -110,6 +110,12 @@ static void format_debug_summary(
     "Station: %s\n"
     "IP: %.15s\n"
     "Cloud account: %.47s\n"
+    "Cloud probe: %s\n"
+    "Cloud HTTP in flight: %u\n"
+    "Cloud WS active: %s\n"
+    "Cloud WS transport: %s\n"
+    "Cloud WS STOMP: %s\n"
+    "Cloud machine online: %s\n"
     "Cloud provisioning: %s\n"
     "Machine selected: %.31s\n"
     "Header logo: %s\n"
@@ -127,6 +133,12 @@ static void format_debug_summary(
     wifi_info->sta_connected ? "connected" : (wifi_info->sta_connecting ? "connecting" : "idle"),
     wifi_info->sta_ip[0] != '\0' ? wifi_info->sta_ip : "--",
     wifi_info->cloud_connected ? "connected" : (wifi_info->has_cloud_credentials ? "configured" : "not configured"),
+    wifi_info->cloud_probe_active ? "running" : "idle",
+    (unsigned)wifi_info->cloud_http_requests_in_flight,
+    wifi_info->cloud_live_updates_active ? "yes" : "no",
+    wifi_info->cloud_ws_transport_connected ? "yes" : "no",
+    wifi_info->cloud_ws_connected ? "yes" : "no",
+    !wifi_info->cloud_machine_status_known ? "unknown" : (wifi_info->machine_cloud_online ? "yes" : "no"),
     wifi_info->has_cloud_provisioning ? "ready" : "missing",
     wifi_info->has_machine_selection ? wifi_info->machine_serial : "no",
     wifi_info->has_custom_logo ? "custom" : "default text",

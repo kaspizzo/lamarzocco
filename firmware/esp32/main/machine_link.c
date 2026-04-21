@@ -33,6 +33,23 @@ static bool heat_info_equal(const lm_ctrl_machine_heat_info_t *lhs, const lm_ctr
          lhs->steam_ready_epoch_ms == rhs->steam_ready_epoch_ms;
 }
 
+static bool water_status_equal(const lm_ctrl_machine_water_status_t *lhs, const lm_ctrl_machine_water_status_t *rhs) {
+  if (lhs == NULL || rhs == NULL) {
+    return lhs == rhs;
+  }
+
+  return lhs->available == rhs->available &&
+         lhs->no_water == rhs->no_water;
+}
+
+static lm_ctrl_machine_water_status_t preferred_water_status_locked(void) {
+  if (s_link.ble_water_status.available) {
+    return s_link.ble_water_status;
+  }
+
+  return s_link.cloud_water_status;
+}
+
 static ctrl_steam_level_t preferred_non_off_steam_level_locked(void) {
   if (ctrl_steam_level_enabled(s_link.reported_values.steam_level)) {
     return ctrl_steam_level_normalize(s_link.reported_values.steam_level);
@@ -71,6 +88,9 @@ void set_statusf(const char *fmt, ...) {
 }
 
 void clear_connection_state_locked(void) {
+  const lm_ctrl_machine_water_status_t previous_water_status = preferred_water_status_locked();
+  lm_ctrl_machine_water_status_t current_water_status;
+
   s_link.scanning = false;
   s_link.connect_after_scan = false;
   s_link.connect_in_progress = false;
@@ -88,6 +108,12 @@ void clear_connection_state_locked(void) {
   s_link.mtu_ready = false;
   s_link.discovered_def_handle = 0;
   s_link.discovered_properties = 0;
+  s_link.ble_water_status = (lm_ctrl_machine_water_status_t){0};
+
+  current_water_status = preferred_water_status_locked();
+  if (!water_status_equal(&previous_water_status, &current_water_status)) {
+    s_link.status_version++;
+  }
 }
 
 void snapshot_desired_values(ctrl_values_t *values) {
@@ -556,6 +582,42 @@ void update_heat_info(const lm_ctrl_machine_heat_info_t *info) {
   portEXIT_CRITICAL(&s_link_lock);
 }
 
+void update_cloud_water_status(const lm_ctrl_machine_water_status_t *status) {
+  lm_ctrl_machine_water_status_t previous_water_status;
+  lm_ctrl_machine_water_status_t current_water_status;
+
+  if (status == NULL) {
+    return;
+  }
+
+  portENTER_CRITICAL(&s_link_lock);
+  previous_water_status = preferred_water_status_locked();
+  s_link.cloud_water_status = *status;
+  current_water_status = preferred_water_status_locked();
+  if (!water_status_equal(&previous_water_status, &current_water_status)) {
+    s_link.status_version++;
+  }
+  portEXIT_CRITICAL(&s_link_lock);
+}
+
+void update_ble_water_status(const lm_ctrl_machine_water_status_t *status) {
+  lm_ctrl_machine_water_status_t previous_water_status;
+  lm_ctrl_machine_water_status_t current_water_status;
+
+  if (status == NULL) {
+    return;
+  }
+
+  portENTER_CRITICAL(&s_link_lock);
+  previous_water_status = preferred_water_status_locked();
+  s_link.ble_water_status = *status;
+  current_water_status = preferred_water_status_locked();
+  if (!water_status_equal(&previous_water_status, &current_water_status)) {
+    s_link.status_version++;
+  }
+  portEXIT_CRITICAL(&s_link_lock);
+}
+
 bool should_skip_ble_attempt(void) {
   int64_t last_failure_us;
 
@@ -638,6 +700,8 @@ static void machine_link_worker(void *arg) {
         ctrl_values_t cloud_values = {0};
         ctrl_values_t ble_values = {0};
         lm_ctrl_machine_heat_info_t heat_info = {0};
+        lm_ctrl_machine_water_status_t cloud_water_status = {0};
+        lm_ctrl_machine_water_status_t ble_water_status = {0};
         uint32_t merged_mask = 0;
         uint32_t cloud_loaded_mask = 0;
         uint32_t ble_loaded_mask = 0;
@@ -645,10 +709,22 @@ static void machine_link_worker(void *arg) {
         bool synced = false;
 
         if ((sync_request_flags & LM_CTRL_MACHINE_SYNC_CLOUD) != 0) {
-          synced |= fetch_values_via_cloud(&cloud_values, &cloud_loaded_mask, &feature_mask, &heat_info);
-          update_feature_mask(feature_mask);
+          synced |= fetch_values_via_cloud(
+            &cloud_values,
+            &cloud_loaded_mask,
+            &feature_mask,
+            &heat_info,
+            &cloud_water_status
+          );
+          if (cloud_loaded_mask != 0 || feature_mask != 0) {
+            update_feature_mask(feature_mask);
+          }
           if (heat_info.available) {
             update_heat_info(&heat_info);
+          }
+          if (cloud_water_status.available) {
+            update_cloud_water_status(&cloud_water_status);
+            synced = true;
           }
           if (cloud_loaded_mask != 0) {
             merged_values = cloud_values;
@@ -658,7 +734,7 @@ static void machine_link_worker(void *arg) {
         }
 
         if ((sync_request_flags & LM_CTRL_MACHINE_SYNC_BLE) != 0 &&
-            fetch_values_via_ble(&binding, &ble_values, &ble_loaded_mask)) {
+            fetch_values_via_ble(&binding, &ble_values, &ble_loaded_mask, &ble_water_status)) {
           if ((ble_loaded_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0) {
             merged_values.standby_on = ble_values.standby_on;
           }
@@ -669,6 +745,9 @@ static void machine_link_worker(void *arg) {
             merged_values.steam_level = ble_values.steam_level;
           }
           merged_mask |= ble_loaded_mask;
+          if (ble_water_status.available) {
+            update_ble_water_status(&ble_water_status);
+          }
           synced = true;
         }
 
@@ -1015,6 +1094,7 @@ void lm_ctrl_machine_link_get_info(lm_ctrl_machine_link_info_t *info) {
   info->sync_flags = s_link.sync_request_flags;
   info->loaded_mask = s_link.loaded_mask;
   info->feature_mask = s_link.feature_mask;
+  info->water_status = preferred_water_status_locked();
   portEXIT_CRITICAL(&s_link_lock);
 }
 

@@ -25,6 +25,7 @@ typedef struct {
   bool battery_low;
   bool heat_visible;
   bool heat_arc_visible;
+  bool water_alert_visible;
   bool ble_visible;
   bool ble_authenticated;
   bool shot_timer_visible;
@@ -78,6 +79,7 @@ struct lm_ctrl_ui_s {
   lv_obj_t *usb_icon;
   lv_obj_t *battery_icon;
   lv_obj_t *heat_icon;
+  lv_obj_t *water_icon;
   lv_obj_t *ble_icon;
   lv_obj_t *heat_arc;
   lv_obj_t *page_label;

@@ -44,6 +44,12 @@ typedef struct {
   int64_t steam_ready_epoch_ms;
 } lm_ctrl_machine_heat_info_t;
 
+/** Water supply status surfaced by BLE or the cloud dashboard. */
+typedef struct {
+  bool available;
+  bool no_water;
+} lm_ctrl_machine_water_status_t;
+
 /** Sync sources that can be requested from the machine link worker. */
 typedef enum {
   LM_CTRL_MACHINE_SYNC_NONE = 0,
@@ -79,6 +85,7 @@ typedef struct {
   uint32_t sync_flags;
   uint32_t loaded_mask;
   uint32_t feature_mask;
+  lm_ctrl_machine_water_status_t water_status;
 } lm_ctrl_machine_link_info_t;
 
 #ifdef __cplusplus

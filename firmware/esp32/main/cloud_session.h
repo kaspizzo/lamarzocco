@@ -36,7 +36,8 @@ esp_err_t lm_ctrl_cloud_session_fetch_dashboard_values(
   ctrl_values_t *values,
   uint32_t *loaded_mask,
   uint32_t *feature_mask,
-  lm_ctrl_machine_heat_info_t *heat_info
+  lm_ctrl_machine_heat_info_t *heat_info,
+  lm_ctrl_machine_water_status_t *water_status
 );
 /** Fetch only the prebrewing timing values from the cloud dashboard. */
 esp_err_t lm_ctrl_cloud_session_fetch_prebrewing_values(float *seconds_in, float *seconds_out);

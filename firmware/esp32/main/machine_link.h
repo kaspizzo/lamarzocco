@@ -27,7 +27,8 @@ typedef struct {
     ctrl_values_t *values,
     uint32_t *loaded_mask,
     uint32_t *feature_mask,
-    lm_ctrl_machine_heat_info_t *heat_info
+    lm_ctrl_machine_heat_info_t *heat_info,
+    lm_ctrl_machine_water_status_t *water_status
   );
 } lm_ctrl_machine_link_deps_t;
 
@@ -48,7 +49,8 @@ void lm_ctrl_machine_link_apply_cloud_dashboard_values(
   const ctrl_values_t *values,
   uint32_t loaded_mask,
   uint32_t feature_mask,
-  const lm_ctrl_machine_heat_info_t *heat_info
+  const lm_ctrl_machine_heat_info_t *heat_info,
+  const lm_ctrl_machine_water_status_t *water_status
 );
 /** Apply command updates delivered asynchronously by the cloud websocket. */
 void lm_ctrl_machine_link_apply_cloud_command_updates(const lm_ctrl_cloud_command_update_t *updates, size_t update_count);
