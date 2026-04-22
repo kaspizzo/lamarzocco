@@ -1,9 +1,12 @@
 #include "cloud_api.h"
 #include "cJSON.h"
+#include "esp_http_client.h"
 #include "mbedtls/base64.h"
 #include "machine_link_types.h"
+#include "test_psa.h"
 #include "test_support.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 static int test_generate_installation_secret_matches_reference_vector(void) {
@@ -34,9 +37,32 @@ static int test_generate_installation_secret_matches_reference_vector(void) {
   return 0;
 }
 
+static int test_generate_request_proof_matches_reference_vector(void) {
+  static const uint8_t secret[32] = {
+    0x53, 0x1b, 0x9e, 0x0e, 0x2f, 0x25, 0x73, 0x84,
+    0x88, 0x35, 0xf4, 0x04, 0x21, 0x19, 0x1a, 0xfd,
+    0xe8, 0x79, 0x94, 0x7a, 0xe8, 0x53, 0x57, 0x49,
+    0xc7, 0xd4, 0x44, 0x3c, 0x4c, 0xc3, 0x46, 0xa1,
+  };
+  char proof[64] = {0};
+
+  ASSERT_EQ_INT(
+    ESP_OK,
+    lm_ctrl_cloud_generate_request_proof_text(
+      "28af7c9e-36cf-4f82-b4c6-0181adc3f59f.123e4567-e89b-12d3-a456-426614174000.1700000000000",
+      secret,
+      proof,
+      sizeof(proof)
+    )
+  );
+  ASSERT_STREQ("FZaoPRXLNkn/xB9WaFpyVtATzuOklgR2+cbRyPUch0s=", proof);
+  return 0;
+}
+
 static int test_generate_installation_populates_uuid_secret_and_private_key(void) {
   lm_ctrl_cloud_installation_t installation = {0};
 
+  test_psa_reset();
   ASSERT_EQ_INT(ESP_OK, lm_ctrl_cloud_generate_installation(&installation));
   ASSERT_TRUE(strlen(installation.installation_id) == 36U);
   ASSERT_TRUE(installation.installation_id[8] == '-');
@@ -46,6 +72,21 @@ static int test_generate_installation_populates_uuid_secret_and_private_key(void
   ASSERT_TRUE(installation.private_key_der_len > 0U);
   ASSERT_TRUE(installation.private_key_der_len <= sizeof(installation.private_key_der));
   ASSERT_FALSE(installation.secret[0] == 0 && installation.secret[1] == 0 && installation.secret[2] == 0);
+  ASSERT_EQ_U32(1U, test_psa_generate_count());
+  ASSERT_EQ_U32(1U, test_psa_destroy_count());
+  ASSERT_EQ_U32(0U, (unsigned)test_psa_active_key_count());
+  return 0;
+}
+
+static int test_generate_installation_destroys_ephemeral_key_when_wrap_fails(void) {
+  lm_ctrl_cloud_installation_t installation = {0};
+
+  test_psa_reset();
+  test_psa_set_wrap_result(-1);
+  ASSERT_EQ_INT(ESP_FAIL, lm_ctrl_cloud_generate_installation(&installation));
+  ASSERT_EQ_U32(1U, test_psa_generate_count());
+  ASSERT_EQ_U32(1U, test_psa_destroy_count());
+  ASSERT_EQ_U32(0U, (unsigned)test_psa_active_key_count());
   return 0;
 }
 
@@ -276,6 +317,198 @@ static int test_parse_prebrew_widget_supports_both_widget_shapes(void) {
   return 0;
 }
 
+static int test_http_request_collects_body_and_server_date_metadata(void) {
+  static const char RESPONSE[] = "{\"ok\":true}";
+  static const test_http_client_event_spec_t EVENTS[] = {
+    {
+      .event_id = HTTP_EVENT_ON_HEADER,
+      .header_key = "Date",
+      .header_value = "Tue, 14 Nov 2023 22:13:20 GMT",
+    },
+    {
+      .event_id = HTTP_EVENT_ON_DATA,
+      .data = RESPONSE,
+      .data_len = (int)(sizeof(RESPONSE) - 1U),
+    },
+  };
+  char *response_body = NULL;
+  int status_code = 0;
+  lm_ctrl_cloud_http_response_meta_t response_meta = {0};
+
+  test_http_client_reset();
+  test_http_client_set_status_code(200);
+  test_http_client_set_perform_result(ESP_OK);
+  test_http_client_set_response_events(EVENTS, sizeof(EVENTS) / sizeof(EVENTS[0]));
+
+  ASSERT_EQ_INT(
+    ESP_OK,
+    lm_ctrl_cloud_http_request(
+      "api.example.test",
+      "/dashboard",
+      443,
+      0,
+      NULL,
+      0,
+      NULL,
+      5000,
+      &response_body,
+      &status_code,
+      &response_meta
+    )
+  );
+  ASSERT_TRUE(response_body != NULL);
+  ASSERT_STREQ(RESPONSE, response_body);
+  ASSERT_EQ_INT(200, status_code);
+  ASSERT_EQ_I64(1700000000000LL, response_meta.server_epoch_ms);
+
+  free(response_body);
+  return 0;
+}
+
+static int test_http_request_rejects_oversize_responses(void) {
+  char *oversize_body = NULL;
+  char *response_body = NULL;
+  int status_code = 0;
+  lm_ctrl_cloud_http_response_meta_t response_meta = {0};
+  test_http_client_event_spec_t event = {0};
+  int ret = 0;
+
+  oversize_body = malloc(LM_CTRL_CLOUD_HTTP_RESPONSE_BODY_CAP + 2U);
+  ASSERT_TRUE(oversize_body != NULL);
+  memset(oversize_body, 'A', LM_CTRL_CLOUD_HTTP_RESPONSE_BODY_CAP + 1U);
+  oversize_body[LM_CTRL_CLOUD_HTTP_RESPONSE_BODY_CAP + 1U] = '\0';
+
+  event.event_id = HTTP_EVENT_ON_DATA;
+  event.data = oversize_body;
+  event.data_len = (int)(LM_CTRL_CLOUD_HTTP_RESPONSE_BODY_CAP + 1U);
+
+  test_http_client_reset();
+  test_http_client_set_status_code(200);
+  test_http_client_set_perform_result(ESP_OK);
+  test_http_client_set_response_events(&event, 1);
+
+  ret = lm_ctrl_cloud_http_request(
+    "api.example.test",
+    "/dashboard",
+    443,
+    0,
+    NULL,
+    0,
+    NULL,
+    5000,
+    &response_body,
+    &status_code,
+    &response_meta
+  );
+  ASSERT_EQ_INT(ESP_ERR_NO_MEM, ret);
+  ASSERT_TRUE(response_body == NULL);
+  ASSERT_EQ_INT(200, status_code);
+  ASSERT_EQ_I64(0LL, response_meta.server_epoch_ms);
+
+  free(oversize_body);
+  return 0;
+}
+
+static int test_http_request_ignores_invalid_http_date_variants(void) {
+  static const char RESPONSE[] = "ok";
+  static const test_http_client_event_spec_t EVENTS[] = {
+    {
+      .event_id = HTTP_EVENT_ON_HEADER,
+      .header_key = "Date",
+      .header_value = "Tue, 14 Nov 2023 22:13:20 CET",
+    },
+    {
+      .event_id = HTTP_EVENT_ON_HEADER,
+      .header_key = "Date",
+      .header_value = "14 Nov 2023 22:13:20 GMT",
+    },
+    {
+      .event_id = HTTP_EVENT_ON_DATA,
+      .data = RESPONSE,
+      .data_len = (int)(sizeof(RESPONSE) - 1U),
+    },
+  };
+  char *response_body = NULL;
+  int status_code = 0;
+  lm_ctrl_cloud_http_response_meta_t response_meta = {0};
+
+  test_http_client_reset();
+  test_http_client_set_status_code(200);
+  test_http_client_set_perform_result(ESP_OK);
+  test_http_client_set_response_events(EVENTS, sizeof(EVENTS) / sizeof(EVENTS[0]));
+
+  ASSERT_EQ_INT(
+    ESP_OK,
+    lm_ctrl_cloud_http_request(
+      "api.example.test",
+      "/dashboard",
+      443,
+      0,
+      NULL,
+      0,
+      NULL,
+      5000,
+      &response_body,
+      &status_code,
+      &response_meta
+    )
+  );
+  ASSERT_TRUE(response_body != NULL);
+  ASSERT_STREQ(RESPONSE, response_body);
+  ASSERT_EQ_INT(200, status_code);
+  ASSERT_EQ_I64(0LL, response_meta.server_epoch_ms);
+
+  free(response_body);
+  return 0;
+}
+
+static int test_http_request_parses_leap_day_http_date(void) {
+  static const char RESPONSE[] = "ok";
+  static const test_http_client_event_spec_t EVENTS[] = {
+    {
+      .event_id = HTTP_EVENT_ON_HEADER,
+      .header_key = "Date",
+      .header_value = "Thu, 29 Feb 2024 12:34:56 GMT",
+    },
+    {
+      .event_id = HTTP_EVENT_ON_DATA,
+      .data = RESPONSE,
+      .data_len = (int)(sizeof(RESPONSE) - 1U),
+    },
+  };
+  char *response_body = NULL;
+  int status_code = 0;
+  lm_ctrl_cloud_http_response_meta_t response_meta = {0};
+
+  test_http_client_reset();
+  test_http_client_set_status_code(200);
+  test_http_client_set_perform_result(ESP_OK);
+  test_http_client_set_response_events(EVENTS, sizeof(EVENTS) / sizeof(EVENTS[0]));
+
+  ASSERT_EQ_INT(
+    ESP_OK,
+    lm_ctrl_cloud_http_request(
+      "api.example.test",
+      "/dashboard",
+      443,
+      0,
+      NULL,
+      0,
+      NULL,
+      5000,
+      &response_body,
+      &status_code,
+      &response_meta
+    )
+  );
+  ASSERT_TRUE(response_body != NULL);
+  ASSERT_STREQ(RESPONSE, response_body);
+  ASSERT_EQ_I64(1709210096000LL, response_meta.server_epoch_ms);
+
+  free(response_body);
+  return 0;
+}
+
 static int test_parse_dashboard_values_prefers_latest_ready_time_across_heating_boilers(void) {
   static const char *response_body =
     "{"
@@ -362,8 +595,14 @@ static int test_parse_dashboard_values_falls_back_to_coffee_eta_when_steam_is_no
 
 int run_cloud_api_tests(void) {
   RUN_TEST(test_generate_installation_secret_matches_reference_vector);
+  RUN_TEST(test_generate_request_proof_matches_reference_vector);
   RUN_TEST(test_generate_installation_populates_uuid_secret_and_private_key);
+  RUN_TEST(test_generate_installation_destroys_ephemeral_key_when_wrap_fails);
   RUN_TEST(test_parse_access_token_success_and_invalid_payload);
+  RUN_TEST(test_http_request_collects_body_and_server_date_metadata);
+  RUN_TEST(test_http_request_rejects_oversize_responses);
+  RUN_TEST(test_http_request_ignores_invalid_http_date_variants);
+  RUN_TEST(test_http_request_parses_leap_day_http_date);
   RUN_TEST(test_parse_customer_fleet_filters_invalid_entries);
   RUN_TEST(test_parse_dashboard_machine_status_extracts_online_signal);
   RUN_TEST(test_parse_dashboard_water_status_extracts_no_water_alarm);

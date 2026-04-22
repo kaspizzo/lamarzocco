@@ -10,6 +10,7 @@
 #include "cloud_auth_internal.h"
 #include "cloud_machine_selection.h"
 #include "controller_settings.h"
+#include "wifi_setup_internal.h"
 
 static const char *TAG = "lm_cloud_machine";
 

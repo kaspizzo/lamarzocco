@@ -497,6 +497,23 @@ static int test_clearing_password_returns_portal_to_open_mode(void) {
   return 0;
 }
 
+static int test_http_server_start_uses_explicit_stack_budget(void) {
+  const httpd_config_t *config = NULL;
+
+  reset_route_test_state();
+  test_httpd_reset_server_config();
+
+  ASSERT_EQ_INT(ESP_OK, lm_ctrl_setup_portal_start_http_server());
+  config = test_httpd_last_config();
+  ASSERT_TRUE(config != NULL);
+  ASSERT_EQ_INT(35, config->max_uri_handlers);
+  ASSERT_EQ_INT(LM_CTRL_SETUP_PORTAL_HTTPD_STACK_SIZE, config->stack_size);
+  ASSERT_TRUE(config->uri_match_fn != NULL);
+
+  s_state.http_server = NULL;
+  return 0;
+}
+
 int run_setup_portal_route_tests(void) {
   RUN_TEST(test_parse_advanced_form_reads_supported_values);
   RUN_TEST(test_validate_advanced_form_rejects_invalid_values_and_missing_confirm);
@@ -504,5 +521,6 @@ int run_setup_portal_route_tests(void) {
   RUN_TEST(test_access_setup_post_with_password_renders_portal_and_sets_cookie);
   RUN_TEST(test_login_post_creates_usable_session_for_protected_post);
   RUN_TEST(test_clearing_password_returns_portal_to_open_mode);
+  RUN_TEST(test_http_server_start_uses_explicit_stack_budget);
   return 0;
 }

@@ -12,3 +12,5 @@ const char *test_httpd_request_body(const httpd_req_t *req);
 const char *test_httpd_request_type(const httpd_req_t *req);
 const char *test_httpd_request_status(const httpd_req_t *req);
 const char *test_httpd_response_header(const httpd_req_t *req, const char *name);
+void test_httpd_reset_server_config(void);
+const httpd_config_t *test_httpd_last_config(void);

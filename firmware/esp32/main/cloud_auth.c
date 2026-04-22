@@ -184,6 +184,9 @@ static bool parse_cloud_access_token_jwt_times(
 
   payload_len = (size_t)(payload_end - payload_start);
   if (payload_len == 0 || payload_len > sizeof(normalized) - 5) {
+    if (payload_len > sizeof(normalized) - 5) {
+      ESP_LOGW(TAG, "Cloud access token JWT payload too large for local parsing: %u bytes", (unsigned)payload_len);
+    }
     return false;
   }
 
@@ -206,12 +209,22 @@ static bool parse_cloud_access_token_jwt_times(
 
   if (mbedtls_base64_decode(decoded, sizeof(decoded) - 1, &decoded_len, (const unsigned char *)normalized, normalized_len) != 0 ||
       decoded_len == 0) {
+    ESP_LOGW(
+      TAG,
+      "Cloud access token JWT payload decode failed after %u encoded bytes",
+      (unsigned)payload_len
+    );
     return false;
   }
   decoded[decoded_len] = '\0';
 
   root = cJSON_Parse((const char *)decoded);
   if (root == NULL) {
+    ESP_LOGW(
+      TAG,
+      "Cloud access token JWT payload JSON parse failed after %u decoded bytes",
+      (unsigned)decoded_len
+    );
     return false;
   }
 
@@ -228,6 +241,13 @@ static bool parse_cloud_access_token_jwt_times(
   if (cJSON_IsNumber(nbf_item)) {
     *not_before_epoch_ms = (int64_t)nbf_item->valuedouble * 1000LL;
   }
+  if (!parsed) {
+    ESP_LOGW(
+      TAG,
+      "Cloud access token JWT payload missing usable exp claim after %u decoded bytes",
+      (unsigned)decoded_len
+    );
+  }
 
   cJSON_Delete(root);
   return parsed;
@@ -242,7 +262,7 @@ static int64_t compute_cloud_access_token_cache_until_us(const char *access_toke
   int64_t now_us = esp_timer_get_time();
 
   if (!parse_cloud_access_token_jwt_times(access_token, &expiry_epoch_ms, &issued_epoch_ms, &not_before_epoch_ms)) {
-    ESP_LOGI(TAG, "Cloud access token cache fallback: 30s");
+    ESP_LOGW(TAG, "Cloud access token cache fallback: 30s");
     return now_us + LM_CTRL_CLOUD_ACCESS_TOKEN_CACHE_FALLBACK_US;
   }
 
@@ -255,7 +275,7 @@ static int64_t compute_cloud_access_token_cache_until_us(const char *access_toke
     remaining_ms = expiry_epoch_ms - not_before_epoch_ms;
     ESP_LOGI(TAG, "Cloud access token wall clock unavailable; using JWT lifetime from nbf/exp");
   } else {
-    ESP_LOGI(TAG, "Cloud access token JWT exp found, but no usable lifetime claims; using 30s fallback");
+    ESP_LOGW(TAG, "Cloud access token JWT exp found, but no usable lifetime claims; using 30s fallback");
     return now_us + LM_CTRL_CLOUD_ACCESS_TOKEN_CACHE_FALLBACK_US;
   }
 
@@ -719,6 +739,9 @@ esp_err_t lm_ctrl_cloud_session_fetch_access_token_cached(
   unlock_state();
 
   if (auth_lock != NULL) {
+    // Lock-order rule: resolve the auth mutex from s_state first, then release
+    // s_state before waiting here so sign-in serialization never nests under
+    // the shared runtime lock.
     xSemaphoreTake(auth_lock, portMAX_DELAY);
   }
 

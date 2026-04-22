@@ -99,12 +99,24 @@ If you want to flash the controller:
 - On first boot without stored Wi-Fi credentials, and again after a full factory reset, the controller opens `Setup` automatically and starts its own setup AP.
 - In that state the setup screen shows a QR code for the controller AP plus the AP name, password, and local setup IP so onboarding can start directly on a phone.
 - After home Wi-Fi is saved, the controller immediately tries to join that network. Once connected, the setup portal stays available again via the on-device setup gesture and the configured `http://<hostname>.local/` address.
+- On later boots with stored Wi-Fi, the controller retries the saved network automatically. If the STA link drops repeatedly, reconnect uses exponential backoff and the setup AP is brought back as a recovery path while background retries continue.
 - The browser setup portal is currently split into `Overview`, `Controller`, `Network`, `Cloud`, `Recipes`, `Advanced`, and `Diagnostics`.
 - A crossed Wi-Fi icon means the controller has account/network context but the selected machine is not currently reachable through cloud. BLE control can still stay active in that state.
 - Brew by weight is currently a cloud-only path in the firmware: the UI and presets can expose it, but BBW writes still require cloud machine reachability.
 - The cloud login path expects a direct La Marzocco account email/password. Accounts created only through Apple or Google sign-in are not expected to work with the current controller login flow.
 - A possible workaround for Apple/Google-only accounts is to create a second La Marzocco account with a normal email/password login and grant that account access in the official app. Treat this as a best-effort workaround, not a guaranteed fix.
 - Main gestures are: swipe down for `Presets`, swipe up for `Setup`, and long-press on the setup screen to open `Recovery` for `Clear web password` or `Reset network`.
+
+## Security model and known limitations
+
+- There is currently no OTA update path. Firmware updates still require local USB flashing.
+- The setup AP and captive portal are local onboarding/recovery tools, not hardened hostile-network services.
+- The home-network portal assumes a trusted LAN unless you enable the optional portal admin password.
+- If you deliberately keep the LAN portal open, anyone on that same LAN can use it to change controller settings.
+- The captive DNS implementation is intentionally minimal and mainly exists to trigger common portal flows; some clients still need the manual fallback URL `http://192.168.4.1/`.
+- Wi-Fi credentials, cloud credentials, machine binding, and related tokens are stored locally on the controller for normal operation.
+- Brew by weight remains cloud-dependent in this firmware, and some behaviour still depends on La Marzocco backend responses.
+- The project still targets a narrow JC3636K718-style hardware family rather than a broad controller matrix.
 
 ## Developer tools
 

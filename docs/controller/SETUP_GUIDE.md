@@ -47,6 +47,9 @@ The current firmware provides a real local setup path:
 3. In that onboarding state, the device shows a QR code for the setup AP together with the AP name, password, and setup IP.
 4. Scan the QR code with a phone or join the controller AP manually, then open the captive portal.
 5. If the captive portal does not open automatically, open `http://192.168.4.1/` manually.
+   The captive DNS path is intentionally minimal and mainly answers basic IPv4
+   `A` queries with the portal IP, so some iOS/Android captive helpers may fall
+   back to the manual URL.
 6. In the browser portal:
    - optionally change the controller hostname
    - optionally switch the controller UI language
@@ -54,9 +57,12 @@ The current firmware provides a real local setup path:
 7. In **Network**, save the home Wi-Fi SSID and password.
 8. After saving Wi-Fi, the controller immediately tries to join the configured home network.
 9. Once the controller is on the home network, the setup portal remains available at `http://<hostname>.local/`.
-10. In **La Marzocco Cloud**, store the cloud account email/password and load the machine list.
-11. Select the active machine in **Select Machine** so the controller can persist the machine binding.
-12. The browser portal currently supports:
+10. On later boots with stored Wi-Fi, the controller again tries the saved network immediately.
+11. If home Wi-Fi drops later, reconnect uses exponential backoff from 1 second up to 30 seconds.
+12. After repeated failures, the setup AP is enabled again at `http://192.168.4.1/` so local recovery stays available while the controller keeps retrying the saved home network.
+13. In **La Marzocco Cloud**, store the cloud account email/password and load the machine list.
+14. Select the active machine in **Select Machine** so the controller can persist the machine binding.
+15. The browser portal currently supports:
    - `Overview` with portal reachability, current IP, and stable `.local` URL
    - `Controller` settings for hostname, language (`English` default), and optional local SVG header logo
    - `Network` with Wi-Fi storage and scan
@@ -64,8 +70,8 @@ The current firmware provides a real local setup path:
    - `Recipes` for controller preset editing, including BBW fields when the selected machine reports BBW support
    - `Advanced` controller tuning and factory reset
    - `Diagnostics` for cloud heat debug and the optional remote screenshot route
-13. Swipe up on the main controller screen to reopen `Setup` later.
-14. Swipe down on the main controller screen to open `Presets`.
+16. Swipe up on the main controller screen to reopen `Setup` later.
+17. Swipe down on the main controller screen to open `Presets`.
 
 ## Connectivity indicators
 

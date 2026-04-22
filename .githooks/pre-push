@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+echo "[pre-push] Running firmware host tests"
+cd "${REPO_ROOT}"
+./firmware/esp32/dev.sh test

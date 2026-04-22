@@ -6,6 +6,7 @@
  */
 #include "controller_state.h"
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stddef.h>
@@ -27,7 +28,7 @@ static const float CTRL_STEAM_LEVEL_2_TEMPERATURE_C = 128.0f;
 static const float CTRL_STEAM_LEVEL_3_TEMPERATURE_C = 131.0f;
 static const float CTRL_EDIT_STEP_FINE = 0.1f;
 static const float CTRL_EDIT_STEP_COARSE = 0.5f;
-static volatile uint32_t s_preset_version = 1;
+static _Atomic uint32_t s_preset_version = 1;
 
 typedef struct {
   float temperature_c;
@@ -79,7 +80,7 @@ static void copy_text(char *dst, size_t dst_size, const char *src) {
 }
 
 static uint32_t bump_preset_version(void) {
-  return __atomic_add_fetch(&s_preset_version, 1U, __ATOMIC_RELAXED);
+  return atomic_fetch_add_explicit(&s_preset_version, 1U, memory_order_relaxed) + 1U;
 }
 
 static void format_preset_key(int preset_index, char *buffer, size_t buffer_size) {
@@ -1113,38 +1114,193 @@ const char *ctrl_focus_name(ctrl_focus_t focus) {
   return ctrl_focus_name_for_language(focus, CTRL_LANGUAGE_EN);
 }
 
+typedef struct {
+  const char *en;
+  const char *de;
+} ctrl_text_entry_t;
+
+static const ctrl_text_entry_t s_ctrl_text[CTRL_TEXT_COUNT] = {
+  [CTRL_TEXT_FOCUS_TEMPERATURE] = { "Coffee Boiler", "Kaffeeboiler" },
+  [CTRL_TEXT_FOCUS_INFUSE] = { "Prebrewing On-Time", "Prebrewing An-Zeit" },
+  [CTRL_TEXT_FOCUS_PAUSE] = { "Prebrewing Off-Time", "Prebrewing Aus-Zeit" },
+  [CTRL_TEXT_FOCUS_STEAM] = { "Steam Boiler", "Dampfboiler" },
+  [CTRL_TEXT_STATUS] = { "Status", "Status" },
+  [CTRL_TEXT_FOCUS_BBW] = { "Brew by Weight", "Brew by Weight" },
+  [CTRL_TEXT_FOCUS_BBW_DOSE_1] = { "BBW Dose 1", "BBW Dosis 1" },
+  [CTRL_TEXT_FOCUS_BBW_DOSE_2] = { "BBW Dose 2", "BBW Dosis 2" },
+  [CTRL_TEXT_PREBREWING] = { "Prebrewing", "Prebrewing" },
+  [CTRL_TEXT_SETTING] = { "Setting", "Einstellung" },
+  [CTRL_TEXT_BBW_MODE_DOSE_1] = { "Dose 1", "Dosis 1" },
+  [CTRL_TEXT_BBW_MODE_DOSE_2] = { "Dose 2", "Dosis 2" },
+  [CTRL_TEXT_BBW_MODE_CONTINUOUS] = { "Continuous", "Kontinuierlich" },
+  [CTRL_TEXT_STATUS_FIELD_UPDATED_FMT] = { "%s updated.", "%s aktualisiert." },
+  [CTRL_TEXT_STATUS_PRESET_LOADED_FMT] = { "Preset %d loaded.", "Preset %d aktiviert." },
+  [CTRL_TEXT_STATUS_PRESET_SAVED_FMT] = {
+    "Preset %d saved from the current values.",
+    "Preset %d aus aktuellen Werten gesichert.",
+  },
+  [CTRL_TEXT_STATUS_SETUP_LOADING] = { "Controller setup is loading.", "Controller-Setup wird geladen." },
+  [CTRL_TEXT_STATUS_CLEAR_WEB_PASSWORD] = {
+    "Web password is being cleared.",
+    "Web-Passwort wird gelöscht.",
+  },
+  [CTRL_TEXT_STATUS_RESET_NETWORK] = { "Network reset in progress.", "Netzwerk-Reset wird ausgeführt." },
+  [CTRL_TEXT_LOADING_CLOUD_VALUES] = {
+    "Values load once\ncloud sync is ready.",
+    "Werte werden geladen,\nsobald die Cloud bereit ist.",
+  },
+  [CTRL_TEXT_LOADING_MACHINE_VALUES] = {
+    "Values load once\nthe machine is connected.",
+    "Werte werden geladen,\nsobald die Maschine verbunden ist.",
+  },
+  [CTRL_TEXT_MACHINE_OFFLINE_CLOUD_VALUES] = {
+    "Machine offline.\nCloud values unavailable.",
+    "Maschine offline.\nCloud-Werte nicht verfügbar.",
+  },
+  [CTRL_TEXT_MACHINE_UNREACHABLE] = {
+    "Machine unreachable.\nConnect via BLE or cloud.",
+    "Maschine nicht erreichbar.\nBLE oder Cloud verbinden.",
+  },
+  [CTRL_TEXT_NO_WATER_HINT] = {
+    "No water detected.\nCheck and refill tank.",
+    "Kein Wasser erkannt.\nTank prüfen und füllen.",
+  },
+  [CTRL_TEXT_HINT_TEMPERATURE] = {
+    "The coffee boiler setting controls the brewing water temperature.",
+    "Die Kaffeeboiler-Einstellung regelt die Wassertemperatur für die Espresso-Zubereitung.",
+  },
+  [CTRL_TEXT_HINT_INFUSE] = {
+    "On-time: pump pulse duration during prebrewing.",
+    "An-Zeit: Dauer des Pumpenimpulses während Prebrewing.",
+  },
+  [CTRL_TEXT_HINT_PAUSE] = {
+    "Off-time: pause between prebrewing pump pulses.",
+    "Aus-Zeit: Pause zwischen zwei Pumpenimpulsen.",
+  },
+  [CTRL_TEXT_HINT_HEATING_READY_FMT] = {
+    "Heating up.\nReady in %s.",
+    "Aufheizen läuft.\nBereit in %s.",
+  },
+  [CTRL_TEXT_HINT_STEAM_DIRECT] = {
+    "Adjust the steam level\ndirectly on the controller.",
+    "Dampflevel direkt\nam Controller einstellen.",
+  },
+  [CTRL_TEXT_ON] = { "On", "An" },
+  [CTRL_TEXT_HINT_STATUS_DIRECT] = {
+    "Adjust machine status\ndirectly on the controller.",
+    "Maschinenstatus direkt\nam Controller einstellen.",
+  },
+  [CTRL_TEXT_HINT_BBW_MODE] = {
+    "Select the active\nbrew-by-weight mode.",
+    "Aktiven Brew-by-Weight\nModus wählen.",
+  },
+  [CTRL_TEXT_HINT_BBW_DOSE_1] = {
+    "Target weight for\nBBW dose 1.",
+    "Zielgewicht für\nBBW Dosis 1.",
+  },
+  [CTRL_TEXT_HINT_BBW_DOSE_2] = {
+    "Target weight for\nBBW dose 2.",
+    "Zielgewicht für\nBBW Dosis 2.",
+  },
+  [CTRL_TEXT_PRESET_BODY_WITH_BBW_FMT] = {
+    "Coffee Boiler %.1f C\nOn-Time %.1f s\nOff-Time %.1f s\nBBW %s\nDose 1 %.1f g\nDose 2 %.1f g",
+    "Kaffeeboiler %.1f C\nAn-Zeit %.1f s\nAus-Zeit %.1f s\nBBW %s\nDosis 1 %.1f g\nDosis 2 %.1f g",
+  },
+  [CTRL_TEXT_PRESET_BODY_BASIC_FMT] = {
+    "Coffee Boiler %.1f C\nOn-Time %.1f s\nOff-Time %.1f s",
+    "Kaffeeboiler %.1f C\nAn-Zeit %.1f s\nAus-Zeit %.1f s",
+  },
+  [CTRL_TEXT_SHOT_TIMER_TITLE] = { "Shot Timer", "Shot-Timer" },
+  [CTRL_TEXT_LOAD] = { "Load", "Laden" },
+  [CTRL_TEXT_SAVE] = { "Save", "Sichern" },
+  [CTRL_TEXT_SETUP_PORTAL_STARTING] = { "Setup portal is starting.", "Setup-Portal wird gestartet." },
+  [CTRL_TEXT_RESET] = { "Reset", "Zurücksetzen" },
+  [CTRL_TEXT_RECOVERY_ARM_OPEN] = {
+    "Rotate clockwise once to open recovery.",
+    "Einmal im Uhrzeigersinn drehen, um die Wiederherstellung zu öffnen.",
+  },
+  [CTRL_TEXT_RECOVERY_ARM_CANCEL] = { "Swipe down to cancel.", "Nach unten wischen zum Abbrechen." },
+  [CTRL_TEXT_RECOVERY] = { "Recovery", "Wiederherstellung" },
+  [CTRL_TEXT_CLEAR_WEB_PASSWORD_ACTION] = { "Clear web password", "Web-Passwort löschen" },
+  [CTRL_TEXT_RESET_NETWORK_ACTION] = { "Reset network", "Netzwerk zurücksetzen" },
+  [CTRL_TEXT_RECOVERY_PICK_ACTION] = {
+    "Rotate to choose the recovery action.",
+    "Aktion mit dem Drehknopf wählen.",
+  },
+  [CTRL_TEXT_BACK] = { "Back", "Zurück" },
+  [CTRL_TEXT_RUN] = { "Run", "Start" },
+};
+
+const char *ctrl_text(ctrl_text_key_t key, ctrl_language_t language) {
+  if (key < 0 || key >= CTRL_TEXT_COUNT) {
+    return "";
+  }
+
+  return language == CTRL_LANGUAGE_DE ? s_ctrl_text[key].de : s_ctrl_text[key].en;
+}
+
 const char *ctrl_focus_name_for_language(ctrl_focus_t focus, ctrl_language_t language) {
   switch (focus) {
     case CTRL_FOCUS_TEMPERATURE:
-      return language == CTRL_LANGUAGE_DE ? "Kaffeeboiler" : "Coffee Boiler";
+      return ctrl_text(CTRL_TEXT_FOCUS_TEMPERATURE, language);
     case CTRL_FOCUS_INFUSE:
-      return language == CTRL_LANGUAGE_DE ? "Prebrewing An-Zeit" : "Prebrewing On-Time";
+      return ctrl_text(CTRL_TEXT_FOCUS_INFUSE, language);
     case CTRL_FOCUS_PAUSE:
-      return language == CTRL_LANGUAGE_DE ? "Prebrewing Aus-Zeit" : "Prebrewing Off-Time";
+      return ctrl_text(CTRL_TEXT_FOCUS_PAUSE, language);
     case CTRL_FOCUS_STEAM:
-      return language == CTRL_LANGUAGE_DE ? "Dampfboiler" : "Steam Boiler";
+      return ctrl_text(CTRL_TEXT_FOCUS_STEAM, language);
     case CTRL_FOCUS_STANDBY:
-      return "Status";
+      return ctrl_text(CTRL_TEXT_STATUS, language);
     case CTRL_FOCUS_BBW_MODE:
-      return language == CTRL_LANGUAGE_DE ? "Brew by Weight" : "Brew by Weight";
+      return ctrl_text(CTRL_TEXT_FOCUS_BBW, language);
     case CTRL_FOCUS_BBW_DOSE_1:
-      return language == CTRL_LANGUAGE_DE ? "BBW Dosis 1" : "BBW Dose 1";
+      return ctrl_text(CTRL_TEXT_FOCUS_BBW_DOSE_1, language);
     case CTRL_FOCUS_BBW_DOSE_2:
-      return language == CTRL_LANGUAGE_DE ? "BBW Dosis 2" : "BBW Dose 2";
+      return ctrl_text(CTRL_TEXT_FOCUS_BBW_DOSE_2, language);
     default:
       return "Unknown";
+  }
+}
+
+const char *ctrl_focus_page_title(ctrl_focus_t focus, ctrl_language_t language) {
+  switch (focus) {
+    case CTRL_FOCUS_INFUSE:
+    case CTRL_FOCUS_PAUSE:
+      return ctrl_text(CTRL_TEXT_PREBREWING, language);
+    case CTRL_FOCUS_STANDBY:
+      return ctrl_text(CTRL_TEXT_STATUS, language);
+    case CTRL_FOCUS_BBW_MODE:
+      return ctrl_text(CTRL_TEXT_FOCUS_BBW, language);
+    case CTRL_FOCUS_TEMPERATURE:
+    case CTRL_FOCUS_STEAM:
+    case CTRL_FOCUS_BBW_DOSE_1:
+    case CTRL_FOCUS_BBW_DOSE_2:
+      return ctrl_focus_name_for_language(focus, language);
+    default:
+      return ctrl_text(CTRL_TEXT_SETTING, language);
   }
 }
 
 const char *ctrl_bbw_mode_name(ctrl_bbw_mode_t mode, ctrl_language_t language) {
   switch (normalize_bbw_mode(mode)) {
     case CTRL_BBW_MODE_DOSE_1:
-      return language == CTRL_LANGUAGE_DE ? "Dosis 1" : "Dose 1";
+      return ctrl_text(CTRL_TEXT_BBW_MODE_DOSE_1, language);
     case CTRL_BBW_MODE_DOSE_2:
-      return language == CTRL_LANGUAGE_DE ? "Dosis 2" : "Dose 2";
+      return ctrl_text(CTRL_TEXT_BBW_MODE_DOSE_2, language);
     case CTRL_BBW_MODE_CONTINUOUS:
     default:
-      return language == CTRL_LANGUAGE_DE ? "Kontinuierlich" : "Continuous";
+      return ctrl_text(CTRL_TEXT_BBW_MODE_CONTINUOUS, language);
+  }
+}
+
+const char *ctrl_recovery_action_name(ctrl_recovery_action_t action, ctrl_language_t language) {
+  switch (action) {
+    case CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD:
+      return ctrl_text(CTRL_TEXT_CLEAR_WEB_PASSWORD_ACTION, language);
+    case CTRL_RECOVERY_ACTION_RESET_NETWORK:
+      return ctrl_text(CTRL_TEXT_RESET_NETWORK_ACTION, language);
+    default:
+      return "";
   }
 }
 
@@ -1295,7 +1451,7 @@ esp_err_t ctrl_state_store_preset_slot(int preset_index, const ctrl_preset_t *pr
 }
 
 uint32_t ctrl_state_preset_version(void) {
-  return __atomic_load_n(&s_preset_version, __ATOMIC_RELAXED);
+  return atomic_load_explicit(&s_preset_version, memory_order_relaxed);
 }
 
 esp_err_t ctrl_state_update_advanced_settings(uint8_t preset_count, float temperature_step_c, float time_step_s) {

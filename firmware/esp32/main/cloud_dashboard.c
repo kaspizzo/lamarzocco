@@ -8,6 +8,7 @@
 
 #include "cloud_auth_internal.h"
 #include "controller_settings.h"
+#include "wifi_setup_internal.h"
 
 static void append_text(char *buffer, size_t buffer_size, const char *text) {
   size_t used;

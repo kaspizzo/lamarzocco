@@ -13,6 +13,7 @@ static int test_legacy_wifi_snapshot_preserves_portal_password_and_cloud_provisi
   char portal_password[65] = {0};
   size_t portal_password_size = sizeof(portal_password);
   size_t provisioning_size = sizeof(restored_provisioning);
+  uint8_t heat_display = 1;
   uint8_t install_reg = 0;
 
   test_nvs_reset();
@@ -30,14 +31,17 @@ static int test_legacy_wifi_snapshot_preserves_portal_password_and_cloud_provisi
   ASSERT_EQ_INT(ESP_OK, test_nvs_seed_str(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_PORTAL_PASS, "PortalPass42"));
   ASSERT_EQ_INT(ESP_OK, test_nvs_seed_blob(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_INSTALL_BLOB, &expected_provisioning, sizeof(expected_provisioning)));
   ASSERT_EQ_INT(ESP_OK, test_nvs_seed_u8(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_INSTALL_REG, 1));
+  ASSERT_EQ_INT(ESP_OK, test_nvs_seed_u8(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_HEAT_DISPLAY, 0));
 
   ASSERT_EQ_INT(ESP_OK, capture_legacy_wifi_snapshot(&snapshot));
-  ASSERT_TRUE(snapshot.has_portal_password);
-  ASSERT_STREQ("PortalPass42", snapshot.portal_password);
-  ASSERT_TRUE(snapshot.has_cloud_provisioning);
-  ASSERT_TRUE(snapshot.has_cloud_install_reg);
-  ASSERT_EQ_INT(0, memcmp(&expected_provisioning, &snapshot.cloud_provisioning, sizeof(expected_provisioning)));
-  ASSERT_EQ_INT(1, snapshot.cloud_install_reg);
+  ASSERT_TRUE(lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_PORTAL_PASSWORD));
+  ASSERT_STREQ("PortalPass42", snapshot.values.portal_password);
+  ASSERT_TRUE(lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_CLOUD_PROVISIONING));
+  ASSERT_TRUE(lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_CLOUD_INSTALL_REG));
+  ASSERT_TRUE(lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_HEAT_DISPLAY_ENABLED));
+  ASSERT_EQ_INT(0, memcmp(&expected_provisioning, &snapshot.values.cloud_provisioning, sizeof(expected_provisioning)));
+  ASSERT_EQ_INT(1, snapshot.values.cloud_install_reg);
+  ASSERT_EQ_INT(0, snapshot.values.heat_display_enabled);
 
   test_nvs_reset();
   ASSERT_EQ_INT(ESP_OK, restore_legacy_wifi_snapshot(&snapshot));
@@ -50,6 +54,8 @@ static int test_legacy_wifi_snapshot_preserves_portal_password_and_cloud_provisi
   ASSERT_EQ_INT(0, memcmp(&expected_provisioning, &restored_provisioning, sizeof(expected_provisioning)));
   ASSERT_EQ_INT(ESP_OK, nvs_get_u8(handle, LM_CTRL_WIFI_KEY_INSTALL_REG, &install_reg));
   ASSERT_EQ_INT(1, install_reg);
+  ASSERT_EQ_INT(ESP_OK, nvs_get_u8(handle, LM_CTRL_WIFI_KEY_HEAT_DISPLAY, &heat_display));
+  ASSERT_EQ_INT(0, heat_display);
   nvs_close(handle);
 
   secure_zero(&snapshot, sizeof(snapshot));

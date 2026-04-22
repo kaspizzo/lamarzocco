@@ -458,7 +458,7 @@ static void set_status_from_action(const ctrl_state_t *state, ctrl_action_t acti
       snprintf(
         status,
         status_size,
-        language == CTRL_LANGUAGE_DE ? "%s aktualisiert." : "%s updated.",
+        ctrl_text(CTRL_TEXT_STATUS_FIELD_UPDATED_FMT, language),
         ctrl_focus_name_for_language(action.applied_focus, language)
       );
       break;
@@ -466,7 +466,7 @@ static void set_status_from_action(const ctrl_state_t *state, ctrl_action_t acti
       snprintf(
         status,
         status_size,
-        language == CTRL_LANGUAGE_DE ? "Preset %d aktiviert." : "Preset %d loaded.",
+        ctrl_text(CTRL_TEXT_STATUS_PRESET_LOADED_FMT, language),
         action.preset_slot + 1
       );
       break;
@@ -474,33 +474,18 @@ static void set_status_from_action(const ctrl_state_t *state, ctrl_action_t acti
       snprintf(
         status,
         status_size,
-        language == CTRL_LANGUAGE_DE ? "Preset %d aus aktuellen Werten gesichert." : "Preset %d saved from the current values.",
+        ctrl_text(CTRL_TEXT_STATUS_PRESET_SAVED_FMT, language),
         action.preset_slot + 1
       );
       break;
     case CTRL_ACTION_OPEN_SETUP:
-      snprintf(
-        status,
-        status_size,
-        "%s",
-        language == CTRL_LANGUAGE_DE ? "Controller-Setup wird geladen." : "Controller setup is loading."
-      );
+      snprintf(status, status_size, "%s", ctrl_text(CTRL_TEXT_STATUS_SETUP_LOADING, language));
       break;
     case CTRL_ACTION_CLEAR_WEB_PASSWORD:
-      snprintf(
-        status,
-        status_size,
-        "%s",
-        language == CTRL_LANGUAGE_DE ? "Web-Passwort wird gelöscht." : "Web password is being cleared."
-      );
+      snprintf(status, status_size, "%s", ctrl_text(CTRL_TEXT_STATUS_CLEAR_WEB_PASSWORD, language));
       break;
     case CTRL_ACTION_RESET_NETWORK:
-      snprintf(
-        status,
-        status_size,
-        "%s",
-        language == CTRL_LANGUAGE_DE ? "Netzwerk-Reset wird ausgeführt." : "Network reset in progress."
-      );
+      snprintf(status, status_size, "%s", ctrl_text(CTRL_TEXT_STATUS_RESET_NETWORK, language));
       break;
     case CTRL_ACTION_NONE:
     default:

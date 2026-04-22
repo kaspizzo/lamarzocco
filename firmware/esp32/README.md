@@ -138,6 +138,12 @@ On first boot without stored Wi-Fi credentials, and again after a full factory r
 
 The same setup portal can be reopened any time from the on-device setup screen.
 
+If home Wi-Fi credentials are already stored, the controller tries to join that
+network immediately on boot. If the STA link drops later, the firmware retries
+with exponential backoff starting at 1 second and capped at 30 seconds. After
+repeated failures, the setup AP is enabled again as a local recovery path while
+the controller keeps retrying the saved home network in the background.
+
 The browser portal currently supports:
 
 - storing the La Marzocco cloud email/password locally on the controller
@@ -259,7 +265,19 @@ Useful macOS/Linux helper commands:
 ESPPORT=/dev/cu.usbmodemXXXX ./dev.sh quick
 ```
 
+If you want the host-side firmware tests to run automatically before every local `git push`, install the repo-local hook once:
+
+```bash
+./dev.sh install-hooks
+```
+
+The hook runs `./firmware/esp32/dev.sh test` from the repository root. On a fresh checkout, build the firmware once first so `managed_components/` is available for the host test runner.
+
 The `quick` command uses `idf.py app-flash monitor`, so only the app partition is reflashed after the initial full flash.
+
+If `partitions.csv` changes, run `./dev.sh full` once again instead of `quick`.
+Partition-layout changes can move the app offset, so reflashing only the app is
+not sufficient for that transition.
 
 `./dev.sh test` runs the host-side unit-test harness for the pure controller state machine, shot-timer state machine, cloud JSON parsing, and setup portal HTML rendering seams. It does not exercise BLE, Wi-Fi drivers, or on-device ESP-IDF runtime tasks.
 
