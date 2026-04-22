@@ -23,6 +23,9 @@ typedef struct {
   int64_t server_epoch_ms;
 } lm_ctrl_cloud_http_response_meta_t;
 
+/** Hard cap for collected cloud HTTP response bodies, excluding the trailing NUL byte. */
+#define LM_CTRL_CLOUD_HTTP_RESPONSE_BODY_CAP (64U * 1024U)
+
 /** Machine metadata returned by the La Marzocco customer fleet endpoint. */
 typedef struct {
   char serial[32];

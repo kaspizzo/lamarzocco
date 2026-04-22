@@ -6,7 +6,7 @@
 
 #include "controller_state.h"
 
-/** Events produced by the physical ring and by touch gestures/buttons. */
+/** Events produced by the physical ring, touch gestures/buttons, and internal runtime wakeups. */
 typedef enum {
   LM_CTRL_EVENT_ROTATE = 0,
   LM_CTRL_EVENT_SELECT_FOCUS,
@@ -20,6 +20,7 @@ typedef enum {
   LM_CTRL_EVENT_CANCEL_SETUP_RESET,
   LM_CTRL_EVENT_CONFIRM_SETUP_RESET,
   LM_CTRL_EVENT_DISMISS_SHOT_TIMER,
+  LM_CTRL_EVENT_RUNTIME_TICK,
 } lm_ctrl_input_event_type_t;
 
 /** Normalized input event consumed by the main controller loop. */

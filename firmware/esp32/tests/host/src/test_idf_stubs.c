@@ -10,6 +10,7 @@
 #include "mbedtls/pk.h"
 #include "mbedtls/private/sha256.h"
 #include "psa/crypto.h"
+#include "test_psa.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -47,7 +48,45 @@ typedef struct {
 
 static test_psa_key_slot_t s_psa_keys[8];
 static unsigned int s_psa_next_key_id = 1;
+static unsigned int s_psa_generate_count = 0;
+static unsigned int s_psa_destroy_count = 0;
+static int s_psa_wrap_result = 0;
 static unsigned int s_random_counter = 0;
+static test_http_client_event_spec_t s_http_client_events[16];
+static size_t s_http_client_event_count = 0;
+static int s_http_client_status_code = 0;
+static esp_err_t s_http_client_perform_result = ESP_FAIL;
+
+void test_psa_reset(void) {
+  memset(s_psa_keys, 0, sizeof(s_psa_keys));
+  s_psa_next_key_id = 1;
+  s_psa_generate_count = 0;
+  s_psa_destroy_count = 0;
+  s_psa_wrap_result = 0;
+}
+
+void test_psa_set_wrap_result(int result) {
+  s_psa_wrap_result = result;
+}
+
+unsigned int test_psa_generate_count(void) {
+  return s_psa_generate_count;
+}
+
+unsigned int test_psa_destroy_count(void) {
+  return s_psa_destroy_count;
+}
+
+size_t test_psa_active_key_count(void) {
+  size_t count = 0;
+
+  for (size_t i = 0; i < sizeof(s_psa_keys) / sizeof(s_psa_keys[0]); ++i) {
+    if (s_psa_keys[i].in_use) {
+      ++count;
+    }
+  }
+  return count;
+}
 
 static uint32_t rotr32(uint32_t value, uint32_t shift) {
   return (value >> shift) | (value << (32U - shift));
@@ -303,7 +342,7 @@ esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *co
   }
 
   client->config = *config;
-  client->status_code = 0;
+  client->status_code = s_http_client_status_code;
   return client;
 }
 
@@ -322,8 +361,34 @@ esp_err_t esp_http_client_set_post_field(esp_http_client_handle_t client, const 
 }
 
 esp_err_t esp_http_client_perform(esp_http_client_handle_t client) {
-  (void)client;
-  return ESP_FAIL;
+  if (client == NULL) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  if (s_http_client_perform_result != ESP_OK) {
+    return s_http_client_perform_result;
+  }
+
+  for (size_t i = 0; i < s_http_client_event_count; ++i) {
+    esp_http_client_event_t event = {
+      .event_id = s_http_client_events[i].event_id,
+      .user_data = client->config.user_data,
+      .header_key = s_http_client_events[i].header_key,
+      .header_value = s_http_client_events[i].header_value,
+      .data = s_http_client_events[i].data,
+      .data_len = s_http_client_events[i].data_len,
+    };
+    esp_err_t ret = ESP_OK;
+
+    if (client->config.event_handler == NULL) {
+      continue;
+    }
+    ret = client->config.event_handler(&event);
+    if (ret != ESP_OK) {
+      return ret;
+    }
+  }
+
+  return ESP_OK;
 }
 
 int esp_http_client_get_status_code(esp_http_client_handle_t client) {
@@ -336,6 +401,43 @@ int esp_http_client_get_status_code(esp_http_client_handle_t client) {
 
 void esp_http_client_cleanup(esp_http_client_handle_t client) {
   free(client);
+}
+
+void test_http_client_reset(void) {
+  memset(s_http_client_events, 0, sizeof(s_http_client_events));
+  s_http_client_event_count = 0;
+  s_http_client_status_code = 0;
+  s_http_client_perform_result = ESP_FAIL;
+}
+
+void test_http_client_set_status_code(int status_code) {
+  s_http_client_status_code = status_code;
+}
+
+void test_http_client_set_perform_result(esp_err_t result) {
+  s_http_client_perform_result = result;
+}
+
+void test_http_client_set_response_events(const test_http_client_event_spec_t *events, size_t event_count) {
+  if (events == NULL || event_count == 0) {
+    memset(s_http_client_events, 0, sizeof(s_http_client_events));
+    s_http_client_event_count = 0;
+    return;
+  }
+
+  if (event_count > (sizeof(s_http_client_events) / sizeof(s_http_client_events[0]))) {
+    event_count = sizeof(s_http_client_events) / sizeof(s_http_client_events[0]);
+  }
+
+  memcpy(s_http_client_events, events, event_count * sizeof(s_http_client_events[0]));
+  if (event_count < (sizeof(s_http_client_events) / sizeof(s_http_client_events[0]))) {
+    memset(
+      s_http_client_events + event_count,
+      0,
+      (sizeof(s_http_client_events) / sizeof(s_http_client_events[0]) - event_count) * sizeof(s_http_client_events[0])
+    );
+  }
+  s_http_client_event_count = event_count;
 }
 
 void esp_fill_random(void *buffer, size_t length) {
@@ -462,6 +564,10 @@ void mbedtls_pk_free(mbedtls_pk_context *ctx) {
 
 int mbedtls_pk_wrap_psa(mbedtls_pk_context *ctx, const mbedtls_svc_key_id_t key) {
   size_t slot_index = key == 0 ? 0U : (size_t)(key - 1U);
+
+  if (s_psa_wrap_result != 0) {
+    return s_psa_wrap_result;
+  }
 
   if (ctx == NULL ||
       key == 0 ||
@@ -621,6 +727,7 @@ psa_status_t psa_generate_key(const psa_key_attributes_t *attributes, psa_key_id
   s_psa_keys[slot_index].in_use = 1;
   s_psa_keys[slot_index].private_key_len = 32;
   esp_fill_random(s_psa_keys[slot_index].private_key, s_psa_keys[slot_index].private_key_len);
+  s_psa_generate_count++;
   *key = s_psa_next_key_id++;
   return PSA_SUCCESS;
 }
@@ -633,6 +740,7 @@ psa_status_t psa_destroy_key(psa_key_id_t key) {
   }
 
   memset(&s_psa_keys[slot_index], 0, sizeof(s_psa_keys[slot_index]));
+  s_psa_destroy_count++;
   return PSA_SUCCESS;
 }
 

@@ -117,26 +117,7 @@ static ctrl_focus_t focus_from_page_index(uint32_t feature_mask, int index) {
 }
 
 static const char *focus_title(ctrl_focus_t focus, ctrl_language_t language) {
-  switch (focus) {
-    case CTRL_FOCUS_TEMPERATURE:
-      return language == CTRL_LANGUAGE_DE ? "Kaffeeboiler" : "Coffee Boiler";
-    case CTRL_FOCUS_INFUSE:
-      return "Prebrewing";
-    case CTRL_FOCUS_PAUSE:
-      return "Prebrewing";
-    case CTRL_FOCUS_STEAM:
-      return language == CTRL_LANGUAGE_DE ? "Dampfboiler" : "Steam Boiler";
-    case CTRL_FOCUS_STANDBY:
-      return "Status";
-    case CTRL_FOCUS_BBW_MODE:
-      return "Brew by Weight";
-    case CTRL_FOCUS_BBW_DOSE_1:
-      return language == CTRL_LANGUAGE_DE ? "BBW Dosis 1" : "BBW Dose 1";
-    case CTRL_FOCUS_BBW_DOSE_2:
-      return language == CTRL_LANGUAGE_DE ? "BBW Dosis 2" : "BBW Dose 2";
-    default:
-      return language == CTRL_LANGUAGE_DE ? "Einstellung" : "Setting";
-  }
+  return ctrl_focus_page_title(focus, language);
 }
 
 static bool is_setup_reset_screen(ctrl_screen_t screen) {
@@ -272,9 +253,7 @@ static void format_main_loading_placeholder(
         hint,
         hint_size,
         "%s",
-        language == CTRL_LANGUAGE_DE
-          ? "Werte werden geladen,\nsobald die Cloud bereit ist."
-          : "Values load once\ncloud sync is ready."
+        ctrl_text(CTRL_TEXT_LOADING_CLOUD_VALUES, language)
       );
       break;
     default:
@@ -282,9 +261,7 @@ static void format_main_loading_placeholder(
         hint,
         hint_size,
         "%s",
-        language == CTRL_LANGUAGE_DE
-          ? "Werte werden geladen,\nsobald die Maschine verbunden ist."
-          : "Values load once\nthe machine is connected."
+        ctrl_text(CTRL_TEXT_LOADING_MACHINE_VALUES, language)
       );
       break;
   }
@@ -316,9 +293,7 @@ static void format_main_unavailable_placeholder(
         hint,
         hint_size,
         "%s",
-        language == CTRL_LANGUAGE_DE
-          ? "Maschine offline.\nCloud-Werte nicht verfügbar."
-          : "Machine offline.\nCloud values unavailable."
+        ctrl_text(CTRL_TEXT_MACHINE_OFFLINE_CLOUD_VALUES, language)
       );
       break;
     default:
@@ -326,9 +301,7 @@ static void format_main_unavailable_placeholder(
         hint,
         hint_size,
         "%s",
-        language == CTRL_LANGUAGE_DE
-          ? "Maschine nicht erreichbar.\nBLE oder Cloud verbinden."
-          : "Machine unreachable.\nConnect via BLE or cloud."
+        ctrl_text(CTRL_TEXT_MACHINE_UNREACHABLE, language)
       );
       break;
   }
@@ -343,9 +316,7 @@ static void format_no_water_hint(ctrl_language_t language, char *hint, size_t hi
     hint,
     hint_size,
     "%s",
-    language == CTRL_LANGUAGE_DE
-      ? "Kein Wasser erkannt.\nTank prüfen und füllen."
-      : "No water detected.\nCheck and refill tank."
+    ctrl_text(CTRL_TEXT_NO_WATER_HINT, language)
   );
 }
 
@@ -365,9 +336,7 @@ static void format_main_value(
         hint,
         hint_size,
         "%s",
-        language == CTRL_LANGUAGE_DE
-          ? "Die Kaffeeboiler-Einstellung regelt die Wassertemperatur für die Espresso-Zubereitung."
-          : "The coffee boiler setting controls the brewing water temperature."
+        ctrl_text(CTRL_TEXT_HINT_TEMPERATURE, language)
       );
       break;
     case CTRL_FOCUS_INFUSE:
@@ -376,9 +345,7 @@ static void format_main_value(
         hint,
         hint_size,
         "%s",
-        language == CTRL_LANGUAGE_DE
-          ? "An-Zeit: Dauer des Pumpenimpulses während Prebrewing."
-          : "On-time: pump pulse duration during prebrewing."
+        ctrl_text(CTRL_TEXT_HINT_INFUSE, language)
       );
       break;
     case CTRL_FOCUS_PAUSE:
@@ -387,9 +354,7 @@ static void format_main_value(
         hint,
         hint_size,
         "%s",
-        language == CTRL_LANGUAGE_DE
-          ? "Aus-Zeit: Pause zwischen zwei Pumpenimpulsen."
-          : "Off-time: pause between prebrewing pump pulses."
+        ctrl_text(CTRL_TEXT_HINT_PAUSE, language)
       );
       break;
     case CTRL_FOCUS_STEAM:
@@ -403,7 +368,7 @@ static void format_main_value(
         snprintf(
           hint,
           hint_size,
-          language == CTRL_LANGUAGE_DE ? "Aufheizen läuft.\nBereit in %s." : "Heating up.\nReady in %s.",
+          ctrl_text(CTRL_TEXT_HINT_HEATING_READY_FMT, language),
           view->heat_eta_text
         );
       } else {
@@ -411,9 +376,7 @@ static void format_main_value(
           hint,
           hint_size,
           "%s",
-          language == CTRL_LANGUAGE_DE
-            ? "Dampflevel direkt\nam Controller einstellen."
-            : "Adjust the steam level\ndirectly on the controller."
+          ctrl_text(CTRL_TEXT_HINT_STEAM_DIRECT, language)
         );
       }
       break;
@@ -424,21 +387,19 @@ static void format_main_value(
         "%s",
         state->values.standby_on
           ? "Standby"
-          : (language == CTRL_LANGUAGE_DE ? "An" : "On")
+          : ctrl_text(CTRL_TEXT_ON, language)
       );
       snprintf(
         hint,
         hint_size,
         "%s",
-        language == CTRL_LANGUAGE_DE
-          ? "Maschinenstatus direkt\nam Controller einstellen."
-          : "Adjust machine status\ndirectly on the controller."
+        ctrl_text(CTRL_TEXT_HINT_STATUS_DIRECT, language)
       );
       if (view != NULL && view->heat_arc_visible && view->heat_eta_text[0] != '\0') {
         snprintf(
           hint,
           hint_size,
-          language == CTRL_LANGUAGE_DE ? "Aufheizen läuft.\nBereit in %s." : "Heating up.\nReady in %s.",
+          ctrl_text(CTRL_TEXT_HINT_HEATING_READY_FMT, language),
           view->heat_eta_text
         );
       }
@@ -449,9 +410,7 @@ static void format_main_value(
         hint,
         hint_size,
         "%s",
-        language == CTRL_LANGUAGE_DE
-          ? "Aktiven Brew-by-Weight\nModus wählen."
-          : "Select the active\nbrew-by-weight mode."
+        ctrl_text(CTRL_TEXT_HINT_BBW_MODE, language)
       );
       break;
     case CTRL_FOCUS_BBW_DOSE_1:
@@ -460,9 +419,7 @@ static void format_main_value(
         hint,
         hint_size,
         "%s",
-        language == CTRL_LANGUAGE_DE
-          ? "Zielgewicht für\nBBW Dosis 1."
-          : "Target weight for\nBBW dose 1."
+        ctrl_text(CTRL_TEXT_HINT_BBW_DOSE_1, language)
       );
       break;
     case CTRL_FOCUS_BBW_DOSE_2:
@@ -471,9 +428,7 @@ static void format_main_value(
         hint,
         hint_size,
         "%s",
-        language == CTRL_LANGUAGE_DE
-          ? "Zielgewicht für\nBBW Dosis 2."
-          : "Target weight for\nBBW dose 2."
+        ctrl_text(CTRL_TEXT_HINT_BBW_DOSE_2, language)
       );
       break;
     default:
@@ -501,9 +456,7 @@ static void format_preset_body(const ctrl_state_t *state, const ctrl_preset_t *p
     snprintf(
       body,
       body_size,
-      language == CTRL_LANGUAGE_DE
-        ? "Kaffeeboiler %.1f C\nAn-Zeit %.1f s\nAus-Zeit %.1f s\nBBW %s\nDosis 1 %.1f g\nDosis 2 %.1f g"
-        : "Coffee Boiler %.1f C\nOn-Time %.1f s\nOff-Time %.1f s\nBBW %s\nDose 1 %.1f g\nDose 2 %.1f g",
+      ctrl_text(CTRL_TEXT_PRESET_BODY_WITH_BBW_FMT, language),
       values->temperature_c,
       values->infuse_s,
       values->pause_s,
@@ -517,9 +470,7 @@ static void format_preset_body(const ctrl_state_t *state, const ctrl_preset_t *p
   snprintf(
     body,
     body_size,
-    language == CTRL_LANGUAGE_DE
-      ? "Kaffeeboiler %.1f C\nAn-Zeit %.1f s\nAus-Zeit %.1f s"
-      : "Coffee Boiler %.1f C\nOn-Time %.1f s\nOff-Time %.1f s",
+    ctrl_text(CTRL_TEXT_PRESET_BODY_BASIC_FMT, language),
     values->temperature_c,
     values->infuse_s,
     values->pause_s
@@ -773,7 +724,7 @@ static void render_shot_timer_screen(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *
     set_hidden(ui->page_dots[i], true);
   }
 
-  set_label_text(ui->shot_timer_title, language == CTRL_LANGUAGE_DE ? "Shot-Timer" : "Shot Timer", COLOR_ACTIVE);
+  set_label_text(ui->shot_timer_title, ctrl_text(CTRL_TEXT_SHOT_TIMER_TITLE, language), COLOR_ACTIVE);
   set_label_text(ui->shot_timer_value, view->shot_timer_text, COLOR_TEXT);
 }
 
@@ -924,10 +875,10 @@ static void render_presets_screen(
   set_label_text(ui->presets_body, body, COLOR_TEXT);
   set_label_text(
     ui->presets_load_label,
-    language == CTRL_LANGUAGE_DE ? "Laden" : "Load",
+    ctrl_text(CTRL_TEXT_LOAD, language),
     preset_load_enabled ? COLOR_BG : COLOR_MUTED
   );
-  set_label_text(ui->presets_save_label, language == CTRL_LANGUAGE_DE ? "Sichern" : "Save", COLOR_TEXT);
+  set_label_text(ui->presets_save_label, ctrl_text(CTRL_TEXT_SAVE, language), COLOR_TEXT);
   if (preset_load_enabled) {
     lv_obj_clear_state(ui->presets_load_button, LV_STATE_DISABLED);
     style_action_button(ui->presets_load_button, ui->presets_load_label, true);
@@ -942,7 +893,7 @@ static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, con
   const ctrl_language_t language = view != NULL ? view->language : CTRL_LANGUAGE_EN;
   const char *body = (view != NULL && view->setup_status_text[0] != '\0')
     ? view->setup_status_text
-    : (language == CTRL_LANGUAGE_DE ? "Setup-Portal wird gestartet." : "Setup portal is starting.");
+    : ctrl_text(CTRL_TEXT_SETUP_PORTAL_STARTING, language);
   char reset_body[160];
   char recovery_actions[96];
   const int reset_progress = state != NULL ? (int)state->reset_progress : 0;
@@ -966,17 +917,13 @@ static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, con
   if (state->screen == CTRL_SCREEN_SETUP_RESET_ARM) {
     lv_obj_align(ui->setup_title, LV_ALIGN_TOP_MID, 0, 24);
     lv_obj_align(ui->setup_body, LV_ALIGN_BOTTOM_MID, 0, -6);
-    set_label_text(ui->setup_title, language == CTRL_LANGUAGE_DE ? "Zurücksetzen" : "Reset", COLOR_ACTIVE);
+    set_label_text(ui->setup_title, ctrl_text(CTRL_TEXT_RESET, language), COLOR_ACTIVE);
     snprintf(
       reset_body,
       sizeof(reset_body),
       "%s\n\n%s",
-      language == CTRL_LANGUAGE_DE
-        ? "Einmal im Uhrzeigersinn drehen, um die Wiederherstellung zu öffnen."
-        : "Rotate clockwise once to open recovery.",
-      language == CTRL_LANGUAGE_DE
-        ? "Nach unten wischen zum Abbrechen."
-        : "Swipe down to cancel."
+      ctrl_text(CTRL_TEXT_RECOVERY_ARM_OPEN, language),
+      ctrl_text(CTRL_TEXT_RECOVERY_ARM_CANCEL, language)
     );
     set_label_text(ui->setup_body, reset_body, COLOR_TEXT);
     set_label_text(ui->setup_action_list, "", COLOR_TEXT);
@@ -991,26 +938,24 @@ static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, con
     lv_obj_align(ui->setup_action_list, LV_ALIGN_TOP_MID, 0, 102);
     lv_obj_align(ui->setup_secondary_button, LV_ALIGN_CENTER, -50, 74);
     lv_obj_align(ui->setup_primary_button, LV_ALIGN_CENTER, 50, 74);
-    set_label_text(ui->setup_title, language == CTRL_LANGUAGE_DE ? "Wiederherstellung" : "Recovery", COLOR_ACTIVE);
+    set_label_text(ui->setup_title, ctrl_text(CTRL_TEXT_RECOVERY, language), COLOR_ACTIVE);
     snprintf(
       recovery_actions,
       sizeof(recovery_actions),
       "%s %s\n%s %s",
       state->recovery_action == CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD ? ">" : " ",
-      language == CTRL_LANGUAGE_DE ? "Web-Passwort löschen" : "Clear web password",
+      ctrl_recovery_action_name(CTRL_RECOVERY_ACTION_CLEAR_WEB_PASSWORD, language),
       state->recovery_action == CTRL_RECOVERY_ACTION_RESET_NETWORK ? ">" : " ",
-      language == CTRL_LANGUAGE_DE ? "Netzwerk zurücksetzen" : "Reset network"
+      ctrl_recovery_action_name(CTRL_RECOVERY_ACTION_RESET_NETWORK, language)
     );
     set_label_text(
       ui->setup_body,
-      language == CTRL_LANGUAGE_DE
-        ? "Aktion mit dem Drehknopf wählen."
-        : "Rotate to choose the recovery action.",
+      ctrl_text(CTRL_TEXT_RECOVERY_PICK_ACTION, language),
       COLOR_TEXT
     );
     set_label_text(ui->setup_action_list, recovery_actions, COLOR_TEXT);
-    set_label_text(ui->setup_secondary_label, language == CTRL_LANGUAGE_DE ? "Zurück" : "Back", COLOR_TEXT);
-    set_label_text(ui->setup_primary_label, language == CTRL_LANGUAGE_DE ? "Start" : "Run", COLOR_BG);
+    set_label_text(ui->setup_secondary_label, ctrl_text(CTRL_TEXT_BACK, language), COLOR_TEXT);
+    set_label_text(ui->setup_primary_label, ctrl_text(CTRL_TEXT_RUN, language), COLOR_BG);
     style_action_button(ui->setup_secondary_button, ui->setup_secondary_label, false);
     style_action_button(ui->setup_primary_button, ui->setup_primary_label, true);
     lv_arc_set_value(ui->setup_reset_arc, 100);

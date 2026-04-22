@@ -38,6 +38,7 @@ mkdir -p "${BUILD_DIR}"
   "${HOST_DIR}/src/test_controller_connectivity.c" \
   "${HOST_DIR}/src/test_cloud_machine_selection.c" \
   "${HOST_DIR}/src/test_machine_link_policy.c" \
+  "${HOST_DIR}/src/test_wifi_reconnect_policy.c" \
   "${HOST_DIR}/src/test_storage_security.c" \
   "${HOST_DIR}/src/test_setup_portal_page.c" \
   "${HOST_DIR}/src/test_setup_portal_routes.c" \
@@ -48,6 +49,7 @@ mkdir -p "${BUILD_DIR}"
   "${ROOT_DIR}/main/cloud_machine_selection.c" \
   "${ROOT_DIR}/main/controller_shot_timer.c" \
   "${ROOT_DIR}/main/machine_link_policy.c" \
+  "${ROOT_DIR}/main/wifi_reconnect_policy.c" \
   "${ROOT_DIR}/main/setup_portal_http.c" \
   "${ROOT_DIR}/main/setup_portal_page.c" \
   "${ROOT_DIR}/main/setup_portal_routes_shared.c" \

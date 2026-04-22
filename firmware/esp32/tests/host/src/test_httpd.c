@@ -3,6 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+static httpd_config_t s_last_httpd_config;
+static bool s_has_last_httpd_config = false;
+
 static char *dup_text(const char *text) {
   size_t len = 0;
   char *copy = NULL;
@@ -412,10 +415,15 @@ int httpd_req_recv(httpd_req_t *req, char *buf, size_t buf_len) {
 }
 
 esp_err_t httpd_start(httpd_handle_t *handle, const httpd_config_t *config) {
-  (void)config;
-
   if (handle == NULL) {
     return ESP_ERR_INVALID_ARG;
+  }
+  if (config != NULL) {
+    s_last_httpd_config = *config;
+    s_has_last_httpd_config = true;
+  } else {
+    memset(&s_last_httpd_config, 0, sizeof(s_last_httpd_config));
+    s_has_last_httpd_config = false;
   }
 
   *handle = (httpd_handle_t)0x1;
@@ -438,4 +446,16 @@ bool httpd_uri_match_wildcard(const char *template_uri, const char *requested_ur
   (void)requested_uri;
   (void)requested_uri_len;
   return true;
+}
+
+void test_httpd_reset_server_config(void) {
+  memset(&s_last_httpd_config, 0, sizeof(s_last_httpd_config));
+  s_has_last_httpd_config = false;
+}
+
+const httpd_config_t *test_httpd_last_config(void) {
+  if (!s_has_last_httpd_config) {
+    return NULL;
+  }
+  return &s_last_httpd_config;
 }

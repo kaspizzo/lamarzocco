@@ -17,3 +17,8 @@ firmware/esp32/tests/host/build/
 firmware/esp32/dependencies.lock
 firmware/esp32/sdkconfig
 firmware/esp32/sdkconfig.old
+
+# Local renderer build artifacts
+tools/controller_screenshot_renderer/build/
+tools/controller_screenshot_renderer/out/
+tools/controller_screenshot_renderer/renderer

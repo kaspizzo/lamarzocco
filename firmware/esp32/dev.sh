@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${ROOT_DIR}/../.." && pwd)"
 TARGET="${IDF_TARGET_OVERRIDE:-esp32s3}"
 COMMAND="${1:-quick}"
 
@@ -13,11 +14,29 @@ run_host_tests() {
   local test_script="${ROOT_DIR}/tests/host/run.sh"
 
   if [[ ! -x "${test_script}" ]]; then
-    echo "Host-Testscript nicht gefunden oder nicht ausführbar: ${test_script}" >&2
+    echo "Host test script not found or not executable: ${test_script}" >&2
     exit 1
   fi
 
   (cd "${ROOT_DIR}" && "${test_script}" "$@")
+}
+
+install_git_hooks() {
+  if ! command -v git >/dev/null 2>&1; then
+    echo "git was not found in PATH." >&2
+    exit 1
+  fi
+  if ! git -C "${REPO_ROOT}" rev-parse --show-toplevel >/dev/null 2>&1; then
+    echo "Git repository root not found at ${REPO_ROOT}." >&2
+    exit 1
+  fi
+  if [[ ! -f "${REPO_ROOT}/.githooks/pre-push" ]]; then
+    echo "Expected hook file is missing: ${REPO_ROOT}/.githooks/pre-push" >&2
+    exit 1
+  fi
+
+  git -C "${REPO_ROOT}" config core.hooksPath "${REPO_ROOT}/.githooks"
+  echo "Installed repo-local Git hooks from ${REPO_ROOT}/.githooks"
 }
 
 ensure_idf() {
@@ -36,7 +55,7 @@ ensure_idf() {
   fi
 
   if ! command -v idf.py >/dev/null 2>&1; then
-    echo "ESP-IDF nicht gefunden. Setze IDF_PATH oder installiere ~/esp/esp-idf." >&2
+    echo "ESP-IDF was not found. Set IDF_PATH or install ~/esp/esp-idf." >&2
     exit 1
   fi
 }
@@ -68,7 +87,7 @@ detect_port() {
   done
   shopt -u nullglob
 
-  echo "Kein serieller Port gefunden. Setze ESPPORT=/dev/cu...." >&2
+  echo "No serial port found. Set ESPPORT=/dev/cu...." >&2
   exit 1
 }
 
@@ -88,14 +107,19 @@ run_idf() {
   (cd "${ROOT_DIR}" && idf.py "$@")
 }
 
-if [[ "${COMMAND}" != "test" ]]; then
-  ensure_idf
-  ensure_target
-fi
+case "${COMMAND}" in
+  build|flash|quick|full|monitor|erase|clean|menuconfig)
+    ensure_idf
+    ensure_target
+    ;;
+esac
 
 case "${COMMAND}" in
   test)
     run_host_tests "$@"
+    ;;
+  install-hooks)
+    install_git_hooks
     ;;
   build)
     run_idf build "$@"
@@ -136,18 +160,19 @@ case "${COMMAND}" in
     ;;
   *)
     cat <<'EOF'
-Usage: ./dev.sh [test|build|flash|quick|full|monitor|erase|clean|menuconfig|ports]
+Usage: ./dev.sh [test|install-hooks|build|flash|quick|full|monitor|erase|clean|menuconfig|ports]
 
-  test        Run host-side unit tests for pure/controller modules
-  build       Build only
-  flash       Full flash without monitor
-  quick       Fast loop: app-flash + monitor
-  full        First flash: full flash + monitor
-  monitor     Open serial monitor
-  erase       Erase flash
-  clean       Run idf.py fullclean
-  menuconfig  Open ESP-IDF menuconfig
-  ports       List serial ports
+  test           Run host-side unit tests for pure/controller modules
+  install-hooks  Install the repo-local Git pre-push hook
+  build          Build only
+  flash          Full flash without monitor
+  quick          Fast loop: app-flash + monitor
+  full           First flash: full flash + monitor
+  monitor        Open serial monitor
+  erase          Erase flash
+  clean          Run idf.py fullclean
+  menuconfig     Open ESP-IDF menuconfig
+  ports          List serial ports
 
 Set ESPPORT=/dev/cu.usbmodemXXXX to override port detection.
 EOF

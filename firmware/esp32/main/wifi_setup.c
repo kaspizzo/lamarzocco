@@ -33,6 +33,7 @@
 #include "controller_settings.h"
 #include "setup_portal_routes.h"
 #include "storage_security.h"
+#include "wifi_reconnect_policy.h"
 #include "wifi_setup_internal.h"
 #include "mdns.h"
 
@@ -255,6 +256,105 @@ static void stop_dns_server(void);
 static esp_err_t disable_setup_ap(void);
 static esp_err_t restart_setup_portal_after_network_reset(void);
 
+typedef struct {
+  uint32_t delay_ms;
+  uint32_t generation;
+} lm_ctrl_sta_reconnect_task_args_t;
+
+static void reset_sta_reconnect_locked(void) {
+  s_state.sta_reconnect_pending = false;
+  s_state.sta_disconnect_count = 0;
+  s_state.sta_retry_delay_ms = 0;
+  s_state.sta_retry_generation++;
+}
+
+static void sta_reconnect_task(void *arg) {
+  lm_ctrl_sta_reconnect_task_args_t *task_args = (lm_ctrl_sta_reconnect_task_args_t *)arg;
+  uint32_t delay_ms = 0;
+  uint32_t generation = 0;
+  uint8_t disconnect_count = 0;
+  bool should_connect = false;
+
+  if (task_args != NULL) {
+    delay_ms = task_args->delay_ms;
+    generation = task_args->generation;
+  }
+  if (delay_ms > 0) {
+    vTaskDelay(pdMS_TO_TICKS(delay_ms));
+  }
+
+  lock_state();
+  if (task_args != NULL && s_state.sta_retry_generation == generation) {
+    s_state.sta_reconnect_pending = false;
+    s_state.sta_retry_delay_ms = 0;
+    disconnect_count = s_state.sta_disconnect_count;
+    if (s_state.has_credentials && !s_state.sta_connected) {
+      s_state.sta_connecting = true;
+      mark_status_dirty_locked();
+      should_connect = true;
+    }
+  }
+  unlock_state();
+
+  free(task_args);
+  if (should_connect) {
+    ESP_LOGI(
+      TAG,
+      "Retrying Wi-Fi station connect after %u ms (disconnect count %u)",
+      (unsigned)delay_ms,
+      (unsigned)disconnect_count
+    );
+    if (esp_wifi_connect() != ESP_OK) {
+      ESP_LOGW(TAG, "Scheduled Wi-Fi reconnect could not start");
+    }
+  }
+  vTaskDelete(NULL);
+}
+
+static esp_err_t schedule_sta_reconnect(uint32_t delay_ms) {
+  lm_ctrl_sta_reconnect_task_args_t *task_args = NULL;
+  uint32_t generation = 0;
+
+  lock_state();
+  if (s_state.sta_reconnect_pending) {
+    unlock_state();
+    return ESP_OK;
+  }
+  generation = s_state.sta_retry_generation;
+  s_state.sta_reconnect_pending = true;
+  s_state.sta_retry_delay_ms = delay_ms;
+  mark_status_dirty_locked();
+  unlock_state();
+
+  task_args = calloc(1, sizeof(*task_args));
+  if (task_args == NULL) {
+    lock_state();
+    if (s_state.sta_retry_generation == generation) {
+      s_state.sta_reconnect_pending = false;
+      s_state.sta_retry_delay_ms = 0;
+      mark_status_dirty_locked();
+    }
+    unlock_state();
+    return ESP_ERR_NO_MEM;
+  }
+
+  task_args->delay_ms = delay_ms;
+  task_args->generation = generation;
+  if (xTaskCreate(sta_reconnect_task, "lm_sta_retry", 3072, task_args, 5, NULL) != pdPASS) {
+    free(task_args);
+    lock_state();
+    if (s_state.sta_retry_generation == generation) {
+      s_state.sta_reconnect_pending = false;
+      s_state.sta_retry_delay_ms = 0;
+      mark_status_dirty_locked();
+    }
+    unlock_state();
+    return ESP_ERR_NO_MEM;
+  }
+
+  return ESP_OK;
+}
+
 static void fill_portal_ssid_locked(void) {
   uint8_t mac[6] = {0};
 
@@ -432,6 +532,7 @@ static esp_err_t restart_setup_portal_after_network_reset(void) {
   s_state.sta_connecting = false;
   s_state.sta_connected = false;
   s_state.sta_ip[0] = '\0';
+  reset_sta_reconnect_locked();
   mark_status_dirty_locked();
   unlock_state();
   stop_dns_server();
@@ -462,10 +563,13 @@ esp_err_t lm_ctrl_wifi_apply_station_credentials(void) {
     unlock_state();
     return ESP_ERR_INVALID_STATE;
   }
+  reset_sta_reconnect_locked();
   copy_text(ssid, sizeof(ssid), s_state.sta_ssid);
   copy_text(password, sizeof(password), s_state.sta_password);
   copy_text(hostname, sizeof(hostname), s_state.hostname);
   mode = s_state.portal_running ? WIFI_MODE_APSTA : WIFI_MODE_STA;
+  s_state.sta_connecting = true;
+  mark_status_dirty_locked();
   unlock_state();
 
   copy_text((char *)sta_config.sta.ssid, sizeof(sta_config.sta.ssid), ssid);
@@ -672,6 +776,11 @@ static void dns_server_task(void *arg) {
       }
       continue;
     }
+    // This captive DNS path intentionally stays minimal: any plain DNS query
+    // with room for one answer gets a single A/IN record pointing at the setup
+    // portal. We do not parse names, AAAA, EDNS, or multi-question packets
+    // because the goal is only to trigger common captive portal flows and keep
+    // the fallback manual URL (`http://192.168.4.1/`) deterministic.
     if (len < 12 || (buffer[2] & 0x80) != 0 || (len + 16) > (int)sizeof(buffer)) {
       continue;
     }
@@ -764,6 +873,9 @@ static void stop_dns_server(void) {
 }
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+  lm_ctrl_wifi_reconnect_plan_t reconnect_plan = {0};
+  bool retry_already_pending = false;
+  bool should_enable_setup_ap = false;
   bool should_retry = false;
 
   (void)arg;
@@ -788,7 +900,21 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         s_state.cloud_connected = false;
         clear_cloud_machine_status_locked();
         clear_cached_cloud_access_token_locked();
-        should_retry = s_state.has_credentials;
+        if (s_state.has_credentials) {
+          if (s_state.sta_reconnect_pending) {
+            retry_already_pending = true;
+            reconnect_plan.disconnect_count = s_state.sta_disconnect_count;
+            reconnect_plan.retry_delay_ms = s_state.sta_retry_delay_ms;
+          } else {
+            reconnect_plan = lm_ctrl_wifi_reconnect_plan_next(s_state.sta_disconnect_count, s_state.portal_running);
+            s_state.sta_disconnect_count = reconnect_plan.disconnect_count;
+            s_state.sta_retry_delay_ms = reconnect_plan.retry_delay_ms;
+            should_enable_setup_ap = reconnect_plan.should_enable_setup_ap;
+          }
+          should_retry = true;
+        } else {
+          reset_sta_reconnect_locked();
+        }
         mark_status_dirty_locked();
         unlock_state();
         lm_ctrl_cloud_live_updates_stop(false);
@@ -803,6 +929,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     s_state.sta_connected = true;
     s_state.sta_connecting = false;
     snprintf(s_state.sta_ip, sizeof(s_state.sta_ip), IPSTR, IP2STR(&ip_event->ip_info.ip));
+    reset_sta_reconnect_locked();
     mark_status_dirty_locked();
     unlock_state();
     ensure_station_dns();
@@ -810,8 +937,30 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     (void)lm_ctrl_wifi_request_cloud_probe();
   }
 
+  if (should_enable_setup_ap) {
+    ESP_LOGW(TAG, "Wi-Fi reconnect threshold reached; keeping setup AP available during STA recovery");
+    (void)lm_ctrl_wifi_start_portal();
+  }
   if (should_retry) {
-    esp_wifi_connect();
+    if (retry_already_pending) {
+      ESP_LOGI(
+        TAG,
+        "Wi-Fi STA disconnected again while reconnect is already pending (%u ms, disconnect count %u)",
+        (unsigned)reconnect_plan.retry_delay_ms,
+        (unsigned)reconnect_plan.disconnect_count
+      );
+    } else {
+      ESP_LOGI(
+        TAG,
+        "Wi-Fi STA disconnected; scheduling reconnect in %u ms (disconnect count %u)",
+        (unsigned)reconnect_plan.retry_delay_ms,
+        (unsigned)reconnect_plan.disconnect_count
+      );
+    }
+    if (!retry_already_pending && schedule_sta_reconnect(reconnect_plan.retry_delay_ms) != ESP_OK) {
+      ESP_LOGW(TAG, "Reconnect backoff scheduling failed; retrying immediately");
+      (void)esp_wifi_connect();
+    }
   }
 }
 

@@ -8,6 +8,7 @@ int run_controller_shot_timer_tests(void);
 int run_controller_connectivity_tests(void);
 int run_cloud_machine_selection_tests(void);
 int run_machine_link_policy_tests(void);
+int run_wifi_reconnect_policy_tests(void);
 int run_storage_security_tests(void);
 int run_setup_portal_page_tests(void);
 int run_setup_portal_route_tests(void);
@@ -37,6 +38,9 @@ int main(void) {
     return 1;
   }
   if (run_machine_link_policy_tests() != 0) {
+    return 1;
+  }
+  if (run_wifi_reconnect_policy_tests() != 0) {
     return 1;
   }
   if (run_storage_security_tests() != 0) {

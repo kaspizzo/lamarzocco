@@ -6,7 +6,7 @@
 #include "esp_http_client.h"
 
 #include "cloud_api.h"
-#include "wifi_setup_internal.h"
+#include "lm_ctrl_cloud_endpoints.h"
 
 #ifdef __cplusplus
 extern "C" {

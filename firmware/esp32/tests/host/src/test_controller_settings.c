@@ -63,6 +63,42 @@ static int load_cloud_provisioning_blob(lm_ctrl_cloud_provisioning_blob_t *blob)
   return 0;
 }
 
+static int test_load_applies_descriptor_backed_wifi_fields(void) {
+  test_nvs_reset();
+  reset_controller_settings_test_state();
+
+  ASSERT_EQ_INT(ESP_OK, test_nvs_seed_str(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_SSID, "HomeWifi"));
+  ASSERT_EQ_INT(ESP_OK, test_nvs_seed_str(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_PASS, "HomePass"));
+  ASSERT_EQ_INT(ESP_OK, test_nvs_seed_str(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_HOST, "espresso-setup"));
+  ASSERT_EQ_INT(ESP_OK, test_nvs_seed_str(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_LANG, "de"));
+  ASSERT_EQ_INT(ESP_OK, test_nvs_seed_str(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_CLOUD_USER, "barista@example.com"));
+  ASSERT_EQ_INT(ESP_OK, test_nvs_seed_str(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_CLOUD_PASS, "CloudPass42"));
+  ASSERT_EQ_INT(ESP_OK, test_nvs_seed_str(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_MACHINE_SERIAL, "LM-12345"));
+  ASSERT_EQ_INT(ESP_OK, test_nvs_seed_str(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_MACHINE_NAME, "GS3"));
+  ASSERT_EQ_INT(ESP_OK, test_nvs_seed_str(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_MACHINE_MODEL, "GS3 MP"));
+  ASSERT_EQ_INT(ESP_OK, test_nvs_seed_str(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_MACHINE_KEY, "comm-key"));
+  ASSERT_EQ_INT(ESP_OK, test_nvs_seed_u8(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_HEAT_DISPLAY, 0));
+  ASSERT_EQ_INT(ESP_OK, test_nvs_seed_u8(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_DEBUG_SHOT, 1));
+
+  ASSERT_EQ_INT(ESP_OK, lm_ctrl_settings_load());
+  ASSERT_STREQ("HomeWifi", s_state.sta_ssid);
+  ASSERT_STREQ("HomePass", s_state.sta_password);
+  ASSERT_STREQ("espresso-setup", s_state.hostname);
+  ASSERT_EQ_INT(CTRL_LANGUAGE_DE, s_state.language);
+  ASSERT_STREQ("barista@example.com", s_state.cloud_username);
+  ASSERT_STREQ("CloudPass42", s_state.cloud_password);
+  ASSERT_STREQ("LM-12345", s_state.selected_machine.serial);
+  ASSERT_STREQ("GS3", s_state.selected_machine.name);
+  ASSERT_STREQ("GS3 MP", s_state.selected_machine.model);
+  ASSERT_STREQ("comm-key", s_state.selected_machine.communication_key);
+  ASSERT_TRUE(s_state.has_credentials);
+  ASSERT_TRUE(s_state.has_cloud_credentials);
+  ASSERT_TRUE(s_state.has_machine_selection);
+  ASSERT_FALSE(s_state.heat_display_enabled);
+  ASSERT_TRUE(s_state.debug_screenshot_enabled);
+  return 0;
+}
+
 static int test_ensure_cloud_provisioning_generates_and_persists_missing_installation(void) {
   lm_ctrl_cloud_provisioning_blob_t stored = {0};
 
@@ -97,16 +133,20 @@ static int test_reset_network_keeps_cloud_provisioning_blob_and_runtime_state(vo
 
   ASSERT_EQ_INT(ESP_OK, test_nvs_seed_str(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_SSID, "TestWifi"));
   ASSERT_EQ_INT(ESP_OK, test_nvs_seed_str(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_PASS, "TestPass"));
+  ASSERT_EQ_INT(ESP_OK, test_nvs_seed_u8(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_HEAT_DISPLAY, 0));
   copy_text(s_state.sta_ssid, sizeof(s_state.sta_ssid), "TestWifi");
   copy_text(s_state.sta_password, sizeof(s_state.sta_password), "TestPass");
   s_state.has_credentials = true;
+  s_state.heat_display_enabled = false;
 
   ASSERT_EQ_INT(ESP_OK, lm_ctrl_settings_reset_network());
   ASSERT_TRUE(test_nvs_has_key(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_INSTALL_BLOB));
+  ASSERT_TRUE(test_nvs_has_key(LM_CTRL_WIFI_NAMESPACE, LM_CTRL_WIFI_KEY_HEAT_DISPLAY));
   ASSERT_TRUE(s_state.has_cloud_provisioning);
   ASSERT_TRUE(s_state.cloud_installation_ready);
   ASSERT_FALSE(s_state.has_credentials);
   ASSERT_STREQ("", s_state.sta_ssid);
+  ASSERT_FALSE(s_state.heat_display_enabled);
   ASSERT_EQ_INT(0, load_cloud_provisioning_blob(&after));
   ASSERT_EQ_INT(0, memcmp(&before, &after, sizeof(before)));
   return 0;
@@ -135,6 +175,7 @@ static int test_factory_reset_clears_provisioning_and_next_ensure_regenerates_it
 }
 
 int run_controller_settings_tests(void) {
+  RUN_TEST(test_load_applies_descriptor_backed_wifi_fields);
   RUN_TEST(test_ensure_cloud_provisioning_generates_and_persists_missing_installation);
   RUN_TEST(test_reset_network_keeps_cloud_provisioning_blob_and_runtime_state);
   RUN_TEST(test_factory_reset_clears_provisioning_and_next_ensure_regenerates_it);

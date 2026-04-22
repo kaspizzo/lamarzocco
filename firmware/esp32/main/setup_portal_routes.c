@@ -23,6 +23,7 @@
 static const char *TAG = "lm_portal_routes";
 static const char *SESSION_COOKIE_NAME = "lmctrl_session";
 static const char *CSRF_HEADER_NAME = "X-CSRF-Token";
+static const int LM_CTRL_SETUP_PORTAL_HTTPD_STACK_SIZE = 12288;
 
 static void write_u16_le(uint8_t *dst, uint16_t value) {
   dst[0] = (uint8_t)(value & 0xffU);
@@ -54,6 +55,63 @@ static esp_err_t base64_decode_bytes(const char *input, uint8_t *output, size_t 
 
 static bool parse_form_value(const char *body, const char *key, char *dst, size_t dst_size) {
   return lm_ctrl_setup_portal_parse_form_value(body, key, dst, dst_size);
+}
+
+static void free_form_body(char **body, size_t *body_size) {
+  if (body == NULL || *body == NULL) {
+    return;
+  }
+  if (body_size != NULL && *body_size > 0) {
+    secure_zero(*body, *body_size);
+    *body_size = 0;
+  }
+  free(*body);
+  *body = NULL;
+}
+
+static esp_err_t read_form_body_alloc(httpd_req_t *req, size_t max_body_size, char **body, size_t *body_size) {
+  int received = 0;
+  size_t alloc_size = 0;
+  char *buffer = NULL;
+
+  if (body != NULL) {
+    *body = NULL;
+  }
+  if (body_size != NULL) {
+    *body_size = 0;
+  }
+  if (req == NULL || body == NULL || max_body_size == 0) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  if (req->content_len <= 0 || req->content_len >= (int)max_body_size) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid form body");
+    return ESP_FAIL;
+  }
+
+  alloc_size = (size_t)req->content_len + 1U;
+  buffer = calloc(1, alloc_size);
+  if (buffer == NULL) {
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to allocate form buffer");
+    return ESP_ERR_NO_MEM;
+  }
+
+  while (received < req->content_len) {
+    int chunk = httpd_req_recv(req, buffer + received, req->content_len - received);
+
+    if (chunk <= 0) {
+      free_form_body(&buffer, &alloc_size);
+      httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read form data");
+      return ESP_FAIL;
+    }
+    received += chunk;
+  }
+
+  buffer[received] = '\0';
+  *body = buffer;
+  if (body_size != NULL) {
+    *body_size = alloc_size;
+  }
+  return ESP_OK;
 }
 
 static esp_err_t read_form_body(httpd_req_t *req, char *body, size_t body_size) {
@@ -482,7 +540,8 @@ static esp_err_t handle_access_setup_get(httpd_req_t *req) {
 }
 
 static esp_err_t handle_access_setup_post(httpd_req_t *req) {
-  char body[1024];
+  char *body = NULL;
+  size_t body_size = 0;
   char mode[16];
   char password[64];
   char password_confirm[64];
@@ -490,7 +549,7 @@ static esp_err_t handle_access_setup_post(httpd_req_t *req) {
   char csrf_token[LM_CTRL_RANDOM_TOKEN_HEX_LEN] = {0};
   esp_err_t ret;
 
-  if (read_form_body(req, body, sizeof(body)) != ESP_OK) {
+  if (read_form_body_alloc(req, 1024, &body, &body_size) != ESP_OK) {
     return ESP_FAIL;
   }
 
@@ -501,32 +560,32 @@ static esp_err_t handle_access_setup_post(httpd_req_t *req) {
   if (strcmp(mode, "disabled") == 0) {
     ret = lm_ctrl_wifi_clear_web_admin_password();
     if (ret != ESP_OK) {
-      secure_zero(body, sizeof(body));
+      free_form_body(&body, &body_size);
       secure_zero(password, sizeof(password));
       secure_zero(password_confirm, sizeof(password_confirm));
       return lm_ctrl_setup_portal_send_response(req, "Could not store the open LAN access choice.", NULL);
     }
     set_session_cookie(req, NULL);
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     secure_zero(password, sizeof(password));
     secure_zero(password_confirm, sizeof(password_confirm));
     return lm_ctrl_setup_portal_send_response(req, "The LAN portal stays open by choice.", NULL);
   }
 
   if (strcmp(mode, "enabled") != 0) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     secure_zero(password, sizeof(password));
     secure_zero(password_confirm, sizeof(password_confirm));
     return send_access_setup_page(req, "Choose how the LAN portal should be handled.");
   }
   if (password[0] == '\0' || strlen(password) < 8) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     secure_zero(password, sizeof(password));
     secure_zero(password_confirm, sizeof(password_confirm));
     return send_access_setup_page(req, "Choose an admin password with at least 8 characters.");
   }
   if (strcmp(password, password_confirm) != 0) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     secure_zero(password, sizeof(password));
     secure_zero(password_confirm, sizeof(password_confirm));
     return send_access_setup_page(req, "The password confirmation does not match.");
@@ -535,7 +594,7 @@ static esp_err_t handle_access_setup_post(httpd_req_t *req) {
   ret = lm_ctrl_wifi_save_web_admin_password(password);
   secure_zero(password, sizeof(password));
   secure_zero(password_confirm, sizeof(password_confirm));
-  secure_zero(body, sizeof(body));
+  free_form_body(&body, &body_size);
   if (ret != ESP_OK) {
     return send_access_setup_page(req, "Could not store the admin password.");
   }
@@ -646,9 +705,11 @@ static esp_err_t handle_admin_password_post(httpd_req_t *req) {
 }
 
 static esp_err_t handle_cloud_provisioning_post(httpd_req_t *req) {
-  char body[3072];
+  char *body = NULL;
+  size_t body_size = 0;
   char csrf_token[LM_CTRL_RANDOM_TOKEN_HEX_LEN] = {0};
-  char bundle_json[2500];
+  char *bundle_json = NULL;
+  size_t bundle_json_size = 0;
   uint8_t secret[LM_CTRL_CLOUD_SECRET_LEN] = {0};
   uint8_t private_key_der[LM_CTRL_PRIVATE_KEY_DER_MAX] = {0};
   size_t secret_len = 0;
@@ -660,33 +721,41 @@ static esp_err_t handle_cloud_provisioning_post(httpd_req_t *req) {
   cJSON *private_key_item = NULL;
   esp_err_t ret = ESP_FAIL;
 
-  if (read_form_body(req, body, sizeof(body)) != ESP_OK) {
+  if (read_form_body_alloc(req, 3072, &body, &body_size) != ESP_OK) {
     return ESP_FAIL;
   }
   if (!ensure_portal_html_access(req, body, true, csrf_token, sizeof(csrf_token))) {
-    secure_zero(body, sizeof(body));
-    return ESP_OK;
+    ret = ESP_OK;
+    goto cleanup;
   }
 
   lock_state();
   allowed = s_state.portal_running || !s_state.has_cloud_provisioning;
   unlock_state();
   if (!allowed) {
-    secure_zero(body, sizeof(body));
-    return lm_ctrl_setup_portal_send_response(req, "Replacing cloud provisioning is only allowed from the setup AP.", csrf_token);
+    ret = lm_ctrl_setup_portal_send_response(req, "Replacing cloud provisioning is only allowed from the setup AP.", csrf_token);
+    goto cleanup;
   }
 
-  parse_form_value(body, "bundle_json", bundle_json, sizeof(bundle_json));
-  secure_zero(body, sizeof(body));
+  bundle_json_size = 2500U;
+  bundle_json = calloc(1, bundle_json_size);
+  if (bundle_json == NULL) {
+    ret = ESP_ERR_NO_MEM;
+    goto cleanup;
+  }
+
+  parse_form_value(body, "bundle_json", bundle_json, bundle_json_size);
+  free_form_body(&body, &body_size);
   if (bundle_json[0] == '\0') {
-    secure_zero(bundle_json, sizeof(bundle_json));
-    return lm_ctrl_setup_portal_send_response(req, "Paste the provisioning bundle JSON first.", csrf_token);
+    ret = lm_ctrl_setup_portal_send_response(req, "Paste the provisioning bundle JSON first.", csrf_token);
+    goto cleanup;
   }
 
   root = cJSON_Parse(bundle_json);
-  secure_zero(bundle_json, sizeof(bundle_json));
+  free_form_body(&bundle_json, &bundle_json_size);
   if (root == NULL) {
-    return lm_ctrl_setup_portal_send_response(req, "Provisioning bundle must be valid JSON.", csrf_token);
+    ret = lm_ctrl_setup_portal_send_response(req, "Provisioning bundle must be valid JSON.", csrf_token);
+    goto cleanup;
   }
 
   installation_id_item = cJSON_GetObjectItemCaseSensitive(root, "installation_id");
@@ -698,23 +767,19 @@ static esp_err_t handle_cloud_provisioning_post(httpd_req_t *req) {
       secret_item->valuestring == NULL ||
       !cJSON_IsString(private_key_item) ||
       private_key_item->valuestring == NULL) {
-    cJSON_Delete(root);
-    return lm_ctrl_setup_portal_send_response(req, "Provisioning bundle is missing required fields.", csrf_token);
+    ret = lm_ctrl_setup_portal_send_response(req, "Provisioning bundle is missing required fields.", csrf_token);
+    goto cleanup;
   }
 
   ret = base64_decode_bytes(secret_item->valuestring, secret, sizeof(secret), &secret_len);
   if (ret != ESP_OK || secret_len != LM_CTRL_CLOUD_SECRET_LEN) {
-    cJSON_Delete(root);
-    secure_zero(secret, sizeof(secret));
-    secure_zero(private_key_der, sizeof(private_key_der));
-    return lm_ctrl_setup_portal_send_response(req, "Provisioning bundle contains an invalid cloud secret.", csrf_token);
+    ret = lm_ctrl_setup_portal_send_response(req, "Provisioning bundle contains an invalid cloud secret.", csrf_token);
+    goto cleanup;
   }
   ret = base64_decode_bytes(private_key_item->valuestring, private_key_der, sizeof(private_key_der), &private_key_der_len);
   if (ret != ESP_OK || private_key_der_len == 0) {
-    cJSON_Delete(root);
-    secure_zero(secret, sizeof(secret));
-    secure_zero(private_key_der, sizeof(private_key_der));
-    return lm_ctrl_setup_portal_send_response(req, "Provisioning bundle contains an invalid private key.", csrf_token);
+    ret = lm_ctrl_setup_portal_send_response(req, "Provisioning bundle contains an invalid private key.", csrf_token);
+    goto cleanup;
   }
 
   ret = lm_ctrl_wifi_save_cloud_provisioning(
@@ -723,15 +788,23 @@ static esp_err_t handle_cloud_provisioning_post(httpd_req_t *req) {
     private_key_der,
     private_key_der_len
   );
-  cJSON_Delete(root);
-  secure_zero(secret, sizeof(secret));
-  secure_zero(private_key_der, sizeof(private_key_der));
   if (ret != ESP_OK) {
-    return lm_ctrl_setup_portal_send_response(req, "Could not store the cloud provisioning bundle.", csrf_token);
+    ret = lm_ctrl_setup_portal_send_response(req, "Could not store the cloud provisioning bundle.", csrf_token);
+    goto cleanup;
   }
 
   lm_ctrl_cloud_live_updates_stop(true);
-  return lm_ctrl_setup_portal_send_response(req, "Cloud provisioning imported.", csrf_token);
+  ret = lm_ctrl_setup_portal_send_response(req, "Cloud provisioning imported.", csrf_token);
+
+cleanup:
+  if (root != NULL) {
+    cJSON_Delete(root);
+  }
+  free_form_body(&body, &body_size);
+  free_form_body(&bundle_json, &bundle_json_size);
+  secure_zero(secret, sizeof(secret));
+  secure_zero(private_key_der, sizeof(private_key_der));
+  return ret;
 }
 
 static esp_err_t handle_root_get(httpd_req_t *req) {
@@ -985,7 +1058,8 @@ static esp_err_t handle_controller_logo_clear_post(httpd_req_t *req) {
 }
 
 static esp_err_t handle_wifi_post(httpd_req_t *req) {
-  char body[768];
+  char *body = NULL;
+  size_t body_size = 0;
   char csrf_token[LM_CTRL_RANDOM_TOKEN_HEX_LEN] = {0};
   char ssid[33];
   char password[65];
@@ -995,11 +1069,11 @@ static esp_err_t handle_wifi_post(httpd_req_t *req) {
   char current_hostname[33];
   ctrl_language_t language;
 
-  if (read_form_body(req, body, sizeof(body)) != ESP_OK) {
+  if (read_form_body_alloc(req, 768, &body, &body_size) != ESP_OK) {
     return ESP_FAIL;
   }
   if (!ensure_portal_html_access(req, body, true, csrf_token, sizeof(csrf_token))) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     return ESP_OK;
   }
 
@@ -1007,7 +1081,7 @@ static esp_err_t handle_wifi_post(httpd_req_t *req) {
   parse_form_value(body, "password", password, sizeof(password));
 
   if (ssid[0] == '\0') {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     return lm_ctrl_setup_portal_send_response(req, "SSID is required.", csrf_token);
   }
 
@@ -1022,7 +1096,7 @@ static esp_err_t handle_wifi_post(httpd_req_t *req) {
   if (password[0] == '\0' && current_ssid[0] != '\0' && strcmp(ssid, current_ssid) == 0) {
     copy_text(password, sizeof(password), current_password);
   }
-  secure_zero(body, sizeof(body));
+  free_form_body(&body, &body_size);
 
   if (lm_ctrl_wifi_store_credentials(ssid, password, hostname, language) != ESP_OK) {
     secure_zero(password, sizeof(password));
@@ -1099,18 +1173,19 @@ static esp_err_t handle_factory_reset_post(httpd_req_t *req) {
 }
 
 static esp_err_t handle_cloud_post(httpd_req_t *req) {
-  char body[768];
+  char *body = NULL;
+  size_t body_size = 0;
   char csrf_token[LM_CTRL_RANDOM_TOKEN_HEX_LEN] = {0};
   char cloud_username[96];
   char cloud_password[128];
   char banner[160];
   bool has_cloud_provisioning = false;
 
-  if (read_form_body(req, body, sizeof(body)) != ESP_OK) {
+  if (read_form_body_alloc(req, 768, &body, &body_size) != ESP_OK) {
     return ESP_FAIL;
   }
   if (!ensure_portal_html_access(req, body, true, csrf_token, sizeof(csrf_token))) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     return ESP_OK;
   }
 
@@ -1121,22 +1196,22 @@ static esp_err_t handle_cloud_post(httpd_req_t *req) {
   unlock_state();
 
   if (cloud_username[0] == '\0') {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     secure_zero(cloud_password, sizeof(cloud_password));
     return lm_ctrl_setup_portal_send_response(req, "Cloud e-mail is required.", csrf_token);
   }
   if (cloud_password[0] == '\0') {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     secure_zero(cloud_password, sizeof(cloud_password));
     return lm_ctrl_setup_portal_send_response(req, "Cloud password is required.", csrf_token);
   }
   if (!has_cloud_provisioning) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     secure_zero(cloud_password, sizeof(cloud_password));
     return lm_ctrl_setup_portal_send_response(req, "Import the cloud provisioning bundle first.", csrf_token);
   }
 
-  secure_zero(body, sizeof(body));
+  free_form_body(&body, &body_size);
   if (save_cloud_credentials(cloud_username, cloud_password) != ESP_OK) {
     secure_zero(cloud_password, sizeof(cloud_password));
     return lm_ctrl_setup_portal_send_response(req, "Could not store cloud credentials.", csrf_token);
@@ -1295,7 +1370,8 @@ static esp_err_t handle_bbw_post(httpd_req_t *req) {
 }
 
 static esp_err_t handle_preset_post(httpd_req_t *req) {
-  char body[768];
+  char *body = NULL;
+  size_t body_size = 0;
   char csrf_token[LM_CTRL_RANDOM_TOKEN_HEX_LEN] = {0};
   char slot_text[8];
   char preset_name[CTRL_PRESET_NAME_LEN];
@@ -1316,11 +1392,11 @@ static esp_err_t handle_preset_post(httpd_req_t *req) {
   bool bbw_available = false;
   char banner[96];
 
-  if (read_form_body(req, body, sizeof(body)) != ESP_OK) {
+  if (read_form_body_alloc(req, 768, &body, &body_size) != ESP_OK) {
     return ESP_FAIL;
   }
   if (!ensure_portal_html_access(req, body, true, csrf_token, sizeof(csrf_token))) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     return ESP_OK;
   }
 
@@ -1331,56 +1407,56 @@ static esp_err_t handle_preset_post(httpd_req_t *req) {
   parse_form_value(body, "pause_s", pause_text, sizeof(pause_text));
 
   if (slot_text[0] == '\0') {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     return lm_ctrl_setup_portal_send_response(req, "Preset slot is required.", csrf_token);
   }
 
   preset_index = (int)strtol(slot_text, &endptr, 10);
   if (endptr == slot_text || *endptr != '\0' || preset_index < 0 || preset_index >= CTRL_PRESET_MAX_COUNT) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     return lm_ctrl_setup_portal_send_response(req, "Preset slot is invalid.", csrf_token);
   }
 
   ctrl_state_init(&controller_state);
   if (ctrl_state_load(&controller_state) != ESP_OK) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     return lm_ctrl_setup_portal_send_response(req, "Could not load the controller presets.", csrf_token);
   }
   if (preset_index >= controller_state.preset_count) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     return lm_ctrl_setup_portal_send_response(req, "Preset slot is not active.", csrf_token);
   }
   preset = controller_state.presets[preset_index];
 
   parsed_value = strtof(temperature_text, &endptr);
   if (temperature_text[0] == '\0' || endptr == temperature_text || *endptr != '\0' || parsed_value < 80.0f || parsed_value > 103.0f) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     return lm_ctrl_setup_portal_send_response(req, "Temperature must stay between 80.0 C and 103.0 C.", csrf_token);
   }
   if (!ctrl_state_value_matches_step(parsed_value, 80.0f, 103.0f, controller_state.temperature_step_c)) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     return lm_ctrl_setup_portal_send_response(req, controller_state.temperature_step_c < 0.3f ? "Temperature must follow 0.1 C steps." : "Temperature must follow 0.5 C steps.", csrf_token);
   }
   preset.values.temperature_c = parsed_value;
 
   parsed_value = strtof(infuse_text, &endptr);
   if (infuse_text[0] == '\0' || endptr == infuse_text || *endptr != '\0' || parsed_value < 0.0f || parsed_value > 9.0f) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     return lm_ctrl_setup_portal_send_response(req, "Prebrewing In must stay between 0.0 s and 9.0 s.", csrf_token);
   }
   if (!ctrl_state_value_matches_step(parsed_value, 0.0f, 9.0f, controller_state.time_step_s)) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     return lm_ctrl_setup_portal_send_response(req, controller_state.time_step_s < 0.3f ? "Prebrewing In must follow 0.1 s steps." : "Prebrewing In must follow 0.5 s steps.", csrf_token);
   }
   preset.values.infuse_s = parsed_value;
 
   parsed_value = strtof(pause_text, &endptr);
   if (pause_text[0] == '\0' || endptr == pause_text || *endptr != '\0' || parsed_value < 0.0f || parsed_value > 9.0f) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     return lm_ctrl_setup_portal_send_response(req, "Prebrewing Out must stay between 0.0 s and 9.0 s.", csrf_token);
   }
   if (!ctrl_state_value_matches_step(parsed_value, 0.0f, 9.0f, controller_state.time_step_s)) {
-    secure_zero(body, sizeof(body));
+    free_form_body(&body, &body_size);
     return lm_ctrl_setup_portal_send_response(req, controller_state.time_step_s < 0.3f ? "Prebrewing Out must follow 0.1 s steps." : "Prebrewing Out must follow 0.5 s steps.", csrf_token);
   }
   preset.values.pause_s = parsed_value;
@@ -1397,7 +1473,7 @@ static esp_err_t handle_preset_post(httpd_req_t *req) {
     parse_form_value(body, "bbw_dose_2", bbw_dose_2_text, sizeof(bbw_dose_2_text));
 
     if (bbw_mode_code[0] == '\0' || bbw_dose_1_text[0] == '\0' || bbw_dose_2_text[0] == '\0') {
-      secure_zero(body, sizeof(body));
+      free_form_body(&body, &body_size);
       return lm_ctrl_setup_portal_send_response(req, "BBW mode and both dose targets are required when BBW is available.", csrf_token);
     }
 
@@ -1405,19 +1481,19 @@ static esp_err_t handle_preset_post(httpd_req_t *req) {
 
     parsed_value = strtof(bbw_dose_1_text, &endptr);
     if (endptr == bbw_dose_1_text || *endptr != '\0' || parsed_value < 5.0f || parsed_value > 100.0f) {
-      secure_zero(body, sizeof(body));
+      free_form_body(&body, &body_size);
       return lm_ctrl_setup_portal_send_response(req, "BBW Dose 1 must stay between 5.0 g and 100.0 g.", csrf_token);
     }
     preset.values.bbw_dose_1_g = parsed_value;
 
     parsed_value = strtof(bbw_dose_2_text, &endptr);
     if (endptr == bbw_dose_2_text || *endptr != '\0' || parsed_value < 5.0f || parsed_value > 100.0f) {
-      secure_zero(body, sizeof(body));
+      free_form_body(&body, &body_size);
       return lm_ctrl_setup_portal_send_response(req, "BBW Dose 2 must stay between 5.0 g and 100.0 g.", csrf_token);
     }
     preset.values.bbw_dose_2_g = parsed_value;
   }
-  secure_zero(body, sizeof(body));
+  free_form_body(&body, &body_size);
 
   if (ctrl_state_store_preset_slot(preset_index, &preset) != ESP_OK) {
     return lm_ctrl_setup_portal_send_response(req, "Could not store the preset.", csrf_token);
@@ -1863,7 +1939,7 @@ esp_err_t lm_ctrl_setup_portal_start_http_server(void) {
   }
 
   config.max_uri_handlers = 35;
-  config.stack_size = 12288;
+  config.stack_size = LM_CTRL_SETUP_PORTAL_HTTPD_STACK_SIZE;
   config.uri_match_fn = httpd_uri_match_wildcard;
   ESP_RETURN_ON_ERROR(httpd_start(&s_state.http_server, &config), TAG, "Failed to start setup web server");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &root_uri), TAG, "Failed to register root handler");

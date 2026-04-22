@@ -4,11 +4,13 @@
 
 #define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
 #include "esp_check.h"
+#include "esp_log.h"
 #include "esp_lv_adapter.h"
 #include "mbedtls/md.h"
 #include "nvs.h"
 
 #include "cloud_machine_selection.h"
+#include "settings_storage_model.h"
 #include "wifi_setup_internal.h"
 
 static const char *TAG = "lm_ctrl_settings";
@@ -23,6 +25,33 @@ static void clear_web_admin_material_locked(void) {
   secure_zero(s_state.web_admin_salt, sizeof(s_state.web_admin_salt));
   secure_zero(s_state.web_admin_hash, sizeof(s_state.web_admin_hash));
   s_state.web_admin_iterations = 0;
+}
+
+static esp_err_t write_settings_snapshot_fields(
+  nvs_handle_t handle,
+  const lm_ctrl_settings_snapshot_t *snapshot,
+  uint64_t field_mask,
+  const char *context
+) {
+  esp_err_t ret = lm_ctrl_settings_snapshot_write_fields(handle, snapshot, field_mask);
+
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to store %s", context);
+  }
+  return ret;
+}
+
+static esp_err_t erase_settings_fields(
+  nvs_handle_t handle,
+  uint64_t field_mask,
+  const char *context
+) {
+  esp_err_t ret = lm_ctrl_settings_erase_fields(handle, field_mask);
+
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to erase %s", context);
+  }
+  return ret;
 }
 
 static esp_err_t derive_web_admin_hash(
@@ -107,6 +136,7 @@ static esp_err_t persist_web_admin_hash_material(
   uint32_t iterations
 ) {
   nvs_handle_t handle = 0;
+  lm_ctrl_settings_snapshot_t snapshot = {0};
   esp_err_t ret;
 
   if (salt == NULL || hash == NULL || iterations == 0) {
@@ -118,41 +148,32 @@ static esp_err_t persist_web_admin_hash_material(
     return ret;
   }
 
-  ESP_GOTO_ON_ERROR(nvs_set_u8(handle, LM_CTRL_WIFI_KEY_WEB_MODE, (uint8_t)LM_CTRL_WEB_AUTH_ENABLED), exit, TAG, "Failed to store web auth mode");
-  ESP_GOTO_ON_ERROR(nvs_set_blob(handle, LM_CTRL_WIFI_KEY_WEB_SALT, salt, LM_CTRL_WEB_ADMIN_SALT_LEN), exit, TAG, "Failed to store web auth salt");
-  ESP_GOTO_ON_ERROR(nvs_set_blob(handle, LM_CTRL_WIFI_KEY_WEB_HASH, hash, LM_CTRL_WEB_ADMIN_HASH_LEN), exit, TAG, "Failed to store web auth hash");
-  ESP_GOTO_ON_ERROR(nvs_set_u32(handle, LM_CTRL_WIFI_KEY_WEB_ITER, iterations), exit, TAG, "Failed to store web auth iterations");
+  snapshot.present_mask = LM_CTRL_SETTINGS_WEB_AUTH_FIELDS;
+  snapshot.values.web_auth_mode = (uint8_t)LM_CTRL_WEB_AUTH_ENABLED;
+  memcpy(snapshot.values.web_auth_salt, salt, sizeof(snapshot.values.web_auth_salt));
+  memcpy(snapshot.values.web_auth_hash, hash, sizeof(snapshot.values.web_auth_hash));
+  snapshot.values.web_auth_iterations = iterations;
+  ESP_GOTO_ON_ERROR(
+    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "web auth settings"),
+    exit,
+    TAG,
+    "Failed to store web auth settings"
+  );
   ESP_GOTO_ON_ERROR(nvs_commit(handle), exit, TAG, "Failed to commit web auth settings");
 
 exit:
   nvs_close(handle);
-  return ret;
-}
-
-static esp_err_t erase_key_if_present(nvs_handle_t handle, const char *key) {
-  esp_err_t ret = nvs_erase_key(handle, key);
-
-  if (ret == ESP_ERR_NVS_NOT_FOUND) {
-    return ESP_OK;
-  }
+  secure_zero(&snapshot, sizeof(snapshot));
   return ret;
 }
 
 esp_err_t lm_ctrl_settings_load(void) {
   nvs_handle_t handle = 0;
-  char language_code[8] = {0};
-  uint8_t logo_schema_version = 0;
+  lm_ctrl_settings_snapshot_t snapshot = {0};
   bool has_logo_version = false;
   bool has_logo_blob = false;
   bool has_web_salt = false;
   bool has_web_hash = false;
-  uint8_t web_auth_mode = (uint8_t)LM_CTRL_WEB_AUTH_UNSET;
-  uint8_t heat_display_enabled = 1;
-  uint8_t debug_screenshot_enabled = 0;
-  uint8_t install_reg = 0;
-  uint32_t web_admin_iterations = 0;
-  lm_ctrl_cloud_provisioning_blob_t provisioning = {0};
-  size_t size = 0;
   esp_err_t ret = ESP_OK;
 
   lock_state();
@@ -192,176 +213,102 @@ esp_err_t lm_ctrl_settings_load(void) {
   }
 
   lock_state();
-
-  size = sizeof(s_state.sta_ssid);
-  ret = nvs_get_str(handle, LM_CTRL_WIFI_KEY_SSID, s_state.sta_ssid, &size);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
+  ret = lm_ctrl_settings_snapshot_load_from_nvs(handle, &snapshot);
+  if (ret != ESP_OK) {
     goto exit;
   }
 
-  size = sizeof(s_state.sta_password);
-  ret = nvs_get_str(handle, LM_CTRL_WIFI_KEY_PASS, s_state.sta_password, &size);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_SSID)) {
+    copy_text(s_state.sta_ssid, sizeof(s_state.sta_ssid), snapshot.values.ssid);
   }
-
-  size = sizeof(s_state.portal_password);
-  ret = nvs_get_str(handle, LM_CTRL_WIFI_KEY_PORTAL_PASS, s_state.portal_password, &size);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_PASSWORD)) {
+    copy_text(s_state.sta_password, sizeof(s_state.sta_password), snapshot.values.password);
   }
-
-  size = sizeof(s_state.hostname);
-  ret = nvs_get_str(handle, LM_CTRL_WIFI_KEY_HOST, s_state.hostname, &size);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_PORTAL_PASSWORD)) {
+    copy_text(s_state.portal_password, sizeof(s_state.portal_password), snapshot.values.portal_password);
   }
-
-  size = sizeof(language_code);
-  ret = nvs_get_str(handle, LM_CTRL_WIFI_KEY_LANG, language_code, &size);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_HOSTNAME)) {
+    copy_text(s_state.hostname, sizeof(s_state.hostname), snapshot.values.hostname);
   }
-  if (ret == ESP_OK) {
-    s_state.language = ctrl_language_from_code(language_code);
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_LANGUAGE_CODE)) {
+    s_state.language = ctrl_language_from_code(snapshot.values.language_code);
   }
-
-  size = sizeof(s_state.cloud_username);
-  ret = nvs_get_str(handle, LM_CTRL_WIFI_KEY_CLOUD_USER, s_state.cloud_username, &size);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_CLOUD_USERNAME)) {
+    copy_text(s_state.cloud_username, sizeof(s_state.cloud_username), snapshot.values.cloud_username);
   }
-
-  size = sizeof(s_state.cloud_password);
-  ret = nvs_get_str(handle, LM_CTRL_WIFI_KEY_CLOUD_PASS, s_state.cloud_password, &size);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_CLOUD_PASSWORD)) {
+    copy_text(s_state.cloud_password, sizeof(s_state.cloud_password), snapshot.values.cloud_password);
   }
-
-  size = sizeof(s_state.selected_machine.serial);
-  ret = nvs_get_str(handle, LM_CTRL_WIFI_KEY_MACHINE_SERIAL, s_state.selected_machine.serial, &size);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_MACHINE_SERIAL)) {
+    copy_text(s_state.selected_machine.serial, sizeof(s_state.selected_machine.serial), snapshot.values.machine_serial);
   }
-
-  size = sizeof(s_state.selected_machine.name);
-  ret = nvs_get_str(handle, LM_CTRL_WIFI_KEY_MACHINE_NAME, s_state.selected_machine.name, &size);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_MACHINE_NAME)) {
+    copy_text(s_state.selected_machine.name, sizeof(s_state.selected_machine.name), snapshot.values.machine_name);
   }
-
-  size = sizeof(s_state.selected_machine.model);
-  ret = nvs_get_str(handle, LM_CTRL_WIFI_KEY_MACHINE_MODEL, s_state.selected_machine.model, &size);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_MACHINE_MODEL)) {
+    copy_text(s_state.selected_machine.model, sizeof(s_state.selected_machine.model), snapshot.values.machine_model);
   }
-
-  size = sizeof(s_state.selected_machine.communication_key);
-  ret = nvs_get_str(handle, LM_CTRL_WIFI_KEY_MACHINE_KEY, s_state.selected_machine.communication_key, &size);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_MACHINE_KEY)) {
+    copy_text(
+      s_state.selected_machine.communication_key,
+      sizeof(s_state.selected_machine.communication_key),
+      snapshot.values.machine_key
+    );
   }
-
-  ret = nvs_get_u8(handle, LM_CTRL_WIFI_KEY_WEB_MODE, &web_auth_mode);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_WEB_AUTH_MODE) &&
+      snapshot.values.web_auth_mode <= (uint8_t)LM_CTRL_WEB_AUTH_ENABLED) {
+    s_state.web_auth_mode = (lm_ctrl_web_auth_mode_t)snapshot.values.web_auth_mode;
   }
-  if (ret == ESP_OK && web_auth_mode <= (uint8_t)LM_CTRL_WEB_AUTH_ENABLED) {
-    s_state.web_auth_mode = (lm_ctrl_web_auth_mode_t)web_auth_mode;
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_DEBUG_SCREENSHOT_ENABLED)) {
+    s_state.debug_screenshot_enabled = snapshot.values.debug_screenshot_enabled != 0;
   }
-
-  ret = nvs_get_u8(handle, LM_CTRL_WIFI_KEY_DEBUG_SHOT, &debug_screenshot_enabled);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_HEAT_DISPLAY_ENABLED)) {
+    s_state.heat_display_enabled = snapshot.values.heat_display_enabled != 0;
   }
-  if (ret == ESP_OK) {
-    s_state.debug_screenshot_enabled = debug_screenshot_enabled != 0;
-  }
-
-  ret = nvs_get_u8(handle, LM_CTRL_WIFI_KEY_HEAT_DISPLAY, &heat_display_enabled);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
-  }
-  if (ret == ESP_OK) {
-    s_state.heat_display_enabled = heat_display_enabled != 0;
-  }
-
-  size = sizeof(s_state.web_admin_salt);
-  ret = nvs_get_blob(handle, LM_CTRL_WIFI_KEY_WEB_SALT, s_state.web_admin_salt, &size);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND && ret != ESP_ERR_NVS_INVALID_LENGTH) {
-    goto exit;
-  }
-  if (ret == ESP_OK && size == sizeof(s_state.web_admin_salt)) {
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_WEB_AUTH_SALT)) {
+    memcpy(s_state.web_admin_salt, snapshot.values.web_auth_salt, sizeof(s_state.web_admin_salt));
     has_web_salt = true;
-  } else if (ret == ESP_OK) {
-    clear_web_admin_material_locked();
-    s_state.web_auth_mode = LM_CTRL_WEB_AUTH_UNSET;
   }
-
-  size = sizeof(s_state.web_admin_hash);
-  ret = nvs_get_blob(handle, LM_CTRL_WIFI_KEY_WEB_HASH, s_state.web_admin_hash, &size);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND && ret != ESP_ERR_NVS_INVALID_LENGTH) {
-    goto exit;
-  }
-  if (ret == ESP_OK && size == sizeof(s_state.web_admin_hash)) {
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_WEB_AUTH_HASH)) {
+    memcpy(s_state.web_admin_hash, snapshot.values.web_auth_hash, sizeof(s_state.web_admin_hash));
     has_web_hash = true;
-  } else if (ret == ESP_OK) {
-    clear_web_admin_material_locked();
-    s_state.web_auth_mode = LM_CTRL_WEB_AUTH_UNSET;
   }
-
-  ret = nvs_get_u32(handle, LM_CTRL_WIFI_KEY_WEB_ITER, &web_admin_iterations);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_WEB_AUTH_ITERATIONS) &&
+      snapshot.values.web_auth_iterations > 0) {
+    s_state.web_admin_iterations = snapshot.values.web_auth_iterations;
   }
-  if (ret == ESP_OK && web_admin_iterations > 0) {
-    s_state.web_admin_iterations = web_admin_iterations;
-  }
-
-  size = sizeof(provisioning);
-  ret = nvs_get_blob(handle, LM_CTRL_WIFI_KEY_INSTALL_BLOB, &provisioning, &size);
-  if (ret == ESP_OK &&
-      size == sizeof(provisioning) &&
-      provisioning.schema_version == LM_CTRL_CLOUD_PROVISIONING_SCHEMA_VERSION &&
-      provisioning.private_key_der_len > 0 &&
-      provisioning.private_key_der_len <= LM_CTRL_PRIVATE_KEY_DER_MAX &&
-      provisioning.installation_id[0] != '\0') {
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_CLOUD_PROVISIONING) &&
+      snapshot.values.cloud_provisioning.schema_version == LM_CTRL_CLOUD_PROVISIONING_SCHEMA_VERSION &&
+      snapshot.values.cloud_provisioning.private_key_der_len > 0 &&
+      snapshot.values.cloud_provisioning.private_key_der_len <= LM_CTRL_PRIVATE_KEY_DER_MAX &&
+      snapshot.values.cloud_provisioning.installation_id[0] != '\0') {
     s_state.has_cloud_provisioning = true;
     s_state.cloud_installation_ready = true;
-    copy_text(s_state.cloud_installation_id, sizeof(s_state.cloud_installation_id), provisioning.installation_id);
-    memcpy(s_state.cloud_secret, provisioning.secret, sizeof(s_state.cloud_secret));
-    memcpy(s_state.cloud_private_key_der, provisioning.private_key_der, provisioning.private_key_der_len);
-    s_state.cloud_private_key_der_len = provisioning.private_key_der_len;
-  } else if (ret != ESP_ERR_NVS_NOT_FOUND && ret != ESP_ERR_NVS_INVALID_LENGTH) {
-    goto exit;
+    copy_text(
+      s_state.cloud_installation_id,
+      sizeof(s_state.cloud_installation_id),
+      snapshot.values.cloud_provisioning.installation_id
+    );
+    memcpy(s_state.cloud_secret, snapshot.values.cloud_provisioning.secret, sizeof(s_state.cloud_secret));
+    memcpy(
+      s_state.cloud_private_key_der,
+      snapshot.values.cloud_provisioning.private_key_der,
+      snapshot.values.cloud_provisioning.private_key_der_len
+    );
+    s_state.cloud_private_key_der_len = snapshot.values.cloud_provisioning.private_key_der_len;
+  }
+  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_CLOUD_INSTALL_REG)) {
+    s_state.cloud_installation_registered = snapshot.values.cloud_install_reg != 0;
   }
 
-  ret = nvs_get_u8(handle, LM_CTRL_WIFI_KEY_INSTALL_REG, &install_reg);
-  if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
-  }
-  if (ret == ESP_OK) {
-    s_state.cloud_installation_registered = install_reg != 0;
-  }
-
-  ret = nvs_get_u8(handle, LM_CTRL_WIFI_KEY_LOGO_VERSION, &logo_schema_version);
-  if (ret == ESP_OK) {
-    has_logo_version = true;
-  } else if (ret != ESP_ERR_NVS_NOT_FOUND) {
-    goto exit;
-  }
-
-  size = sizeof(s_state.custom_logo_blob);
-  ret = nvs_get_blob(handle, LM_CTRL_WIFI_KEY_LOGO_BLOB, s_state.custom_logo_blob, &size);
-  if (ret == ESP_OK && size == sizeof(s_state.custom_logo_blob)) {
-    has_logo_blob = true;
-  } else if (ret != ESP_ERR_NVS_NOT_FOUND && ret != ESP_ERR_NVS_INVALID_LENGTH) {
-    goto exit;
-  }
-
-  if (has_logo_version && has_logo_blob && logo_schema_version == LM_CTRL_CUSTOM_LOGO_SCHEMA_VERSION) {
+  has_logo_version = lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_LOGO_SCHEMA_VERSION);
+  has_logo_blob = lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_LOGO_BLOB);
+  if (has_logo_version &&
+      has_logo_blob &&
+      snapshot.values.logo_schema_version == LM_CTRL_CUSTOM_LOGO_SCHEMA_VERSION) {
     s_state.has_custom_logo = true;
-    s_state.custom_logo_schema_version = logo_schema_version;
+    s_state.custom_logo_schema_version = snapshot.values.logo_schema_version;
+    memcpy(s_state.custom_logo_blob, snapshot.values.logo_blob, sizeof(s_state.custom_logo_blob));
   } else {
     clear_custom_logo_locked();
   }
@@ -385,22 +332,30 @@ esp_err_t lm_ctrl_settings_load(void) {
 exit:
   unlock_state();
   nvs_close(handle);
-  secure_zero(&provisioning, sizeof(provisioning));
+  secure_zero(&snapshot, sizeof(snapshot));
   return ret;
 }
 
 esp_err_t lm_ctrl_settings_save_wifi_credentials(const char *ssid, const char *password, const char *hostname, ctrl_language_t language) {
   nvs_handle_t handle = 0;
+  lm_ctrl_settings_snapshot_t snapshot = {0};
   esp_err_t ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
 
   if (ret != ESP_OK) {
     return ret;
   }
 
-  ESP_GOTO_ON_ERROR(nvs_set_str(handle, LM_CTRL_WIFI_KEY_SSID, ssid), exit, TAG, "Failed to store SSID");
-  ESP_GOTO_ON_ERROR(nvs_set_str(handle, LM_CTRL_WIFI_KEY_PASS, password), exit, TAG, "Failed to store password");
-  ESP_GOTO_ON_ERROR(nvs_set_str(handle, LM_CTRL_WIFI_KEY_HOST, hostname), exit, TAG, "Failed to store hostname");
-  ESP_GOTO_ON_ERROR(nvs_set_str(handle, LM_CTRL_WIFI_KEY_LANG, ctrl_language_code(language)), exit, TAG, "Failed to store controller language");
+  snapshot.present_mask = LM_CTRL_SETTINGS_WIFI_CREDENTIAL_FIELDS;
+  copy_text(snapshot.values.ssid, sizeof(snapshot.values.ssid), ssid);
+  copy_text(snapshot.values.password, sizeof(snapshot.values.password), password);
+  copy_text(snapshot.values.hostname, sizeof(snapshot.values.hostname), hostname);
+  copy_text(snapshot.values.language_code, sizeof(snapshot.values.language_code), ctrl_language_code(language));
+  ESP_GOTO_ON_ERROR(
+    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "Wi-Fi settings"),
+    exit,
+    TAG,
+    "Failed to store Wi-Fi settings"
+  );
   ESP_GOTO_ON_ERROR(nvs_commit(handle), exit, TAG, "Failed to commit Wi-Fi settings");
 
 exit:
@@ -419,12 +374,14 @@ exit:
     unlock_state();
   }
 
+  secure_zero(&snapshot, sizeof(snapshot));
   return ret;
 }
 
 esp_err_t lm_ctrl_settings_save_controller_preferences(const char *hostname, ctrl_language_t language) {
   nvs_handle_t handle = 0;
   char effective_hostname[33];
+  lm_ctrl_settings_snapshot_t snapshot = {0};
   esp_err_t ret;
 
   copy_text(effective_hostname, sizeof(effective_hostname), hostname);
@@ -437,8 +394,15 @@ esp_err_t lm_ctrl_settings_save_controller_preferences(const char *hostname, ctr
     return ret;
   }
 
-  ESP_GOTO_ON_ERROR(nvs_set_str(handle, LM_CTRL_WIFI_KEY_HOST, effective_hostname), exit, TAG, "Failed to store hostname");
-  ESP_GOTO_ON_ERROR(nvs_set_str(handle, LM_CTRL_WIFI_KEY_LANG, ctrl_language_code(language)), exit, TAG, "Failed to store controller language");
+  snapshot.present_mask = LM_CTRL_SETTINGS_CONTROLLER_PREFERENCE_FIELDS;
+  copy_text(snapshot.values.hostname, sizeof(snapshot.values.hostname), effective_hostname);
+  copy_text(snapshot.values.language_code, sizeof(snapshot.values.language_code), ctrl_language_code(language));
+  ESP_GOTO_ON_ERROR(
+    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "controller settings"),
+    exit,
+    TAG,
+    "Failed to store controller settings"
+  );
   ESP_GOTO_ON_ERROR(nvs_commit(handle), exit, TAG, "Failed to commit controller settings");
 
 exit:
@@ -451,11 +415,13 @@ exit:
     unlock_state();
   }
 
+  secure_zero(&snapshot, sizeof(snapshot));
   return ret;
 }
 
 esp_err_t lm_ctrl_settings_save_controller_logo(uint8_t schema_version, const uint8_t *logo_data, size_t logo_size) {
   nvs_handle_t handle = 0;
+  lm_ctrl_settings_snapshot_t snapshot = {0};
   esp_err_t ret;
 
   if (schema_version != LM_CTRL_CUSTOM_LOGO_SCHEMA_VERSION ||
@@ -469,8 +435,15 @@ esp_err_t lm_ctrl_settings_save_controller_logo(uint8_t schema_version, const ui
     return ret;
   }
 
-  ESP_GOTO_ON_ERROR(nvs_set_u8(handle, LM_CTRL_WIFI_KEY_LOGO_VERSION, schema_version), exit, TAG, "Failed to store logo schema");
-  ESP_GOTO_ON_ERROR(nvs_set_blob(handle, LM_CTRL_WIFI_KEY_LOGO_BLOB, logo_data, logo_size), exit, TAG, "Failed to store logo data");
+  snapshot.present_mask = LM_CTRL_SETTINGS_LOGO_FIELDS;
+  snapshot.values.logo_schema_version = schema_version;
+  memcpy(snapshot.values.logo_blob, logo_data, logo_size);
+  ESP_GOTO_ON_ERROR(
+    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "controller logo"),
+    exit,
+    TAG,
+    "Failed to store controller logo"
+  );
   ESP_GOTO_ON_ERROR(nvs_commit(handle), exit, TAG, "Failed to commit controller logo");
 
 exit:
@@ -495,6 +468,7 @@ exit:
     }
   }
 
+  secure_zero(&snapshot, sizeof(snapshot));
   return ret;
 }
 
@@ -505,8 +479,12 @@ esp_err_t lm_ctrl_settings_clear_controller_logo(void) {
   if (ret == ESP_ERR_NVS_NOT_FOUND) {
     ret = ESP_OK;
   } else if (ret == ESP_OK) {
-    ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_LOGO_VERSION), exit, TAG, "Failed to erase logo schema");
-    ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_LOGO_BLOB), exit, TAG, "Failed to erase logo data");
+    ESP_GOTO_ON_ERROR(
+      erase_settings_fields(handle, LM_CTRL_SETTINGS_LOGO_FIELDS, "controller logo"),
+      exit,
+      TAG,
+      "Failed to erase controller logo"
+    );
     ESP_GOTO_ON_ERROR(nvs_commit(handle), exit, TAG, "Failed to commit controller logo removal");
   } else {
     return ret;
@@ -537,6 +515,7 @@ exit:
 
 esp_err_t lm_ctrl_settings_save_cloud_credentials(const char *username, const char *password, bool *credentials_changed) {
   nvs_handle_t handle = 0;
+  lm_ctrl_settings_snapshot_t snapshot = {0};
   bool changed = false;
   esp_err_t ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
 
@@ -553,13 +532,22 @@ esp_err_t lm_ctrl_settings_save_cloud_credentials(const char *username, const ch
     strcmp(s_state.cloud_password, password) != 0;
   unlock_state();
 
-  ESP_GOTO_ON_ERROR(nvs_set_str(handle, LM_CTRL_WIFI_KEY_CLOUD_USER, username), exit, TAG, "Failed to store cloud username");
-  ESP_GOTO_ON_ERROR(nvs_set_str(handle, LM_CTRL_WIFI_KEY_CLOUD_PASS, password), exit, TAG, "Failed to store cloud password");
+  snapshot.present_mask = LM_CTRL_SETTINGS_CLOUD_CREDENTIAL_FIELDS;
+  copy_text(snapshot.values.cloud_username, sizeof(snapshot.values.cloud_username), username);
+  copy_text(snapshot.values.cloud_password, sizeof(snapshot.values.cloud_password), password);
+  ESP_GOTO_ON_ERROR(
+    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "cloud settings"),
+    exit,
+    TAG,
+    "Failed to store cloud settings"
+  );
   if (changed) {
-    nvs_erase_key(handle, LM_CTRL_WIFI_KEY_MACHINE_SERIAL);
-    nvs_erase_key(handle, LM_CTRL_WIFI_KEY_MACHINE_NAME);
-    nvs_erase_key(handle, LM_CTRL_WIFI_KEY_MACHINE_MODEL);
-    nvs_erase_key(handle, LM_CTRL_WIFI_KEY_MACHINE_KEY);
+    ESP_GOTO_ON_ERROR(
+      erase_settings_fields(handle, LM_CTRL_SETTINGS_MACHINE_SELECTION_FIELDS, "machine selection"),
+      exit,
+      TAG,
+      "Failed to erase machine selection"
+    );
   }
   ESP_GOTO_ON_ERROR(nvs_commit(handle), exit, TAG, "Failed to commit cloud settings");
 
@@ -582,11 +570,13 @@ exit:
     }
   }
 
+  secure_zero(&snapshot, sizeof(snapshot));
   return ret;
 }
 
 esp_err_t lm_ctrl_settings_save_machine_selection(const lm_ctrl_cloud_machine_t *machine) {
   nvs_handle_t handle = 0;
+  lm_ctrl_settings_snapshot_t snapshot = {0};
   esp_err_t ret;
 
   if (machine == NULL || machine->serial[0] == '\0') {
@@ -598,10 +588,17 @@ esp_err_t lm_ctrl_settings_save_machine_selection(const lm_ctrl_cloud_machine_t 
     return ret;
   }
 
-  ESP_GOTO_ON_ERROR(nvs_set_str(handle, LM_CTRL_WIFI_KEY_MACHINE_SERIAL, machine->serial), exit, TAG, "Failed to store machine serial");
-  ESP_GOTO_ON_ERROR(nvs_set_str(handle, LM_CTRL_WIFI_KEY_MACHINE_NAME, machine->name), exit, TAG, "Failed to store machine name");
-  ESP_GOTO_ON_ERROR(nvs_set_str(handle, LM_CTRL_WIFI_KEY_MACHINE_MODEL, machine->model), exit, TAG, "Failed to store machine model");
-  ESP_GOTO_ON_ERROR(nvs_set_str(handle, LM_CTRL_WIFI_KEY_MACHINE_KEY, machine->communication_key), exit, TAG, "Failed to store machine key");
+  snapshot.present_mask = LM_CTRL_SETTINGS_MACHINE_SELECTION_FIELDS;
+  copy_text(snapshot.values.machine_serial, sizeof(snapshot.values.machine_serial), machine->serial);
+  copy_text(snapshot.values.machine_name, sizeof(snapshot.values.machine_name), machine->name);
+  copy_text(snapshot.values.machine_model, sizeof(snapshot.values.machine_model), machine->model);
+  copy_text(snapshot.values.machine_key, sizeof(snapshot.values.machine_key), machine->communication_key);
+  ESP_GOTO_ON_ERROR(
+    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "machine selection"),
+    exit,
+    TAG,
+    "Failed to store machine selection"
+  );
   ESP_GOTO_ON_ERROR(nvs_commit(handle), exit, TAG, "Failed to commit machine selection");
 
 exit:
@@ -614,6 +611,7 @@ exit:
     unlock_state();
   }
 
+  secure_zero(&snapshot, sizeof(snapshot));
   return ret;
 }
 
@@ -624,6 +622,7 @@ esp_err_t lm_ctrl_settings_save_cloud_provisioning(
   size_t private_key_der_len
 ) {
   nvs_handle_t handle = 0;
+  lm_ctrl_settings_snapshot_t snapshot = {0};
   lm_ctrl_cloud_provisioning_blob_t provisioning = {0};
   esp_err_t ret;
 
@@ -648,8 +647,17 @@ esp_err_t lm_ctrl_settings_save_cloud_provisioning(
     return ret;
   }
 
-  ESP_GOTO_ON_ERROR(nvs_set_blob(handle, LM_CTRL_WIFI_KEY_INSTALL_BLOB, &provisioning, sizeof(provisioning)), exit, TAG, "Failed to store cloud provisioning");
-  ESP_GOTO_ON_ERROR(nvs_set_u8(handle, LM_CTRL_WIFI_KEY_INSTALL_REG, 0), exit, TAG, "Failed to clear cloud installation registration");
+  snapshot.present_mask =
+    LM_CTRL_SETTINGS_FIELD_MASK(CLOUD_PROVISIONING) |
+    LM_CTRL_SETTINGS_FIELD_MASK(CLOUD_INSTALL_REG);
+  snapshot.values.cloud_provisioning = provisioning;
+  snapshot.values.cloud_install_reg = 0;
+  ESP_GOTO_ON_ERROR(
+    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "cloud provisioning"),
+    exit,
+    TAG,
+    "Failed to store cloud provisioning"
+  );
   ESP_GOTO_ON_ERROR(nvs_commit(handle), exit, TAG, "Failed to commit cloud provisioning");
 
 exit:
@@ -667,6 +675,7 @@ exit:
     mark_status_dirty_locked();
     unlock_state();
   }
+  secure_zero(&snapshot, sizeof(snapshot));
   secure_zero(&provisioning, sizeof(provisioning));
   return ret;
 }
@@ -704,13 +713,21 @@ esp_err_t lm_ctrl_settings_ensure_cloud_provisioning(void) {
 
 esp_err_t lm_ctrl_settings_set_cloud_installation_registered(bool registered) {
   nvs_handle_t handle = 0;
+  lm_ctrl_settings_snapshot_t snapshot = {0};
   esp_err_t ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
 
   if (ret != ESP_OK) {
     return ret;
   }
 
-  ESP_GOTO_ON_ERROR(nvs_set_u8(handle, LM_CTRL_WIFI_KEY_INSTALL_REG, registered ? 1 : 0), exit, TAG, "Failed to store cloud installation registration");
+  snapshot.present_mask = LM_CTRL_SETTINGS_FIELD_MASK(CLOUD_INSTALL_REG);
+  snapshot.values.cloud_install_reg = registered ? 1U : 0U;
+  ESP_GOTO_ON_ERROR(
+    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "cloud installation registration"),
+    exit,
+    TAG,
+    "Failed to store cloud installation registration"
+  );
   ESP_GOTO_ON_ERROR(nvs_commit(handle), exit, TAG, "Failed to commit cloud installation registration");
 
 exit:
@@ -720,11 +737,13 @@ exit:
     s_state.cloud_installation_registered = registered && s_state.has_cloud_provisioning;
     unlock_state();
   }
+  secure_zero(&snapshot, sizeof(snapshot));
   return ret;
 }
 
 esp_err_t lm_ctrl_settings_save_portal_password(const char *password) {
   nvs_handle_t handle = 0;
+  lm_ctrl_settings_snapshot_t snapshot = {0};
   esp_err_t ret;
 
   if (password == NULL || password[0] == '\0') {
@@ -736,7 +755,14 @@ esp_err_t lm_ctrl_settings_save_portal_password(const char *password) {
     return ret;
   }
 
-  ESP_GOTO_ON_ERROR(nvs_set_str(handle, LM_CTRL_WIFI_KEY_PORTAL_PASS, password), exit, TAG, "Failed to store setup AP password");
+  snapshot.present_mask = LM_CTRL_SETTINGS_FIELD_MASK(PORTAL_PASSWORD);
+  copy_text(snapshot.values.portal_password, sizeof(snapshot.values.portal_password), password);
+  ESP_GOTO_ON_ERROR(
+    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "setup AP password"),
+    exit,
+    TAG,
+    "Failed to store setup AP password"
+  );
   ESP_GOTO_ON_ERROR(nvs_commit(handle), exit, TAG, "Failed to commit setup AP password");
 
 exit:
@@ -747,6 +773,7 @@ exit:
     mark_status_dirty_locked();
     unlock_state();
   }
+  secure_zero(&snapshot, sizeof(snapshot));
   return ret;
 }
 
@@ -784,16 +811,27 @@ esp_err_t lm_ctrl_settings_save_web_admin_password(const char *password) {
 
 esp_err_t lm_ctrl_settings_clear_web_admin_password(void) {
   nvs_handle_t handle = 0;
+  lm_ctrl_settings_snapshot_t snapshot = {0};
   esp_err_t ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
 
   if (ret != ESP_OK) {
     return ret;
   }
 
-  ESP_GOTO_ON_ERROR(nvs_set_u8(handle, LM_CTRL_WIFI_KEY_WEB_MODE, (uint8_t)LM_CTRL_WEB_AUTH_DISABLED), exit, TAG, "Failed to store disabled web auth mode");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_WEB_SALT), exit, TAG, "Failed to erase web auth salt");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_WEB_HASH), exit, TAG, "Failed to erase web auth hash");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_WEB_ITER), exit, TAG, "Failed to erase web auth iterations");
+  snapshot.present_mask = LM_CTRL_SETTINGS_FIELD_MASK(WEB_AUTH_MODE);
+  snapshot.values.web_auth_mode = (uint8_t)LM_CTRL_WEB_AUTH_DISABLED;
+  ESP_GOTO_ON_ERROR(
+    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "disabled web auth mode"),
+    exit,
+    TAG,
+    "Failed to store disabled web auth mode"
+  );
+  ESP_GOTO_ON_ERROR(
+    erase_settings_fields(handle, LM_CTRL_SETTINGS_WEB_AUTH_FIELDS & ~LM_CTRL_SETTINGS_FIELD_MASK(WEB_AUTH_MODE), "web auth material"),
+    exit,
+    TAG,
+    "Failed to erase web auth material"
+  );
   ESP_GOTO_ON_ERROR(nvs_commit(handle), exit, TAG, "Failed to commit web auth removal");
 
 exit:
@@ -806,6 +844,7 @@ exit:
     mark_status_dirty_locked();
     unlock_state();
   }
+  secure_zero(&snapshot, sizeof(snapshot));
   return ret;
 }
 
@@ -873,13 +912,21 @@ bool lm_ctrl_settings_verify_web_admin_password(const char *password) {
 
 esp_err_t lm_ctrl_settings_set_heat_display_enabled(bool enabled) {
   nvs_handle_t handle = 0;
+  lm_ctrl_settings_snapshot_t snapshot = {0};
   esp_err_t ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
 
   if (ret != ESP_OK) {
     return ret;
   }
 
-  ESP_GOTO_ON_ERROR(nvs_set_u8(handle, LM_CTRL_WIFI_KEY_HEAT_DISPLAY, enabled ? 1U : 0U), exit, TAG, "Failed to store heat display toggle");
+  snapshot.present_mask = LM_CTRL_SETTINGS_FIELD_MASK(HEAT_DISPLAY_ENABLED);
+  snapshot.values.heat_display_enabled = enabled ? 1U : 0U;
+  ESP_GOTO_ON_ERROR(
+    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "heat display toggle"),
+    exit,
+    TAG,
+    "Failed to store heat display toggle"
+  );
   ESP_GOTO_ON_ERROR(nvs_commit(handle), exit, TAG, "Failed to commit heat display toggle");
 
 exit:
@@ -890,18 +937,27 @@ exit:
     mark_status_dirty_locked();
     unlock_state();
   }
+  secure_zero(&snapshot, sizeof(snapshot));
   return ret;
 }
 
 esp_err_t lm_ctrl_settings_set_debug_screenshot_enabled(bool enabled) {
   nvs_handle_t handle = 0;
+  lm_ctrl_settings_snapshot_t snapshot = {0};
   esp_err_t ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
 
   if (ret != ESP_OK) {
     return ret;
   }
 
-  ESP_GOTO_ON_ERROR(nvs_set_u8(handle, LM_CTRL_WIFI_KEY_DEBUG_SHOT, enabled ? 1U : 0U), exit, TAG, "Failed to store debug screenshot toggle");
+  snapshot.present_mask = LM_CTRL_SETTINGS_FIELD_MASK(DEBUG_SCREENSHOT_ENABLED);
+  snapshot.values.debug_screenshot_enabled = enabled ? 1U : 0U;
+  ESP_GOTO_ON_ERROR(
+    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "debug screenshot toggle"),
+    exit,
+    TAG,
+    "Failed to store debug screenshot toggle"
+  );
   ESP_GOTO_ON_ERROR(nvs_commit(handle), exit, TAG, "Failed to commit debug screenshot toggle");
 
 exit:
@@ -912,6 +968,7 @@ exit:
     mark_status_dirty_locked();
     unlock_state();
   }
+  secure_zero(&snapshot, sizeof(snapshot));
   return ret;
 }
 
@@ -957,20 +1014,12 @@ esp_err_t lm_ctrl_settings_reset_network(void) {
     return ret;
   }
 
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_SSID), exit, TAG, "Failed to erase SSID");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_PASS), exit, TAG, "Failed to erase Wi-Fi password");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_CLOUD_USER), exit, TAG, "Failed to erase cloud username");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_CLOUD_PASS), exit, TAG, "Failed to erase cloud password");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_MACHINE_SERIAL), exit, TAG, "Failed to erase machine serial");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_MACHINE_NAME), exit, TAG, "Failed to erase machine name");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_MACHINE_MODEL), exit, TAG, "Failed to erase machine model");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_MACHINE_KEY), exit, TAG, "Failed to erase machine key");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_PORTAL_PASS), exit, TAG, "Failed to erase setup AP password");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_WEB_MODE), exit, TAG, "Failed to erase web auth mode");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_WEB_SALT), exit, TAG, "Failed to erase web auth salt");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_WEB_HASH), exit, TAG, "Failed to erase web auth hash");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_WEB_ITER), exit, TAG, "Failed to erase web auth iterations");
-  ESP_GOTO_ON_ERROR(erase_key_if_present(handle, LM_CTRL_WIFI_KEY_DEBUG_SHOT), exit, TAG, "Failed to erase debug screenshot toggle");
+  ESP_GOTO_ON_ERROR(
+    erase_settings_fields(handle, LM_CTRL_SETTINGS_NETWORK_RESET_FIELDS, "network settings"),
+    exit,
+    TAG,
+    "Failed to erase network settings"
+  );
   ESP_GOTO_ON_ERROR(nvs_commit(handle), exit, TAG, "Failed to commit network reset");
 
 exit:

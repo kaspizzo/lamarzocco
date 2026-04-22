@@ -61,6 +61,10 @@ cd firmware/esp32
 
 `quick` uses `idf.py app-flash monitor`, so only the app partition is reflashed.
 
+If you pull a change that modifies `firmware/esp32/partitions.csv`, do one full
+flash again instead of `quick`. Partition-layout changes move partition offsets,
+so `app-flash` alone is not enough for that transition.
+
 ### If port detection fails
 
 List available serial ports:
@@ -89,6 +93,14 @@ Exit the serial monitor with `Ctrl+]`.
 ./dev.sh clean
 ./dev.sh menuconfig
 ```
+
+To run the host-side firmware tests automatically before each local `git push`, install the repo-local hook once:
+
+```bash
+./dev.sh install-hooks
+```
+
+The hook runs `./firmware/esp32/dev.sh test` from the repository root. On a fresh checkout, build the firmware once first so `managed_components/` exists for the host test runner.
 
 ## 3. Windows (native)
 
@@ -140,6 +152,9 @@ This is the standard Windows path for this repository. Windows uses `COMx` seria
 - **Wrong target selected**
   On macOS/Linux, rebuild with `./dev.sh clean && ./dev.sh full`.
   On Windows, run `idf.py fullclean`, then `idf.py set-target esp32s3`, then `idf.py -p COM5 flash monitor`.
+- **Firmware was updated, but a partition-layout change was also pulled**
+  Re-run a full flash so bootloader, partition table, and app are flashed together.
+  `./dev.sh quick` only refreshes the app image.
 - **ESP-IDF not found**
   On macOS/Linux, run `source ~/esp/esp-idf/export.sh` or make sure `IDF_PATH` points to your ESP-IDF install.
   On Windows, use the ESP-IDF PowerShell or ESP-IDF Command Prompt created by the official installer.

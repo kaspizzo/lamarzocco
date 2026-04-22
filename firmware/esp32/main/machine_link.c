@@ -8,12 +8,128 @@
 
 static const char *TAG = "lm_ble";
 
+typedef enum {
+  LM_CTRL_MACHINE_VALUE_FIELD_FLOAT = 0,
+  LM_CTRL_MACHINE_VALUE_FIELD_BOOL,
+  LM_CTRL_MACHINE_VALUE_FIELD_ENUM,
+} lm_ctrl_machine_value_field_kind_t;
+
+typedef struct {
+  uint32_t field_mask;
+  size_t offset;
+  lm_ctrl_machine_value_field_kind_t kind;
+} lm_ctrl_machine_value_field_desc_t;
+
+#define LM_CTRL_MACHINE_VALUE_FIELD_FLOAT_DESC(field_mask_, member_) \
+  { (field_mask_), offsetof(ctrl_values_t, member_), LM_CTRL_MACHINE_VALUE_FIELD_FLOAT }
+#define LM_CTRL_MACHINE_VALUE_FIELD_BOOL_DESC(field_mask_, member_) \
+  { (field_mask_), offsetof(ctrl_values_t, member_), LM_CTRL_MACHINE_VALUE_FIELD_BOOL }
+#define LM_CTRL_MACHINE_VALUE_FIELD_ENUM_DESC(field_mask_, member_) \
+  { (field_mask_), offsetof(ctrl_values_t, member_), LM_CTRL_MACHINE_VALUE_FIELD_ENUM }
+
+static const lm_ctrl_machine_value_field_desc_t s_machine_value_fields[] = {
+  LM_CTRL_MACHINE_VALUE_FIELD_FLOAT_DESC(LM_CTRL_MACHINE_FIELD_TEMPERATURE, temperature_c),
+  LM_CTRL_MACHINE_VALUE_FIELD_FLOAT_DESC(LM_CTRL_MACHINE_FIELD_INFUSE, infuse_s),
+  LM_CTRL_MACHINE_VALUE_FIELD_FLOAT_DESC(LM_CTRL_MACHINE_FIELD_PAUSE, pause_s),
+  LM_CTRL_MACHINE_VALUE_FIELD_ENUM_DESC(LM_CTRL_MACHINE_FIELD_STEAM, steam_level),
+  LM_CTRL_MACHINE_VALUE_FIELD_BOOL_DESC(LM_CTRL_MACHINE_FIELD_STANDBY, standby_on),
+  LM_CTRL_MACHINE_VALUE_FIELD_ENUM_DESC(LM_CTRL_MACHINE_FIELD_BBW_MODE, bbw_mode),
+  LM_CTRL_MACHINE_VALUE_FIELD_FLOAT_DESC(LM_CTRL_MACHINE_FIELD_BBW_DOSE_1, bbw_dose_1_g),
+  LM_CTRL_MACHINE_VALUE_FIELD_FLOAT_DESC(LM_CTRL_MACHINE_FIELD_BBW_DOSE_2, bbw_dose_2_g),
+};
+
+#define LM_CTRL_ARRAY_LEN(array_) (sizeof(array_) / sizeof((array_)[0]))
+
 lm_ctrl_machine_link_state_t s_link = {
   .conn_handle = BLE_HS_CONN_HANDLE_NONE,
 };
 lm_ctrl_pending_cloud_command_t s_pending_cloud_commands[LM_CTRL_MACHINE_MAX_PENDING_CLOUD_COMMANDS];
 lm_ctrl_machine_link_deps_t s_deps = {0};
 portMUX_TYPE s_link_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static bool machine_value_field_equal(
+  const lm_ctrl_machine_value_field_desc_t *field,
+  const ctrl_values_t *lhs,
+  const ctrl_values_t *rhs
+) {
+  const uint8_t *lhs_bytes = (const uint8_t *)lhs;
+  const uint8_t *rhs_bytes = (const uint8_t *)rhs;
+
+  if (field == NULL || lhs == NULL || rhs == NULL) {
+    return false;
+  }
+
+  switch (field->kind) {
+    case LM_CTRL_MACHINE_VALUE_FIELD_FLOAT:
+      return approx_equal(
+        *(const float *)(lhs_bytes + field->offset),
+        *(const float *)(rhs_bytes + field->offset)
+      );
+    case LM_CTRL_MACHINE_VALUE_FIELD_BOOL:
+      return *(const bool *)(lhs_bytes + field->offset) == *(const bool *)(rhs_bytes + field->offset);
+    case LM_CTRL_MACHINE_VALUE_FIELD_ENUM:
+      return *(const int *)(const void *)(lhs_bytes + field->offset) ==
+             *(const int *)(const void *)(rhs_bytes + field->offset);
+    default:
+      return false;
+  }
+}
+
+static void machine_value_field_copy(
+  const lm_ctrl_machine_value_field_desc_t *field,
+  ctrl_values_t *dst,
+  const ctrl_values_t *src
+) {
+  uint8_t *dst_bytes = (uint8_t *)dst;
+  const uint8_t *src_bytes = (const uint8_t *)src;
+
+  if (field == NULL || dst == NULL || src == NULL) {
+    return;
+  }
+
+  switch (field->kind) {
+    case LM_CTRL_MACHINE_VALUE_FIELD_FLOAT:
+      *(float *)(dst_bytes + field->offset) = *(const float *)(src_bytes + field->offset);
+      break;
+    case LM_CTRL_MACHINE_VALUE_FIELD_BOOL:
+      *(bool *)(dst_bytes + field->offset) = *(const bool *)(src_bytes + field->offset);
+      break;
+    case LM_CTRL_MACHINE_VALUE_FIELD_ENUM:
+      *(int *)(void *)(dst_bytes + field->offset) = *(const int *)(const void *)(src_bytes + field->offset);
+      break;
+    default:
+      break;
+  }
+}
+
+static bool machine_value_field_copy_if_changed(
+  const lm_ctrl_machine_value_field_desc_t *field,
+  ctrl_values_t *dst,
+  const ctrl_values_t *src
+) {
+  if (field == NULL || dst == NULL || src == NULL || machine_value_field_equal(field, dst, src)) {
+    return false;
+  }
+
+  machine_value_field_copy(field, dst, src);
+  return true;
+}
+
+static bool should_accept_remote_field_locked(
+  const lm_ctrl_machine_value_field_desc_t *field,
+  const ctrl_values_t *incoming_values
+) {
+  const uint32_t protected_mask = s_link.pending_mask | s_link.inflight_cloud_mask;
+
+  if (field == NULL || incoming_values == NULL) {
+    return false;
+  }
+  if ((protected_mask & field->field_mask) == 0) {
+    return true;
+  }
+
+  return machine_value_field_equal(field, &s_link.desired_values, incoming_values);
+}
 
 static bool heat_info_equal(const lm_ctrl_machine_heat_info_t *lhs, const lm_ctrl_machine_heat_info_t *rhs) {
   if (lhs == NULL || rhs == NULL) {
@@ -175,37 +291,13 @@ void mark_field_complete(uint32_t field_mask, const ctrl_values_t *sent_values) 
   bool needs_wakeup = false;
 
   portENTER_CRITICAL(&s_link_lock);
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_TEMPERATURE) != 0 &&
-      approx_equal(s_link.desired_values.temperature_c, sent_values->temperature_c)) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_TEMPERATURE;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0 &&
-      s_link.desired_values.steam_level == sent_values->steam_level) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_STEAM;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0 &&
-      s_link.desired_values.standby_on == sent_values->standby_on) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_STANDBY;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_INFUSE) != 0 &&
-      approx_equal(s_link.desired_values.infuse_s, sent_values->infuse_s)) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_INFUSE;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_PAUSE) != 0 &&
-      approx_equal(s_link.desired_values.pause_s, sent_values->pause_s)) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_PAUSE;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_BBW_MODE) != 0 &&
-      s_link.desired_values.bbw_mode == sent_values->bbw_mode) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_BBW_MODE;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_BBW_DOSE_1) != 0 &&
-      approx_equal(s_link.desired_values.bbw_dose_1_g, sent_values->bbw_dose_1_g)) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_BBW_DOSE_1;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_BBW_DOSE_2) != 0 &&
-      approx_equal(s_link.desired_values.bbw_dose_2_g, sent_values->bbw_dose_2_g)) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_BBW_DOSE_2;
+  for (size_t i = 0; i < LM_CTRL_ARRAY_LEN(s_machine_value_fields); ++i) {
+    const lm_ctrl_machine_value_field_desc_t *field = &s_machine_value_fields[i];
+
+    if ((field_mask & field->field_mask) != 0 &&
+        machine_value_field_equal(field, &s_link.desired_values, sent_values)) {
+      s_link.pending_mask &= ~field->field_mask;
+    }
   }
   needs_wakeup = s_link.pending_mask != 0;
   portEXIT_CRITICAL(&s_link_lock);
@@ -226,111 +318,18 @@ void apply_values_to_reported_locked(const ctrl_values_t *values, uint32_t field
     return;
   }
 
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_TEMPERATURE) != 0 &&
-      !approx_equal(s_link.reported_values.temperature_c, values->temperature_c)) {
-    s_link.reported_values.temperature_c = values->temperature_c;
-    *changed = true;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_INFUSE) != 0 &&
-      !approx_equal(s_link.reported_values.infuse_s, values->infuse_s)) {
-    s_link.reported_values.infuse_s = values->infuse_s;
-    *changed = true;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_PAUSE) != 0 &&
-      !approx_equal(s_link.reported_values.pause_s, values->pause_s)) {
-    s_link.reported_values.pause_s = values->pause_s;
-    *changed = true;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0 &&
-      s_link.reported_values.steam_level != values->steam_level) {
-    s_link.reported_values.steam_level = values->steam_level;
-    *changed = true;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0 &&
-      s_link.reported_values.standby_on != values->standby_on) {
-    s_link.reported_values.standby_on = values->standby_on;
-    *changed = true;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_BBW_MODE) != 0 &&
-      s_link.reported_values.bbw_mode != values->bbw_mode) {
-    s_link.reported_values.bbw_mode = values->bbw_mode;
-    *changed = true;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_BBW_DOSE_1) != 0 &&
-      !approx_equal(s_link.reported_values.bbw_dose_1_g, values->bbw_dose_1_g)) {
-    s_link.reported_values.bbw_dose_1_g = values->bbw_dose_1_g;
-    *changed = true;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_BBW_DOSE_2) != 0 &&
-      !approx_equal(s_link.reported_values.bbw_dose_2_g, values->bbw_dose_2_g)) {
-    s_link.reported_values.bbw_dose_2_g = values->bbw_dose_2_g;
-    *changed = true;
+  for (size_t i = 0; i < LM_CTRL_ARRAY_LEN(s_machine_value_fields); ++i) {
+    const lm_ctrl_machine_value_field_desc_t *field = &s_machine_value_fields[i];
+
+    if ((field_mask & field->field_mask) != 0 &&
+        machine_value_field_copy_if_changed(field, &s_link.reported_values, values)) {
+      *changed = true;
+    }
   }
   if ((s_link.loaded_mask & field_mask) != field_mask) {
     s_link.loaded_mask |= field_mask;
     *changed = true;
   }
-}
-
-static bool should_accept_remote_float_locked(uint32_t field_mask, float incoming_value) {
-  const uint32_t protected_mask = s_link.pending_mask | s_link.inflight_cloud_mask;
-
-  if ((protected_mask & field_mask) == 0) {
-    return true;
-  }
-
-  switch (field_mask) {
-    case LM_CTRL_MACHINE_FIELD_TEMPERATURE:
-      return approx_equal(s_link.desired_values.temperature_c, incoming_value);
-    case LM_CTRL_MACHINE_FIELD_INFUSE:
-      return approx_equal(s_link.desired_values.infuse_s, incoming_value);
-    case LM_CTRL_MACHINE_FIELD_PAUSE:
-      return approx_equal(s_link.desired_values.pause_s, incoming_value);
-    case LM_CTRL_MACHINE_FIELD_BBW_DOSE_1:
-      return approx_equal(s_link.desired_values.bbw_dose_1_g, incoming_value);
-    case LM_CTRL_MACHINE_FIELD_BBW_DOSE_2:
-      return approx_equal(s_link.desired_values.bbw_dose_2_g, incoming_value);
-    default:
-      return true;
-  }
-}
-
-static bool should_accept_remote_bool_locked(uint32_t field_mask, bool incoming_value) {
-  const uint32_t protected_mask = s_link.pending_mask | s_link.inflight_cloud_mask;
-
-  if ((protected_mask & field_mask) == 0) {
-    return true;
-  }
-
-  switch (field_mask) {
-    case LM_CTRL_MACHINE_FIELD_STANDBY:
-      return s_link.desired_values.standby_on == incoming_value;
-    default:
-      return true;
-  }
-}
-
-static bool should_accept_remote_steam_locked(ctrl_steam_level_t incoming_level) {
-  const uint32_t protected_mask = s_link.pending_mask | s_link.inflight_cloud_mask;
-
-  if ((protected_mask & LM_CTRL_MACHINE_FIELD_STEAM) == 0) {
-    return true;
-  }
-
-  return s_link.desired_values.steam_level == incoming_level;
-}
-
-static bool should_accept_remote_int_locked(uint32_t field_mask, int incoming_value) {
-  const uint32_t protected_mask = s_link.pending_mask | s_link.inflight_cloud_mask;
-
-  if ((protected_mask & field_mask) == 0) {
-    return true;
-  }
-
-  if (field_mask == LM_CTRL_MACHINE_FIELD_BBW_MODE) {
-    return (int)s_link.desired_values.bbw_mode == incoming_value;
-  }
-  return true;
 }
 
 void mark_fields_inflight(uint32_t field_mask, const ctrl_values_t *sent_values) {
@@ -341,61 +340,16 @@ void mark_fields_inflight(uint32_t field_mask, const ctrl_values_t *sent_values)
   }
 
   portENTER_CRITICAL(&s_link_lock);
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_TEMPERATURE) != 0 &&
-      (s_link.pending_mask & LM_CTRL_MACHINE_FIELD_TEMPERATURE) != 0 &&
-      approx_equal(s_link.desired_values.temperature_c, sent_values->temperature_c)) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_TEMPERATURE;
-    s_link.inflight_cloud_mask |= LM_CTRL_MACHINE_FIELD_TEMPERATURE;
-    changed = true;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0 &&
-      (s_link.pending_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0 &&
-      s_link.desired_values.steam_level == sent_values->steam_level) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_STEAM;
-    s_link.inflight_cloud_mask |= LM_CTRL_MACHINE_FIELD_STEAM;
-    changed = true;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0 &&
-      (s_link.pending_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0 &&
-      s_link.desired_values.standby_on == sent_values->standby_on) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_STANDBY;
-    s_link.inflight_cloud_mask |= LM_CTRL_MACHINE_FIELD_STANDBY;
-    changed = true;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_INFUSE) != 0 &&
-      (s_link.pending_mask & LM_CTRL_MACHINE_FIELD_INFUSE) != 0 &&
-      approx_equal(s_link.desired_values.infuse_s, sent_values->infuse_s)) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_INFUSE;
-    s_link.inflight_cloud_mask |= LM_CTRL_MACHINE_FIELD_INFUSE;
-    changed = true;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_PAUSE) != 0 &&
-      (s_link.pending_mask & LM_CTRL_MACHINE_FIELD_PAUSE) != 0 &&
-      approx_equal(s_link.desired_values.pause_s, sent_values->pause_s)) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_PAUSE;
-    s_link.inflight_cloud_mask |= LM_CTRL_MACHINE_FIELD_PAUSE;
-    changed = true;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_BBW_MODE) != 0 &&
-      (s_link.pending_mask & LM_CTRL_MACHINE_FIELD_BBW_MODE) != 0 &&
-      s_link.desired_values.bbw_mode == sent_values->bbw_mode) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_BBW_MODE;
-    s_link.inflight_cloud_mask |= LM_CTRL_MACHINE_FIELD_BBW_MODE;
-    changed = true;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_BBW_DOSE_1) != 0 &&
-      (s_link.pending_mask & LM_CTRL_MACHINE_FIELD_BBW_DOSE_1) != 0 &&
-      approx_equal(s_link.desired_values.bbw_dose_1_g, sent_values->bbw_dose_1_g)) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_BBW_DOSE_1;
-    s_link.inflight_cloud_mask |= LM_CTRL_MACHINE_FIELD_BBW_DOSE_1;
-    changed = true;
-  }
-  if ((field_mask & LM_CTRL_MACHINE_FIELD_BBW_DOSE_2) != 0 &&
-      (s_link.pending_mask & LM_CTRL_MACHINE_FIELD_BBW_DOSE_2) != 0 &&
-      approx_equal(s_link.desired_values.bbw_dose_2_g, sent_values->bbw_dose_2_g)) {
-    s_link.pending_mask &= ~LM_CTRL_MACHINE_FIELD_BBW_DOSE_2;
-    s_link.inflight_cloud_mask |= LM_CTRL_MACHINE_FIELD_BBW_DOSE_2;
-    changed = true;
+  for (size_t i = 0; i < LM_CTRL_ARRAY_LEN(s_machine_value_fields); ++i) {
+    const lm_ctrl_machine_value_field_desc_t *field = &s_machine_value_fields[i];
+
+    if ((field_mask & field->field_mask) != 0 &&
+        (s_link.pending_mask & field->field_mask) != 0 &&
+        machine_value_field_equal(field, &s_link.desired_values, sent_values)) {
+      s_link.pending_mask &= ~field->field_mask;
+      s_link.inflight_cloud_mask |= field->field_mask;
+      changed = true;
+    }
   }
   if (changed) {
     s_link.status_version++;
@@ -483,79 +437,23 @@ void update_reported_values(const ctrl_values_t *values, uint32_t loaded_mask) {
   }
 
   portENTER_CRITICAL(&s_link_lock);
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_TEMPERATURE) != 0) {
-    s_link.remote_values.temperature_c = values->temperature_c;
-  }
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_INFUSE) != 0) {
-    s_link.remote_values.infuse_s = values->infuse_s;
-  }
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_PAUSE) != 0) {
-    s_link.remote_values.pause_s = values->pause_s;
-  }
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0) {
-    s_link.remote_values.steam_level = values->steam_level;
-  }
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0) {
-    s_link.remote_values.standby_on = values->standby_on;
-  }
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_BBW_MODE) != 0) {
-    s_link.remote_values.bbw_mode = values->bbw_mode;
-  }
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_BBW_DOSE_1) != 0) {
-    s_link.remote_values.bbw_dose_1_g = values->bbw_dose_1_g;
-  }
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_BBW_DOSE_2) != 0) {
-    s_link.remote_values.bbw_dose_2_g = values->bbw_dose_2_g;
+  for (size_t i = 0; i < LM_CTRL_ARRAY_LEN(s_machine_value_fields); ++i) {
+    const lm_ctrl_machine_value_field_desc_t *field = &s_machine_value_fields[i];
+
+    if ((loaded_mask & field->field_mask) != 0) {
+      machine_value_field_copy(field, &s_link.remote_values, values);
+    }
   }
   s_link.remote_loaded_mask |= loaded_mask;
 
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_TEMPERATURE) != 0 &&
-      should_accept_remote_float_locked(LM_CTRL_MACHINE_FIELD_TEMPERATURE, values->temperature_c) &&
-      !approx_equal(s_link.reported_values.temperature_c, values->temperature_c)) {
-    s_link.reported_values.temperature_c = values->temperature_c;
-    changed = true;
-  }
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_INFUSE) != 0 &&
-      should_accept_remote_float_locked(LM_CTRL_MACHINE_FIELD_INFUSE, values->infuse_s) &&
-      !approx_equal(s_link.reported_values.infuse_s, values->infuse_s)) {
-    s_link.reported_values.infuse_s = values->infuse_s;
-    changed = true;
-  }
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_PAUSE) != 0 &&
-      should_accept_remote_float_locked(LM_CTRL_MACHINE_FIELD_PAUSE, values->pause_s) &&
-      !approx_equal(s_link.reported_values.pause_s, values->pause_s)) {
-    s_link.reported_values.pause_s = values->pause_s;
-    changed = true;
-  }
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_STEAM) != 0 &&
-      should_accept_remote_steam_locked(values->steam_level) &&
-      s_link.reported_values.steam_level != values->steam_level) {
-    s_link.reported_values.steam_level = values->steam_level;
-    changed = true;
-  }
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_STANDBY) != 0 &&
-      should_accept_remote_bool_locked(LM_CTRL_MACHINE_FIELD_STANDBY, values->standby_on) &&
-      s_link.reported_values.standby_on != values->standby_on) {
-    s_link.reported_values.standby_on = values->standby_on;
-    changed = true;
-  }
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_BBW_MODE) != 0 &&
-      should_accept_remote_int_locked(LM_CTRL_MACHINE_FIELD_BBW_MODE, (int)values->bbw_mode) &&
-      s_link.reported_values.bbw_mode != values->bbw_mode) {
-    s_link.reported_values.bbw_mode = values->bbw_mode;
-    changed = true;
-  }
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_BBW_DOSE_1) != 0 &&
-      should_accept_remote_float_locked(LM_CTRL_MACHINE_FIELD_BBW_DOSE_1, values->bbw_dose_1_g) &&
-      !approx_equal(s_link.reported_values.bbw_dose_1_g, values->bbw_dose_1_g)) {
-    s_link.reported_values.bbw_dose_1_g = values->bbw_dose_1_g;
-    changed = true;
-  }
-  if ((loaded_mask & LM_CTRL_MACHINE_FIELD_BBW_DOSE_2) != 0 &&
-      should_accept_remote_float_locked(LM_CTRL_MACHINE_FIELD_BBW_DOSE_2, values->bbw_dose_2_g) &&
-      !approx_equal(s_link.reported_values.bbw_dose_2_g, values->bbw_dose_2_g)) {
-    s_link.reported_values.bbw_dose_2_g = values->bbw_dose_2_g;
-    changed = true;
+  for (size_t i = 0; i < LM_CTRL_ARRAY_LEN(s_machine_value_fields); ++i) {
+    const lm_ctrl_machine_value_field_desc_t *field = &s_machine_value_fields[i];
+
+    if ((loaded_mask & field->field_mask) != 0 &&
+        should_accept_remote_field_locked(field, values) &&
+        machine_value_field_copy_if_changed(field, &s_link.reported_values, values)) {
+      changed = true;
+    }
   }
   if ((s_link.loaded_mask & loaded_mask) != loaded_mask) {
     s_link.loaded_mask |= loaded_mask;

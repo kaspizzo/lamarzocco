@@ -6,6 +6,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_lv_adapter.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
@@ -21,14 +22,23 @@
 #include "wifi_setup.h"
 
 static const char *TAG = "lm_ctrl";
+static const int64_t LM_CTRL_RUNTIME_TICK_INTERVAL_US = 100LL * 1000LL;
 
-static bool push_ui_event(QueueHandle_t queue, lm_ctrl_input_event_type_t type, ctrl_focus_t focus, int delta_steps) {
+static bool push_runtime_event(QueueHandle_t queue, lm_ctrl_input_event_type_t type, ctrl_focus_t focus, int delta_steps) {
   const lm_ctrl_input_event_t event = {
     .type = type,
     .delta_steps = delta_steps,
     .focus = focus,
   };
   return xQueueSend(queue, &event, 0) == pdTRUE;
+}
+
+static void runtime_tick_timer_cb(void *arg) {
+  QueueHandle_t queue = (QueueHandle_t)arg;
+
+  if (!push_runtime_event(queue, LM_CTRL_EVENT_RUNTIME_TICK, CTRL_FOCUS_TEMPERATURE, 0)) {
+    ESP_LOGW(TAG, "Runtime tick queue full, dropping timer wakeup");
+  }
 }
 
 static void ui_action_cb(lm_ctrl_ui_action_t action, ctrl_focus_t focus, void *user_data) {
@@ -73,7 +83,7 @@ static void ui_action_cb(lm_ctrl_ui_action_t action, ctrl_focus_t focus, void *u
       return;
   }
 
-  if (!push_ui_event(queue, event_type, focus, 0)) {
+  if (!push_runtime_event(queue, event_type, focus, 0)) {
     ESP_LOGW(TAG, "UI event queue full, dropping touch action=%d", (int)action);
   }
 }
@@ -108,6 +118,7 @@ void app_main(void) {
   lm_ctrl_ui_view_t ui_view = {0};
   lv_disp_t *display = NULL;
   QueueHandle_t input_queue = NULL;
+  esp_timer_handle_t runtime_tick_timer = NULL;
   const lm_ctrl_machine_link_deps_t machine_link_deps = {
     .get_machine_binding = machine_link_get_binding,
     .execute_cloud_command = machine_link_execute_cloud_command,
@@ -115,7 +126,7 @@ void app_main(void) {
   };
   ESP_LOGI(TAG, "La Marzocco controller firmware starting");
 
-  input_queue = xQueueCreate(16, sizeof(lm_ctrl_input_event_t));
+  input_queue = xQueueCreate(32, sizeof(lm_ctrl_input_event_t));
   if (input_queue == NULL) {
     ESP_LOGE(TAG, "Failed to allocate input queue");
     return;
@@ -144,12 +155,34 @@ void app_main(void) {
   esp_lv_adapter_unlock();
 
   ESP_ERROR_CHECK(lm_ctrl_input_init(input_queue));
+  {
+    const esp_timer_create_args_t runtime_tick_timer_args = {
+      .callback = runtime_tick_timer_cb,
+      .dispatch_method = ESP_TIMER_TASK,
+      .name = "lm_runtime_tick",
+      .arg = input_queue,
+    };
 
+    ESP_ERROR_CHECK(esp_timer_create(&runtime_tick_timer_args, &runtime_tick_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(runtime_tick_timer, LM_CTRL_RUNTIME_TICK_INTERVAL_US));
+  }
+
+  /*
+   * The main task now blocks on the shared controller event queue instead of
+   * waking every 200 ms on a fixed receive timeout. Touch/encoder input
+   * already arrives as explicit events, and this periodic runtime timer injects
+   * a small internal tick event so async status-version checks, time-based UI
+   * state, and LED updates stay responsive without a coarse poll loop.
+   */
   while (1) {
     lm_ctrl_input_event_t event;
     bool needs_render = false;
 
-    if (xQueueReceive(input_queue, &event, pdMS_TO_TICKS(200)) == pdTRUE) {
+    if (xQueueReceive(input_queue, &event, portMAX_DELAY) != pdTRUE) {
+      continue;
+    }
+
+    if (event.type != LM_CTRL_EVENT_RUNTIME_TICK) {
       lm_ctrl_runtime_handle_input_event(&runtime, &event, &needs_render);
     }
 

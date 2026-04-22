@@ -19,6 +19,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "lm_ctrl_secure_utils.h"
 #include "mbedtls/base64.h"
 #include "mbedtls/pk.h"
 #include "mbedtls/private/sha256.h"
@@ -109,32 +110,6 @@ static bool parse_http_date_epoch_ms(const char *value, int64_t *epoch_ms) {
   days = days_from_civil(year, (unsigned int)month, (unsigned int)day);
   *epoch_ms = (days * 86400LL + (int64_t)hour * 3600LL + (int64_t)minute * 60LL + (int64_t)second) * 1000LL;
   return true;
-}
-
-static void copy_text(char *dst, size_t dst_size, const char *src) {
-  size_t len;
-
-  if (dst == NULL || dst_size == 0) {
-    return;
-  }
-
-  if (src == NULL) {
-    dst[0] = '\0';
-    return;
-  }
-
-  len = strnlen(src, dst_size - 1);
-  memcpy(dst, src, len);
-  dst[len] = '\0';
-}
-
-static void secure_zero(void *ptr, size_t len) {
-  volatile uint8_t *cursor = (volatile uint8_t *)ptr;
-
-  while (cursor != NULL && len > 0) {
-    *cursor++ = 0;
-    --len;
-  }
 }
 
 static esp_err_t sha256_bytes(const uint8_t *data, size_t data_len, uint8_t output[32]) {
@@ -320,17 +295,32 @@ exit:
 static esp_err_t http_buffer_append(lm_ctrl_http_buffer_t *buffer, const char *data, size_t data_len) {
   char *new_data;
   size_t required;
+  const size_t max_capacity = LM_CTRL_CLOUD_HTTP_RESPONSE_BODY_CAP + 1U;
 
   if (buffer == NULL || data == NULL || data_len == 0) {
     return ESP_OK;
+  }
+
+  if (buffer->len > LM_CTRL_CLOUD_HTTP_RESPONSE_BODY_CAP ||
+      data_len > LM_CTRL_CLOUD_HTTP_RESPONSE_BODY_CAP - buffer->len) {
+    buffer->append_error = ESP_ERR_NO_MEM;
+    return ESP_ERR_NO_MEM;
   }
 
   required = buffer->len + data_len + 1;
   if (required > buffer->capacity) {
     size_t new_capacity = buffer->capacity == 0 ? 512 : buffer->capacity;
 
-    while (new_capacity < required) {
+    while (new_capacity < required && new_capacity < max_capacity) {
       new_capacity *= 2;
+      if (new_capacity > max_capacity) {
+        new_capacity = max_capacity;
+      }
+    }
+
+    if (new_capacity < required) {
+      buffer->append_error = ESP_ERR_NO_MEM;
+      return ESP_ERR_NO_MEM;
     }
 
     new_data = realloc(buffer->data, new_capacity);
@@ -591,6 +581,9 @@ esp_err_t lm_ctrl_cloud_build_signed_request_headers(
     random_bytes[8], random_bytes[9],
     random_bytes[10], random_bytes[11], random_bytes[12], random_bytes[13], random_bytes[14], random_bytes[15]
   );
+  // Keep the cloud request timestamp monotonic and uptime-based. The backend
+  // uses it as a freshness token, so this path intentionally avoids depending
+  // on RTC or wall-clock sync during setup and early boot.
   snprintf(timestamp, timestamp_size, "%llu", (unsigned long long)(esp_timer_get_time() / 1000ULL));
   snprintf(proof_input, sizeof(proof_input), "%s.%s.%s", installation->installation_id, nonce, timestamp);
   err = lm_ctrl_cloud_generate_request_proof_text(proof_input, installation->secret, request_proof, sizeof(request_proof));

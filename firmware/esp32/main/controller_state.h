@@ -57,6 +57,60 @@ typedef enum {
   CTRL_LANGUAGE_DE,
 } ctrl_language_t;
 
+/** Stable string keys for translated on-device UI and status text. */
+typedef enum {
+  CTRL_TEXT_FOCUS_TEMPERATURE = 0,
+  CTRL_TEXT_FOCUS_INFUSE,
+  CTRL_TEXT_FOCUS_PAUSE,
+  CTRL_TEXT_FOCUS_STEAM,
+  CTRL_TEXT_STATUS,
+  CTRL_TEXT_FOCUS_BBW,
+  CTRL_TEXT_FOCUS_BBW_DOSE_1,
+  CTRL_TEXT_FOCUS_BBW_DOSE_2,
+  CTRL_TEXT_PREBREWING,
+  CTRL_TEXT_SETTING,
+  CTRL_TEXT_BBW_MODE_DOSE_1,
+  CTRL_TEXT_BBW_MODE_DOSE_2,
+  CTRL_TEXT_BBW_MODE_CONTINUOUS,
+  CTRL_TEXT_STATUS_FIELD_UPDATED_FMT,
+  CTRL_TEXT_STATUS_PRESET_LOADED_FMT,
+  CTRL_TEXT_STATUS_PRESET_SAVED_FMT,
+  CTRL_TEXT_STATUS_SETUP_LOADING,
+  CTRL_TEXT_STATUS_CLEAR_WEB_PASSWORD,
+  CTRL_TEXT_STATUS_RESET_NETWORK,
+  CTRL_TEXT_LOADING_CLOUD_VALUES,
+  CTRL_TEXT_LOADING_MACHINE_VALUES,
+  CTRL_TEXT_MACHINE_OFFLINE_CLOUD_VALUES,
+  CTRL_TEXT_MACHINE_UNREACHABLE,
+  CTRL_TEXT_NO_WATER_HINT,
+  CTRL_TEXT_HINT_TEMPERATURE,
+  CTRL_TEXT_HINT_INFUSE,
+  CTRL_TEXT_HINT_PAUSE,
+  CTRL_TEXT_HINT_HEATING_READY_FMT,
+  CTRL_TEXT_HINT_STEAM_DIRECT,
+  CTRL_TEXT_ON,
+  CTRL_TEXT_HINT_STATUS_DIRECT,
+  CTRL_TEXT_HINT_BBW_MODE,
+  CTRL_TEXT_HINT_BBW_DOSE_1,
+  CTRL_TEXT_HINT_BBW_DOSE_2,
+  CTRL_TEXT_PRESET_BODY_WITH_BBW_FMT,
+  CTRL_TEXT_PRESET_BODY_BASIC_FMT,
+  CTRL_TEXT_SHOT_TIMER_TITLE,
+  CTRL_TEXT_LOAD,
+  CTRL_TEXT_SAVE,
+  CTRL_TEXT_SETUP_PORTAL_STARTING,
+  CTRL_TEXT_RESET,
+  CTRL_TEXT_RECOVERY_ARM_OPEN,
+  CTRL_TEXT_RECOVERY_ARM_CANCEL,
+  CTRL_TEXT_RECOVERY,
+  CTRL_TEXT_CLEAR_WEB_PASSWORD_ACTION,
+  CTRL_TEXT_RESET_NETWORK_ACTION,
+  CTRL_TEXT_RECOVERY_PICK_ACTION,
+  CTRL_TEXT_BACK,
+  CTRL_TEXT_RUN,
+  CTRL_TEXT_COUNT,
+} ctrl_text_key_t;
+
 /** High-level UI screens shown on the controller. */
 typedef enum {
   CTRL_SCREEN_MAIN = 0,
@@ -175,8 +229,14 @@ bool ctrl_state_value_matches_step(float value, float min_value, float max_value
 const char *ctrl_focus_name(ctrl_focus_t focus);
 /** Human-readable name for a focus field in the selected controller language. */
 const char *ctrl_focus_name_for_language(ctrl_focus_t focus, ctrl_language_t language);
+/** Page title shown for the active main-screen focus in the selected controller language. */
+const char *ctrl_focus_page_title(ctrl_focus_t focus, ctrl_language_t language);
 /** Human-readable name for a brew by weight mode in the selected controller language. */
 const char *ctrl_bbw_mode_name(ctrl_bbw_mode_t mode, ctrl_language_t language);
+/** Human-readable label for a recovery action in the selected controller language. */
+const char *ctrl_recovery_action_name(ctrl_recovery_action_t action, ctrl_language_t language);
+/** Translated fixed UI/status string for the selected controller language. */
+const char *ctrl_text(ctrl_text_key_t key, ctrl_language_t language);
 /** Clamp a raw steam level into the supported controller range. */
 ctrl_steam_level_t ctrl_steam_level_normalize(ctrl_steam_level_t level);
 /** Report whether the steam boiler should be enabled for the given level. */
