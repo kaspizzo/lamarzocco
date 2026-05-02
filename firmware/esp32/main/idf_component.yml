@@ -10,4 +10,4 @@ dependencies:
   espressif/cjson: ^1.7.19~1
   espressif/mdns: ^1.10.1
   espressif/led_strip: ^3.0.1
-  espressif/esp_websocket_client: ^1.2.2
+  espressif/esp_websocket_client: ">=1.2.2,<1.6.0"

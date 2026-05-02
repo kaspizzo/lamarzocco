@@ -22,7 +22,21 @@
 #include "lm_ctrl_secure_utils.h"
 #include "mbedtls/base64.h"
 #include "mbedtls/pk.h"
+#if defined(__has_include)
+#if __has_include("mbedtls/build_info.h")
+#include "mbedtls/build_info.h"
+#endif
+#if __has_include("mbedtls/sha256.h")
+#include "mbedtls/sha256.h"
+#else
 #include "mbedtls/private/sha256.h"
+#endif
+#else
+#include "mbedtls/sha256.h"
+#endif
+#if defined(MBEDTLS_VERSION_MAJOR) && MBEDTLS_VERSION_MAJOR == 3
+#include "mbedtls/ecp.h"
+#endif
 #include "machine_link_types.h"
 #include "psa/crypto.h"
 
@@ -118,6 +132,100 @@ static esp_err_t sha256_bytes(const uint8_t *data, size_t data_len, uint8_t outp
   }
 
   return mbedtls_sha256(data, data_len, output, 0) == 0 ? ESP_OK : ESP_FAIL;
+}
+
+#if defined(MBEDTLS_VERSION_MAJOR) && MBEDTLS_VERSION_MAJOR == 3
+static int mbedtls_rng_fill(void *ctx, unsigned char *output, size_t output_len) {
+  (void)ctx;
+
+  if (output == NULL) {
+    return -1;
+  }
+
+  esp_fill_random(output, output_len);
+  return 0;
+}
+#endif
+
+static int parse_private_key_der(mbedtls_pk_context *pk, const uint8_t *private_key_der, size_t private_key_der_len) {
+#if defined(MBEDTLS_VERSION_MAJOR) && MBEDTLS_VERSION_MAJOR == 3
+  return mbedtls_pk_parse_key(pk, private_key_der, private_key_der_len, NULL, 0, mbedtls_rng_fill, NULL);
+#else
+  return mbedtls_pk_parse_key(pk, private_key_der, private_key_der_len, NULL, 0);
+#endif
+}
+
+static int sign_hash_der(
+  mbedtls_pk_context *pk,
+  const uint8_t hash[32],
+  unsigned char *signature_der,
+  size_t signature_der_size,
+  size_t *signature_der_len
+) {
+#if defined(MBEDTLS_VERSION_MAJOR) && MBEDTLS_VERSION_MAJOR == 3
+  return mbedtls_pk_sign(
+    pk,
+    MBEDTLS_MD_SHA256,
+    hash,
+    32,
+    signature_der,
+    signature_der_size,
+    signature_der_len,
+    mbedtls_rng_fill,
+    NULL
+  );
+#else
+  return mbedtls_pk_sign(
+    pk,
+    MBEDTLS_MD_SHA256,
+    hash,
+    32,
+    signature_der,
+    signature_der_size,
+    signature_der_len
+  );
+#endif
+}
+
+static esp_err_t generate_ec_key_pair(mbedtls_pk_context *pk, psa_key_id_t *key_id, psa_key_attributes_t *key_attributes) {
+#if defined(MBEDTLS_VERSION_MAJOR) && MBEDTLS_VERSION_MAJOR == 3
+  const mbedtls_pk_info_t *pk_info;
+
+  (void)key_id;
+  (void)key_attributes;
+
+  pk_info = mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY);
+  if (pk_info == NULL || mbedtls_pk_setup(pk, pk_info) != 0) {
+    return ESP_FAIL;
+  }
+  if (mbedtls_ecp_gen_key(MBEDTLS_ECP_DP_SECP256R1, mbedtls_pk_ec(*pk), mbedtls_rng_fill, NULL) != 0) {
+    return ESP_FAIL;
+  }
+
+  return ESP_OK;
+#else
+  psa_status_t psa_status = PSA_SUCCESS;
+
+  psa_status = psa_crypto_init();
+  if (psa_status != PSA_SUCCESS) {
+    return ESP_FAIL;
+  }
+
+  psa_set_key_usage_flags(key_attributes, PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_SIGN_HASH);
+  psa_set_key_algorithm(key_attributes, PSA_ALG_ECDSA(PSA_ALG_SHA_256));
+  psa_set_key_type(key_attributes, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+  psa_set_key_bits(key_attributes, 256);
+
+  psa_status = psa_generate_key(key_attributes, key_id);
+  if (psa_status != PSA_SUCCESS) {
+    return ESP_FAIL;
+  }
+  if (mbedtls_pk_wrap_psa(pk, *key_id) != 0) {
+    return ESP_FAIL;
+  }
+
+  return ESP_OK;
+#endif
 }
 
 static esp_err_t base64_encode_bytes(const uint8_t *data, size_t data_len, char *output, size_t output_size) {
@@ -224,7 +332,6 @@ esp_err_t lm_ctrl_cloud_generate_installation(lm_ctrl_cloud_installation_t *inst
   const unsigned char *public_key_ptr;
   int private_key_der_len = 0;
   int public_key_der_len = 0;
-  psa_status_t psa_status = PSA_SUCCESS;
   esp_err_t ret = ESP_FAIL;
 
   if (installation == NULL) {
@@ -234,24 +341,8 @@ esp_err_t lm_ctrl_cloud_generate_installation(lm_ctrl_cloud_installation_t *inst
   memset(installation, 0, sizeof(*installation));
   format_uuid_v4(installation->installation_id);
 
-  psa_status = psa_crypto_init();
-  if (psa_status != PSA_SUCCESS) {
-    ret = ESP_FAIL;
-    goto exit;
-  }
-
   mbedtls_pk_init(&pk);
-  psa_set_key_usage_flags(&key_attributes, PSA_KEY_USAGE_EXPORT | PSA_KEY_USAGE_SIGN_HASH);
-  psa_set_key_algorithm(&key_attributes, PSA_ALG_ECDSA(PSA_ALG_SHA_256));
-  psa_set_key_type(&key_attributes, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
-  psa_set_key_bits(&key_attributes, 256);
-
-  psa_status = psa_generate_key(&key_attributes, &key_id);
-  if (psa_status != PSA_SUCCESS) {
-    ret = ESP_FAIL;
-    goto exit;
-  }
-  if (mbedtls_pk_wrap_psa(&pk, key_id) != 0) {
+  if (generate_ec_key_pair(&pk, &key_id, &key_attributes) != ESP_OK) {
     ret = ESP_FAIL;
     goto exit;
   }
@@ -279,7 +370,9 @@ esp_err_t lm_ctrl_cloud_generate_installation(lm_ctrl_cloud_installation_t *inst
   );
 
 exit:
+#if !defined(MBEDTLS_VERSION_MAJOR) || MBEDTLS_VERSION_MAJOR != 3
   psa_reset_key_attributes(&key_attributes);
+#endif
   mbedtls_pk_free(&pk);
   if (key_id != 0) {
     (void)psa_destroy_key(key_id);
@@ -395,7 +488,7 @@ esp_err_t lm_ctrl_cloud_derive_installation_material(
   }
 
   mbedtls_pk_init(&pk);
-  if (mbedtls_pk_parse_key(&pk, private_key_der, private_key_der_len, NULL, 0) != 0) {
+  if (parse_private_key_der(&pk, private_key_der, private_key_der_len) != 0) {
     mbedtls_pk_free(&pk);
     return ESP_FAIL;
   }
@@ -598,19 +691,11 @@ esp_err_t lm_ctrl_cloud_build_signed_request_headers(
   }
 
   mbedtls_pk_init(&pk);
-  if (mbedtls_pk_parse_key(&pk, installation->private_key_der, installation->private_key_der_len, NULL, 0) != 0) {
+  if (parse_private_key_der(&pk, installation->private_key_der, installation->private_key_der_len) != 0) {
     mbedtls_pk_free(&pk);
     return ESP_FAIL;
   }
-  if (mbedtls_pk_sign(
-        &pk,
-        MBEDTLS_MD_SHA256,
-        signature_hash,
-        sizeof(signature_hash),
-        signature_der,
-        sizeof(signature_der),
-        &signature_der_len
-      ) != 0) {
+  if (sign_hash_der(&pk, signature_hash, signature_der, sizeof(signature_der), &signature_der_len) != 0) {
     mbedtls_pk_free(&pk);
     return ESP_FAIL;
   }
