@@ -24,7 +24,7 @@ This repository currently supports two documented flashing paths:
 If ESP-IDF is not installed yet on macOS or Linux:
 
 ```bash
-git clone -b v5.5 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf
+git clone -b release/v5.5 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf
 cd ~/esp/esp-idf
 ./install.sh esp32s3
 ```
@@ -124,7 +124,7 @@ If installing ESP-IDF from Git instead of the installer, clone the stable 5.5
 branch and export the environment before building:
 
 ```powershell
-git clone -b v5.5 --recursive https://github.com/espressif/esp-idf.git C:\esp-idf
+git clone -b release/v5.5 --recursive https://github.com/espressif/esp-idf.git C:\esp-idf
 cd C:\esp-idf
 .\install.ps1 esp32s3
 .\export.ps1

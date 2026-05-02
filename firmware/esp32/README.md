@@ -243,6 +243,8 @@ Additional module notes:
 
 The firmware requires ESP-IDF 5.5 or newer. ESP-IDF 5.4 is no longer supported
 because the managed component set requires `idf >=5.5.0`.
+The WebSocket component is constrained below 1.6.0 because the 1.6.x redirect
+support expects transport APIs that are not present in all ESP-IDF 5.5 installs.
 
 ### macOS / Linux
 
