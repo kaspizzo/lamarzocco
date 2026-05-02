@@ -14,7 +14,7 @@ This repository currently supports two documented flashing paths:
 - a USB data cable
 - Python 3.10 or newer
 - `git`
-- an installed ESP-IDF toolchain
+- ESP-IDF 5.5 or newer
 - the controller board connected over USB
 
 ## 2. macOS / Linux
@@ -24,9 +24,9 @@ This repository currently supports two documented flashing paths:
 If ESP-IDF is not installed yet on macOS or Linux:
 
 ```bash
-git clone --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf
+git clone -b v5.5 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf
 cd ~/esp/esp-idf
-./install.sh esp32,esp32s3
+./install.sh esp32s3
 ```
 
 In every new shell session, load the environment first:
@@ -108,13 +108,26 @@ The hook runs `./firmware/esp32/dev.sh test` from the repository root. On a fres
 
 On Windows, use Espressif's official installer and ESP-IDF terminal instead of `dev.sh`:
 
-- [ESP-IDF Windows setup](https://docs.espressif.com/projects/esp-idf/en/release-v5.4/esp32s3/get-started/windows-setup.html)
-- [ESP-IDF start project on Windows](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/windows-start-project.html)
+- [ESP-IDF Windows setup](https://docs.espressif.com/projects/esp-idf/en/release-v5.5/esp32s3/get-started/windows-setup.html)
+- [ESP-IDF start project on Windows](https://docs.espressif.com/projects/esp-idf/en/release-v5.5/esp32s3/get-started/windows-start-project.html)
 
 Use a project path without spaces, for example:
 
 ```text
 C:\dev\lamarzocco
+```
+
+The firmware component manifest requires ESP-IDF `>=5.5.0`. ESP-IDF 5.4 is no
+longer a supported build target for this repository.
+
+If installing ESP-IDF from Git instead of the installer, clone the stable 5.5
+branch and export the environment before building:
+
+```powershell
+git clone -b v5.5 --recursive https://github.com/espressif/esp-idf.git C:\esp-idf
+cd C:\esp-idf
+.\install.ps1 esp32s3
+.\export.ps1
 ```
 
 ### First flash

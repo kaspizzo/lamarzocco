@@ -241,6 +241,9 @@ Additional module notes:
 
 `dev.sh` is the local Bash helper for macOS/Linux. Native Windows flashing is documented through the standard ESP-IDF terminal flow in `docs/controller/FLASHING_CONTROLLER.md`.
 
+The firmware requires ESP-IDF 5.5 or newer. ESP-IDF 5.4 is no longer supported
+because the managed component set requires `idf >=5.5.0`.
+
 ### macOS / Linux
 
 ```bash
@@ -288,6 +291,7 @@ Use the native ESP-IDF Windows environment and flash with:
 ```powershell
 cd C:\dev\lamarzocco\firmware\esp32
 idf.py set-target esp32s3
+idf.py build
 idf.py -p COM5 flash monitor
 ```
 
