@@ -3,6 +3,14 @@
 #include "test_support.h"
 
 static char s_stub_web_password[64];
+static char s_stub_wifi_ssid[33];
+static char s_stub_wifi_password[65];
+static char s_stub_wifi_hostname[33];
+static ctrl_language_t s_stub_wifi_language;
+static int s_stub_wifi_store_count;
+static int s_stub_wifi_apply_count;
+static esp_err_t s_stub_wifi_store_ret;
+static esp_err_t s_stub_wifi_apply_ret;
 
 #include "../../../main/setup_portal_routes.c"
 
@@ -12,6 +20,14 @@ lv_img_dsc_t s_custom_logo_dsc;
 static void reset_route_test_state(void) {
   memset(&s_state, 0, sizeof(s_state));
   memset(s_stub_web_password, 0, sizeof(s_stub_web_password));
+  memset(s_stub_wifi_ssid, 0, sizeof(s_stub_wifi_ssid));
+  memset(s_stub_wifi_password, 0, sizeof(s_stub_wifi_password));
+  memset(s_stub_wifi_hostname, 0, sizeof(s_stub_wifi_hostname));
+  s_stub_wifi_language = CTRL_LANGUAGE_EN;
+  s_stub_wifi_store_count = 0;
+  s_stub_wifi_apply_count = 0;
+  s_stub_wifi_store_ret = ESP_OK;
+  s_stub_wifi_apply_ret = ESP_OK;
   s_state.web_auth_mode = LM_CTRL_WEB_AUTH_UNSET;
   strcpy(s_state.hostname, LM_CTRL_WIFI_DEFAULT_HOSTNAME);
 }
@@ -134,15 +150,17 @@ esp_err_t lm_ctrl_wifi_clear_controller_logo(void) {
 }
 
 esp_err_t lm_ctrl_wifi_store_credentials(const char *ssid, const char *password, const char *hostname, ctrl_language_t language) {
-  (void)ssid;
-  (void)password;
-  (void)hostname;
-  (void)language;
-  return ESP_OK;
+  s_stub_wifi_store_count++;
+  copy_text(s_stub_wifi_ssid, sizeof(s_stub_wifi_ssid), ssid);
+  copy_text(s_stub_wifi_password, sizeof(s_stub_wifi_password), password);
+  copy_text(s_stub_wifi_hostname, sizeof(s_stub_wifi_hostname), hostname);
+  s_stub_wifi_language = language;
+  return s_stub_wifi_store_ret;
 }
 
 esp_err_t lm_ctrl_wifi_apply_station_credentials(void) {
-  return ESP_OK;
+  s_stub_wifi_apply_count++;
+  return s_stub_wifi_apply_ret;
 }
 
 esp_err_t lm_ctrl_wifi_schedule_reboot(void) {
@@ -497,6 +515,56 @@ static int test_clearing_password_returns_portal_to_open_mode(void) {
   return 0;
 }
 
+static int test_wifi_post_stores_credentials_and_renders_success(void) {
+  httpd_req_t *req = test_httpd_request_create();
+
+  ASSERT_TRUE(req != NULL);
+  reset_route_test_state();
+  s_state.portal_running = true;
+  s_state.language = CTRL_LANGUAGE_DE;
+  copy_text(s_state.hostname, sizeof(s_state.hostname), "espresso");
+
+  test_httpd_request_set_uri(req, "/wifi");
+  ASSERT_EQ_INT(ESP_OK, test_httpd_request_set_body(req, "ssid=Home+Wifi&password=Secret123"));
+
+  ASSERT_EQ_INT(ESP_OK, handle_wifi_post(req));
+  ASSERT_EQ_INT(1, s_stub_wifi_store_count);
+  ASSERT_EQ_INT(1, s_stub_wifi_apply_count);
+  ASSERT_STREQ("Home Wifi", s_stub_wifi_ssid);
+  ASSERT_STREQ("Secret123", s_stub_wifi_password);
+  ASSERT_STREQ("espresso", s_stub_wifi_hostname);
+  ASSERT_EQ_INT(CTRL_LANGUAGE_DE, s_stub_wifi_language);
+  ASSERT_STREQ("text/html; charset=utf-8", test_httpd_request_type(req));
+  ASSERT_CONTAINS(test_httpd_request_body(req), "Saved. The controller is now trying to join the configured Wi-Fi.");
+
+  test_httpd_request_destroy(req);
+  return 0;
+}
+
+static int test_wifi_post_reuses_stored_password_for_same_ssid(void) {
+  httpd_req_t *req = test_httpd_request_create();
+
+  ASSERT_TRUE(req != NULL);
+  reset_route_test_state();
+  s_state.portal_running = true;
+  copy_text(s_state.sta_ssid, sizeof(s_state.sta_ssid), "HomeWifi");
+  copy_text(s_state.sta_password, sizeof(s_state.sta_password), "ExistingPass");
+  copy_text(s_state.hostname, sizeof(s_state.hostname), "espresso");
+
+  test_httpd_request_set_uri(req, "/wifi");
+  ASSERT_EQ_INT(ESP_OK, test_httpd_request_set_body(req, "ssid=HomeWifi&password="));
+
+  ASSERT_EQ_INT(ESP_OK, handle_wifi_post(req));
+  ASSERT_EQ_INT(1, s_stub_wifi_store_count);
+  ASSERT_EQ_INT(1, s_stub_wifi_apply_count);
+  ASSERT_STREQ("HomeWifi", s_stub_wifi_ssid);
+  ASSERT_STREQ("ExistingPass", s_stub_wifi_password);
+  ASSERT_CONTAINS(test_httpd_request_body(req), "Saved. The controller is now trying to join the configured Wi-Fi.");
+
+  test_httpd_request_destroy(req);
+  return 0;
+}
+
 static int test_http_server_start_uses_explicit_stack_budget(void) {
   const httpd_config_t *config = NULL;
 
@@ -521,6 +589,8 @@ int run_setup_portal_route_tests(void) {
   RUN_TEST(test_access_setup_post_with_password_renders_portal_and_sets_cookie);
   RUN_TEST(test_login_post_creates_usable_session_for_protected_post);
   RUN_TEST(test_clearing_password_returns_portal_to_open_mode);
+  RUN_TEST(test_wifi_post_stores_credentials_and_renders_success);
+  RUN_TEST(test_wifi_post_reuses_stored_password_for_same_ssid);
   RUN_TEST(test_http_server_start_uses_explicit_stack_budget);
   return 0;
 }

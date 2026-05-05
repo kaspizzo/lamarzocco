@@ -1,5 +1,6 @@
 #include "controller_settings.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
@@ -25,6 +26,19 @@ static void clear_web_admin_material_locked(void) {
   secure_zero(s_state.web_admin_salt, sizeof(s_state.web_admin_salt));
   secure_zero(s_state.web_admin_hash, sizeof(s_state.web_admin_hash));
   s_state.web_admin_iterations = 0;
+}
+
+static lm_ctrl_settings_snapshot_t *alloc_settings_snapshot(void) {
+  return calloc(1, sizeof(lm_ctrl_settings_snapshot_t));
+}
+
+static void free_settings_snapshot(lm_ctrl_settings_snapshot_t *snapshot) {
+  if (snapshot == NULL) {
+    return;
+  }
+
+  secure_zero(snapshot, sizeof(*snapshot));
+  free(snapshot);
 }
 
 static esp_err_t write_settings_snapshot_fields(
@@ -136,25 +150,31 @@ static esp_err_t persist_web_admin_hash_material(
   uint32_t iterations
 ) {
   nvs_handle_t handle = 0;
-  lm_ctrl_settings_snapshot_t snapshot = {0};
+  lm_ctrl_settings_snapshot_t *snapshot = NULL;
   esp_err_t ret;
 
   if (salt == NULL || hash == NULL || iterations == 0) {
     return ESP_ERR_INVALID_ARG;
   }
 
+  snapshot = alloc_settings_snapshot();
+  if (snapshot == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+
   ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
   if (ret != ESP_OK) {
+    free_settings_snapshot(snapshot);
     return ret;
   }
 
-  snapshot.present_mask = LM_CTRL_SETTINGS_WEB_AUTH_FIELDS;
-  snapshot.values.web_auth_mode = (uint8_t)LM_CTRL_WEB_AUTH_ENABLED;
-  memcpy(snapshot.values.web_auth_salt, salt, sizeof(snapshot.values.web_auth_salt));
-  memcpy(snapshot.values.web_auth_hash, hash, sizeof(snapshot.values.web_auth_hash));
-  snapshot.values.web_auth_iterations = iterations;
+  snapshot->present_mask = LM_CTRL_SETTINGS_WEB_AUTH_FIELDS;
+  snapshot->values.web_auth_mode = (uint8_t)LM_CTRL_WEB_AUTH_ENABLED;
+  memcpy(snapshot->values.web_auth_salt, salt, sizeof(snapshot->values.web_auth_salt));
+  memcpy(snapshot->values.web_auth_hash, hash, sizeof(snapshot->values.web_auth_hash));
+  snapshot->values.web_auth_iterations = iterations;
   ESP_GOTO_ON_ERROR(
-    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "web auth settings"),
+    write_settings_snapshot_fields(handle, snapshot, snapshot->present_mask, "web auth settings"),
     exit,
     TAG,
     "Failed to store web auth settings"
@@ -163,13 +183,13 @@ static esp_err_t persist_web_admin_hash_material(
 
 exit:
   nvs_close(handle);
-  secure_zero(&snapshot, sizeof(snapshot));
+  free_settings_snapshot(snapshot);
   return ret;
 }
 
 esp_err_t lm_ctrl_settings_load(void) {
   nvs_handle_t handle = 0;
-  lm_ctrl_settings_snapshot_t snapshot = {0};
+  lm_ctrl_settings_snapshot_t *snapshot = NULL;
   bool has_logo_version = false;
   bool has_logo_blob = false;
   bool has_web_salt = false;
@@ -212,103 +232,109 @@ esp_err_t lm_ctrl_settings_load(void) {
     return ret;
   }
 
+  snapshot = alloc_settings_snapshot();
+  if (snapshot == NULL) {
+    nvs_close(handle);
+    return ESP_ERR_NO_MEM;
+  }
+
   lock_state();
-  ret = lm_ctrl_settings_snapshot_load_from_nvs(handle, &snapshot);
+  ret = lm_ctrl_settings_snapshot_load_from_nvs(handle, snapshot);
   if (ret != ESP_OK) {
     goto exit;
   }
 
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_SSID)) {
-    copy_text(s_state.sta_ssid, sizeof(s_state.sta_ssid), snapshot.values.ssid);
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_SSID)) {
+    copy_text(s_state.sta_ssid, sizeof(s_state.sta_ssid), snapshot->values.ssid);
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_PASSWORD)) {
-    copy_text(s_state.sta_password, sizeof(s_state.sta_password), snapshot.values.password);
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_PASSWORD)) {
+    copy_text(s_state.sta_password, sizeof(s_state.sta_password), snapshot->values.password);
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_PORTAL_PASSWORD)) {
-    copy_text(s_state.portal_password, sizeof(s_state.portal_password), snapshot.values.portal_password);
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_PORTAL_PASSWORD)) {
+    copy_text(s_state.portal_password, sizeof(s_state.portal_password), snapshot->values.portal_password);
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_HOSTNAME)) {
-    copy_text(s_state.hostname, sizeof(s_state.hostname), snapshot.values.hostname);
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_HOSTNAME)) {
+    copy_text(s_state.hostname, sizeof(s_state.hostname), snapshot->values.hostname);
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_LANGUAGE_CODE)) {
-    s_state.language = ctrl_language_from_code(snapshot.values.language_code);
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_LANGUAGE_CODE)) {
+    s_state.language = ctrl_language_from_code(snapshot->values.language_code);
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_CLOUD_USERNAME)) {
-    copy_text(s_state.cloud_username, sizeof(s_state.cloud_username), snapshot.values.cloud_username);
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_CLOUD_USERNAME)) {
+    copy_text(s_state.cloud_username, sizeof(s_state.cloud_username), snapshot->values.cloud_username);
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_CLOUD_PASSWORD)) {
-    copy_text(s_state.cloud_password, sizeof(s_state.cloud_password), snapshot.values.cloud_password);
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_CLOUD_PASSWORD)) {
+    copy_text(s_state.cloud_password, sizeof(s_state.cloud_password), snapshot->values.cloud_password);
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_MACHINE_SERIAL)) {
-    copy_text(s_state.selected_machine.serial, sizeof(s_state.selected_machine.serial), snapshot.values.machine_serial);
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_MACHINE_SERIAL)) {
+    copy_text(s_state.selected_machine.serial, sizeof(s_state.selected_machine.serial), snapshot->values.machine_serial);
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_MACHINE_NAME)) {
-    copy_text(s_state.selected_machine.name, sizeof(s_state.selected_machine.name), snapshot.values.machine_name);
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_MACHINE_NAME)) {
+    copy_text(s_state.selected_machine.name, sizeof(s_state.selected_machine.name), snapshot->values.machine_name);
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_MACHINE_MODEL)) {
-    copy_text(s_state.selected_machine.model, sizeof(s_state.selected_machine.model), snapshot.values.machine_model);
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_MACHINE_MODEL)) {
+    copy_text(s_state.selected_machine.model, sizeof(s_state.selected_machine.model), snapshot->values.machine_model);
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_MACHINE_KEY)) {
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_MACHINE_KEY)) {
     copy_text(
       s_state.selected_machine.communication_key,
       sizeof(s_state.selected_machine.communication_key),
-      snapshot.values.machine_key
+      snapshot->values.machine_key
     );
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_WEB_AUTH_MODE) &&
-      snapshot.values.web_auth_mode <= (uint8_t)LM_CTRL_WEB_AUTH_ENABLED) {
-    s_state.web_auth_mode = (lm_ctrl_web_auth_mode_t)snapshot.values.web_auth_mode;
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_WEB_AUTH_MODE) &&
+      snapshot->values.web_auth_mode <= (uint8_t)LM_CTRL_WEB_AUTH_ENABLED) {
+    s_state.web_auth_mode = (lm_ctrl_web_auth_mode_t)snapshot->values.web_auth_mode;
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_DEBUG_SCREENSHOT_ENABLED)) {
-    s_state.debug_screenshot_enabled = snapshot.values.debug_screenshot_enabled != 0;
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_DEBUG_SCREENSHOT_ENABLED)) {
+    s_state.debug_screenshot_enabled = snapshot->values.debug_screenshot_enabled != 0;
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_HEAT_DISPLAY_ENABLED)) {
-    s_state.heat_display_enabled = snapshot.values.heat_display_enabled != 0;
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_HEAT_DISPLAY_ENABLED)) {
+    s_state.heat_display_enabled = snapshot->values.heat_display_enabled != 0;
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_WEB_AUTH_SALT)) {
-    memcpy(s_state.web_admin_salt, snapshot.values.web_auth_salt, sizeof(s_state.web_admin_salt));
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_WEB_AUTH_SALT)) {
+    memcpy(s_state.web_admin_salt, snapshot->values.web_auth_salt, sizeof(s_state.web_admin_salt));
     has_web_salt = true;
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_WEB_AUTH_HASH)) {
-    memcpy(s_state.web_admin_hash, snapshot.values.web_auth_hash, sizeof(s_state.web_admin_hash));
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_WEB_AUTH_HASH)) {
+    memcpy(s_state.web_admin_hash, snapshot->values.web_auth_hash, sizeof(s_state.web_admin_hash));
     has_web_hash = true;
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_WEB_AUTH_ITERATIONS) &&
-      snapshot.values.web_auth_iterations > 0) {
-    s_state.web_admin_iterations = snapshot.values.web_auth_iterations;
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_WEB_AUTH_ITERATIONS) &&
+      snapshot->values.web_auth_iterations > 0) {
+    s_state.web_admin_iterations = snapshot->values.web_auth_iterations;
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_CLOUD_PROVISIONING) &&
-      snapshot.values.cloud_provisioning.schema_version == LM_CTRL_CLOUD_PROVISIONING_SCHEMA_VERSION &&
-      snapshot.values.cloud_provisioning.private_key_der_len > 0 &&
-      snapshot.values.cloud_provisioning.private_key_der_len <= LM_CTRL_PRIVATE_KEY_DER_MAX &&
-      snapshot.values.cloud_provisioning.installation_id[0] != '\0') {
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_CLOUD_PROVISIONING) &&
+      snapshot->values.cloud_provisioning.schema_version == LM_CTRL_CLOUD_PROVISIONING_SCHEMA_VERSION &&
+      snapshot->values.cloud_provisioning.private_key_der_len > 0 &&
+      snapshot->values.cloud_provisioning.private_key_der_len <= LM_CTRL_PRIVATE_KEY_DER_MAX &&
+      snapshot->values.cloud_provisioning.installation_id[0] != '\0') {
     s_state.has_cloud_provisioning = true;
     s_state.cloud_installation_ready = true;
     copy_text(
       s_state.cloud_installation_id,
       sizeof(s_state.cloud_installation_id),
-      snapshot.values.cloud_provisioning.installation_id
+      snapshot->values.cloud_provisioning.installation_id
     );
-    memcpy(s_state.cloud_secret, snapshot.values.cloud_provisioning.secret, sizeof(s_state.cloud_secret));
+    memcpy(s_state.cloud_secret, snapshot->values.cloud_provisioning.secret, sizeof(s_state.cloud_secret));
     memcpy(
       s_state.cloud_private_key_der,
-      snapshot.values.cloud_provisioning.private_key_der,
-      snapshot.values.cloud_provisioning.private_key_der_len
+      snapshot->values.cloud_provisioning.private_key_der,
+      snapshot->values.cloud_provisioning.private_key_der_len
     );
-    s_state.cloud_private_key_der_len = snapshot.values.cloud_provisioning.private_key_der_len;
+    s_state.cloud_private_key_der_len = snapshot->values.cloud_provisioning.private_key_der_len;
   }
-  if (lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_CLOUD_INSTALL_REG)) {
-    s_state.cloud_installation_registered = snapshot.values.cloud_install_reg != 0;
+  if (lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_CLOUD_INSTALL_REG)) {
+    s_state.cloud_installation_registered = snapshot->values.cloud_install_reg != 0;
   }
 
-  has_logo_version = lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_LOGO_SCHEMA_VERSION);
-  has_logo_blob = lm_ctrl_settings_snapshot_has(&snapshot, LM_CTRL_SETTINGS_FIELD_LOGO_BLOB);
+  has_logo_version = lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_LOGO_SCHEMA_VERSION);
+  has_logo_blob = lm_ctrl_settings_snapshot_has(snapshot, LM_CTRL_SETTINGS_FIELD_LOGO_BLOB);
   if (has_logo_version &&
       has_logo_blob &&
-      snapshot.values.logo_schema_version == LM_CTRL_CUSTOM_LOGO_SCHEMA_VERSION) {
+      snapshot->values.logo_schema_version == LM_CTRL_CUSTOM_LOGO_SCHEMA_VERSION) {
     s_state.has_custom_logo = true;
-    s_state.custom_logo_schema_version = snapshot.values.logo_schema_version;
-    memcpy(s_state.custom_logo_blob, snapshot.values.logo_blob, sizeof(s_state.custom_logo_blob));
+    s_state.custom_logo_schema_version = snapshot->values.logo_schema_version;
+    memcpy(s_state.custom_logo_blob, snapshot->values.logo_blob, sizeof(s_state.custom_logo_blob));
   } else {
     clear_custom_logo_locked();
   }
@@ -332,26 +358,32 @@ esp_err_t lm_ctrl_settings_load(void) {
 exit:
   unlock_state();
   nvs_close(handle);
-  secure_zero(&snapshot, sizeof(snapshot));
+  free_settings_snapshot(snapshot);
   return ret;
 }
 
 esp_err_t lm_ctrl_settings_save_wifi_credentials(const char *ssid, const char *password, const char *hostname, ctrl_language_t language) {
   nvs_handle_t handle = 0;
-  lm_ctrl_settings_snapshot_t snapshot = {0};
-  esp_err_t ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
+  lm_ctrl_settings_snapshot_t *snapshot = alloc_settings_snapshot();
+  esp_err_t ret;
 
+  if (snapshot == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
   if (ret != ESP_OK) {
+    free_settings_snapshot(snapshot);
     return ret;
   }
 
-  snapshot.present_mask = LM_CTRL_SETTINGS_WIFI_CREDENTIAL_FIELDS;
-  copy_text(snapshot.values.ssid, sizeof(snapshot.values.ssid), ssid);
-  copy_text(snapshot.values.password, sizeof(snapshot.values.password), password);
-  copy_text(snapshot.values.hostname, sizeof(snapshot.values.hostname), hostname);
-  copy_text(snapshot.values.language_code, sizeof(snapshot.values.language_code), ctrl_language_code(language));
+  snapshot->present_mask = LM_CTRL_SETTINGS_WIFI_CREDENTIAL_FIELDS;
+  copy_text(snapshot->values.ssid, sizeof(snapshot->values.ssid), ssid);
+  copy_text(snapshot->values.password, sizeof(snapshot->values.password), password);
+  copy_text(snapshot->values.hostname, sizeof(snapshot->values.hostname), hostname);
+  copy_text(snapshot->values.language_code, sizeof(snapshot->values.language_code), ctrl_language_code(language));
   ESP_GOTO_ON_ERROR(
-    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "Wi-Fi settings"),
+    write_settings_snapshot_fields(handle, snapshot, snapshot->present_mask, "Wi-Fi settings"),
     exit,
     TAG,
     "Failed to store Wi-Fi settings"
@@ -374,14 +406,14 @@ exit:
     unlock_state();
   }
 
-  secure_zero(&snapshot, sizeof(snapshot));
+  free_settings_snapshot(snapshot);
   return ret;
 }
 
 esp_err_t lm_ctrl_settings_save_controller_preferences(const char *hostname, ctrl_language_t language) {
   nvs_handle_t handle = 0;
   char effective_hostname[33];
-  lm_ctrl_settings_snapshot_t snapshot = {0};
+  lm_ctrl_settings_snapshot_t *snapshot = NULL;
   esp_err_t ret;
 
   copy_text(effective_hostname, sizeof(effective_hostname), hostname);
@@ -389,16 +421,22 @@ esp_err_t lm_ctrl_settings_save_controller_preferences(const char *hostname, ctr
     copy_text(effective_hostname, sizeof(effective_hostname), LM_CTRL_WIFI_DEFAULT_HOSTNAME);
   }
 
+  snapshot = alloc_settings_snapshot();
+  if (snapshot == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+
   ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
   if (ret != ESP_OK) {
+    free_settings_snapshot(snapshot);
     return ret;
   }
 
-  snapshot.present_mask = LM_CTRL_SETTINGS_CONTROLLER_PREFERENCE_FIELDS;
-  copy_text(snapshot.values.hostname, sizeof(snapshot.values.hostname), effective_hostname);
-  copy_text(snapshot.values.language_code, sizeof(snapshot.values.language_code), ctrl_language_code(language));
+  snapshot->present_mask = LM_CTRL_SETTINGS_CONTROLLER_PREFERENCE_FIELDS;
+  copy_text(snapshot->values.hostname, sizeof(snapshot->values.hostname), effective_hostname);
+  copy_text(snapshot->values.language_code, sizeof(snapshot->values.language_code), ctrl_language_code(language));
   ESP_GOTO_ON_ERROR(
-    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "controller settings"),
+    write_settings_snapshot_fields(handle, snapshot, snapshot->present_mask, "controller settings"),
     exit,
     TAG,
     "Failed to store controller settings"
@@ -415,13 +453,13 @@ exit:
     unlock_state();
   }
 
-  secure_zero(&snapshot, sizeof(snapshot));
+  free_settings_snapshot(snapshot);
   return ret;
 }
 
 esp_err_t lm_ctrl_settings_save_controller_logo(uint8_t schema_version, const uint8_t *logo_data, size_t logo_size) {
   nvs_handle_t handle = 0;
-  lm_ctrl_settings_snapshot_t snapshot = {0};
+  lm_ctrl_settings_snapshot_t *snapshot = NULL;
   esp_err_t ret;
 
   if (schema_version != LM_CTRL_CUSTOM_LOGO_SCHEMA_VERSION ||
@@ -430,16 +468,22 @@ esp_err_t lm_ctrl_settings_save_controller_logo(uint8_t schema_version, const ui
     return ESP_ERR_INVALID_ARG;
   }
 
+  snapshot = alloc_settings_snapshot();
+  if (snapshot == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+
   ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
   if (ret != ESP_OK) {
+    free_settings_snapshot(snapshot);
     return ret;
   }
 
-  snapshot.present_mask = LM_CTRL_SETTINGS_LOGO_FIELDS;
-  snapshot.values.logo_schema_version = schema_version;
-  memcpy(snapshot.values.logo_blob, logo_data, logo_size);
+  snapshot->present_mask = LM_CTRL_SETTINGS_LOGO_FIELDS;
+  snapshot->values.logo_schema_version = schema_version;
+  memcpy(snapshot->values.logo_blob, logo_data, logo_size);
   ESP_GOTO_ON_ERROR(
-    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "controller logo"),
+    write_settings_snapshot_fields(handle, snapshot, snapshot->present_mask, "controller logo"),
     exit,
     TAG,
     "Failed to store controller logo"
@@ -468,7 +512,7 @@ exit:
     }
   }
 
-  secure_zero(&snapshot, sizeof(snapshot));
+  free_settings_snapshot(snapshot);
   return ret;
 }
 
@@ -515,14 +559,20 @@ exit:
 
 esp_err_t lm_ctrl_settings_save_cloud_credentials(const char *username, const char *password, bool *credentials_changed) {
   nvs_handle_t handle = 0;
-  lm_ctrl_settings_snapshot_t snapshot = {0};
+  lm_ctrl_settings_snapshot_t *snapshot = alloc_settings_snapshot();
   bool changed = false;
-  esp_err_t ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
+  esp_err_t ret;
 
   if (credentials_changed != NULL) {
     *credentials_changed = false;
   }
+  if (snapshot == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
   if (ret != ESP_OK) {
+    free_settings_snapshot(snapshot);
     return ret;
   }
 
@@ -532,11 +582,11 @@ esp_err_t lm_ctrl_settings_save_cloud_credentials(const char *username, const ch
     strcmp(s_state.cloud_password, password) != 0;
   unlock_state();
 
-  snapshot.present_mask = LM_CTRL_SETTINGS_CLOUD_CREDENTIAL_FIELDS;
-  copy_text(snapshot.values.cloud_username, sizeof(snapshot.values.cloud_username), username);
-  copy_text(snapshot.values.cloud_password, sizeof(snapshot.values.cloud_password), password);
+  snapshot->present_mask = LM_CTRL_SETTINGS_CLOUD_CREDENTIAL_FIELDS;
+  copy_text(snapshot->values.cloud_username, sizeof(snapshot->values.cloud_username), username);
+  copy_text(snapshot->values.cloud_password, sizeof(snapshot->values.cloud_password), password);
   ESP_GOTO_ON_ERROR(
-    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "cloud settings"),
+    write_settings_snapshot_fields(handle, snapshot, snapshot->present_mask, "cloud settings"),
     exit,
     TAG,
     "Failed to store cloud settings"
@@ -570,31 +620,37 @@ exit:
     }
   }
 
-  secure_zero(&snapshot, sizeof(snapshot));
+  free_settings_snapshot(snapshot);
   return ret;
 }
 
 esp_err_t lm_ctrl_settings_save_machine_selection(const lm_ctrl_cloud_machine_t *machine) {
   nvs_handle_t handle = 0;
-  lm_ctrl_settings_snapshot_t snapshot = {0};
+  lm_ctrl_settings_snapshot_t *snapshot = NULL;
   esp_err_t ret;
 
   if (machine == NULL || machine->serial[0] == '\0') {
     return ESP_ERR_INVALID_ARG;
   }
 
+  snapshot = alloc_settings_snapshot();
+  if (snapshot == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+
   ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
   if (ret != ESP_OK) {
+    free_settings_snapshot(snapshot);
     return ret;
   }
 
-  snapshot.present_mask = LM_CTRL_SETTINGS_MACHINE_SELECTION_FIELDS;
-  copy_text(snapshot.values.machine_serial, sizeof(snapshot.values.machine_serial), machine->serial);
-  copy_text(snapshot.values.machine_name, sizeof(snapshot.values.machine_name), machine->name);
-  copy_text(snapshot.values.machine_model, sizeof(snapshot.values.machine_model), machine->model);
-  copy_text(snapshot.values.machine_key, sizeof(snapshot.values.machine_key), machine->communication_key);
+  snapshot->present_mask = LM_CTRL_SETTINGS_MACHINE_SELECTION_FIELDS;
+  copy_text(snapshot->values.machine_serial, sizeof(snapshot->values.machine_serial), machine->serial);
+  copy_text(snapshot->values.machine_name, sizeof(snapshot->values.machine_name), machine->name);
+  copy_text(snapshot->values.machine_model, sizeof(snapshot->values.machine_model), machine->model);
+  copy_text(snapshot->values.machine_key, sizeof(snapshot->values.machine_key), machine->communication_key);
   ESP_GOTO_ON_ERROR(
-    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "machine selection"),
+    write_settings_snapshot_fields(handle, snapshot, snapshot->present_mask, "machine selection"),
     exit,
     TAG,
     "Failed to store machine selection"
@@ -611,7 +667,7 @@ exit:
     unlock_state();
   }
 
-  secure_zero(&snapshot, sizeof(snapshot));
+  free_settings_snapshot(snapshot);
   return ret;
 }
 
@@ -622,7 +678,7 @@ esp_err_t lm_ctrl_settings_save_cloud_provisioning(
   size_t private_key_der_len
 ) {
   nvs_handle_t handle = 0;
-  lm_ctrl_settings_snapshot_t snapshot = {0};
+  lm_ctrl_settings_snapshot_t *snapshot = NULL;
   lm_ctrl_cloud_provisioning_blob_t provisioning = {0};
   esp_err_t ret;
 
@@ -641,19 +697,26 @@ esp_err_t lm_ctrl_settings_save_cloud_provisioning(
   memcpy(provisioning.secret, secret, sizeof(provisioning.secret));
   memcpy(provisioning.private_key_der, private_key_der, private_key_der_len);
 
+  snapshot = alloc_settings_snapshot();
+  if (snapshot == NULL) {
+    secure_zero(&provisioning, sizeof(provisioning));
+    return ESP_ERR_NO_MEM;
+  }
+
   ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
   if (ret != ESP_OK) {
+    free_settings_snapshot(snapshot);
     secure_zero(&provisioning, sizeof(provisioning));
     return ret;
   }
 
-  snapshot.present_mask =
+  snapshot->present_mask =
     LM_CTRL_SETTINGS_FIELD_MASK(CLOUD_PROVISIONING) |
     LM_CTRL_SETTINGS_FIELD_MASK(CLOUD_INSTALL_REG);
-  snapshot.values.cloud_provisioning = provisioning;
-  snapshot.values.cloud_install_reg = 0;
+  snapshot->values.cloud_provisioning = provisioning;
+  snapshot->values.cloud_install_reg = 0;
   ESP_GOTO_ON_ERROR(
-    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "cloud provisioning"),
+    write_settings_snapshot_fields(handle, snapshot, snapshot->present_mask, "cloud provisioning"),
     exit,
     TAG,
     "Failed to store cloud provisioning"
@@ -675,7 +738,7 @@ exit:
     mark_status_dirty_locked();
     unlock_state();
   }
-  secure_zero(&snapshot, sizeof(snapshot));
+  free_settings_snapshot(snapshot);
   secure_zero(&provisioning, sizeof(provisioning));
   return ret;
 }
@@ -713,17 +776,23 @@ esp_err_t lm_ctrl_settings_ensure_cloud_provisioning(void) {
 
 esp_err_t lm_ctrl_settings_set_cloud_installation_registered(bool registered) {
   nvs_handle_t handle = 0;
-  lm_ctrl_settings_snapshot_t snapshot = {0};
-  esp_err_t ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
+  lm_ctrl_settings_snapshot_t *snapshot = alloc_settings_snapshot();
+  esp_err_t ret;
 
+  if (snapshot == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
   if (ret != ESP_OK) {
+    free_settings_snapshot(snapshot);
     return ret;
   }
 
-  snapshot.present_mask = LM_CTRL_SETTINGS_FIELD_MASK(CLOUD_INSTALL_REG);
-  snapshot.values.cloud_install_reg = registered ? 1U : 0U;
+  snapshot->present_mask = LM_CTRL_SETTINGS_FIELD_MASK(CLOUD_INSTALL_REG);
+  snapshot->values.cloud_install_reg = registered ? 1U : 0U;
   ESP_GOTO_ON_ERROR(
-    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "cloud installation registration"),
+    write_settings_snapshot_fields(handle, snapshot, snapshot->present_mask, "cloud installation registration"),
     exit,
     TAG,
     "Failed to store cloud installation registration"
@@ -737,28 +806,34 @@ exit:
     s_state.cloud_installation_registered = registered && s_state.has_cloud_provisioning;
     unlock_state();
   }
-  secure_zero(&snapshot, sizeof(snapshot));
+  free_settings_snapshot(snapshot);
   return ret;
 }
 
 esp_err_t lm_ctrl_settings_save_portal_password(const char *password) {
   nvs_handle_t handle = 0;
-  lm_ctrl_settings_snapshot_t snapshot = {0};
+  lm_ctrl_settings_snapshot_t *snapshot = NULL;
   esp_err_t ret;
 
   if (password == NULL || password[0] == '\0') {
     return ESP_ERR_INVALID_ARG;
   }
 
+  snapshot = alloc_settings_snapshot();
+  if (snapshot == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+
   ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
   if (ret != ESP_OK) {
+    free_settings_snapshot(snapshot);
     return ret;
   }
 
-  snapshot.present_mask = LM_CTRL_SETTINGS_FIELD_MASK(PORTAL_PASSWORD);
-  copy_text(snapshot.values.portal_password, sizeof(snapshot.values.portal_password), password);
+  snapshot->present_mask = LM_CTRL_SETTINGS_FIELD_MASK(PORTAL_PASSWORD);
+  copy_text(snapshot->values.portal_password, sizeof(snapshot->values.portal_password), password);
   ESP_GOTO_ON_ERROR(
-    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "setup AP password"),
+    write_settings_snapshot_fields(handle, snapshot, snapshot->present_mask, "setup AP password"),
     exit,
     TAG,
     "Failed to store setup AP password"
@@ -773,7 +848,7 @@ exit:
     mark_status_dirty_locked();
     unlock_state();
   }
-  secure_zero(&snapshot, sizeof(snapshot));
+  free_settings_snapshot(snapshot);
   return ret;
 }
 
@@ -811,17 +886,23 @@ esp_err_t lm_ctrl_settings_save_web_admin_password(const char *password) {
 
 esp_err_t lm_ctrl_settings_clear_web_admin_password(void) {
   nvs_handle_t handle = 0;
-  lm_ctrl_settings_snapshot_t snapshot = {0};
-  esp_err_t ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
+  lm_ctrl_settings_snapshot_t *snapshot = alloc_settings_snapshot();
+  esp_err_t ret;
 
+  if (snapshot == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
   if (ret != ESP_OK) {
+    free_settings_snapshot(snapshot);
     return ret;
   }
 
-  snapshot.present_mask = LM_CTRL_SETTINGS_FIELD_MASK(WEB_AUTH_MODE);
-  snapshot.values.web_auth_mode = (uint8_t)LM_CTRL_WEB_AUTH_DISABLED;
+  snapshot->present_mask = LM_CTRL_SETTINGS_FIELD_MASK(WEB_AUTH_MODE);
+  snapshot->values.web_auth_mode = (uint8_t)LM_CTRL_WEB_AUTH_DISABLED;
   ESP_GOTO_ON_ERROR(
-    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "disabled web auth mode"),
+    write_settings_snapshot_fields(handle, snapshot, snapshot->present_mask, "disabled web auth mode"),
     exit,
     TAG,
     "Failed to store disabled web auth mode"
@@ -844,7 +925,7 @@ exit:
     mark_status_dirty_locked();
     unlock_state();
   }
-  secure_zero(&snapshot, sizeof(snapshot));
+  free_settings_snapshot(snapshot);
   return ret;
 }
 
@@ -912,17 +993,23 @@ bool lm_ctrl_settings_verify_web_admin_password(const char *password) {
 
 esp_err_t lm_ctrl_settings_set_heat_display_enabled(bool enabled) {
   nvs_handle_t handle = 0;
-  lm_ctrl_settings_snapshot_t snapshot = {0};
-  esp_err_t ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
+  lm_ctrl_settings_snapshot_t *snapshot = alloc_settings_snapshot();
+  esp_err_t ret;
 
+  if (snapshot == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
   if (ret != ESP_OK) {
+    free_settings_snapshot(snapshot);
     return ret;
   }
 
-  snapshot.present_mask = LM_CTRL_SETTINGS_FIELD_MASK(HEAT_DISPLAY_ENABLED);
-  snapshot.values.heat_display_enabled = enabled ? 1U : 0U;
+  snapshot->present_mask = LM_CTRL_SETTINGS_FIELD_MASK(HEAT_DISPLAY_ENABLED);
+  snapshot->values.heat_display_enabled = enabled ? 1U : 0U;
   ESP_GOTO_ON_ERROR(
-    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "heat display toggle"),
+    write_settings_snapshot_fields(handle, snapshot, snapshot->present_mask, "heat display toggle"),
     exit,
     TAG,
     "Failed to store heat display toggle"
@@ -937,23 +1024,29 @@ exit:
     mark_status_dirty_locked();
     unlock_state();
   }
-  secure_zero(&snapshot, sizeof(snapshot));
+  free_settings_snapshot(snapshot);
   return ret;
 }
 
 esp_err_t lm_ctrl_settings_set_debug_screenshot_enabled(bool enabled) {
   nvs_handle_t handle = 0;
-  lm_ctrl_settings_snapshot_t snapshot = {0};
-  esp_err_t ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
+  lm_ctrl_settings_snapshot_t *snapshot = alloc_settings_snapshot();
+  esp_err_t ret;
 
+  if (snapshot == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  ret = nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READWRITE, &handle);
   if (ret != ESP_OK) {
+    free_settings_snapshot(snapshot);
     return ret;
   }
 
-  snapshot.present_mask = LM_CTRL_SETTINGS_FIELD_MASK(DEBUG_SCREENSHOT_ENABLED);
-  snapshot.values.debug_screenshot_enabled = enabled ? 1U : 0U;
+  snapshot->present_mask = LM_CTRL_SETTINGS_FIELD_MASK(DEBUG_SCREENSHOT_ENABLED);
+  snapshot->values.debug_screenshot_enabled = enabled ? 1U : 0U;
   ESP_GOTO_ON_ERROR(
-    write_settings_snapshot_fields(handle, &snapshot, snapshot.present_mask, "debug screenshot toggle"),
+    write_settings_snapshot_fields(handle, snapshot, snapshot->present_mask, "debug screenshot toggle"),
     exit,
     TAG,
     "Failed to store debug screenshot toggle"
@@ -968,7 +1061,7 @@ exit:
     mark_status_dirty_locked();
     unlock_state();
   }
-  secure_zero(&snapshot, sizeof(snapshot));
+  free_settings_snapshot(snapshot);
   return ret;
 }
 
