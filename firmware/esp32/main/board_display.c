@@ -3,6 +3,7 @@
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "esp_check.h"
+#include "esp_idf_version.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_st77916.h"
@@ -285,13 +286,25 @@ esp_err_t lm_ctrl_display_init(lv_disp_t **out_display) {
   ESP_RETURN_ON_ERROR(esp_lv_adapter_init(&adapter_config), TAG, "LVGL adapter init failed");
 
   esp_lv_adapter_display_config_t display_config =
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
+    /*
+     * ESP-IDF 5.5 SPI LCD IO does not mark PSRAM color buffers for PSRAM DMA.
+     * Keep LVGL flushes in a small internal buffer to avoid transient internal
+     * DMA bounce-buffer allocation failures after Wi-Fi/BLE/UI startup.
+     */
+    ESP_LV_ADAPTER_DISPLAY_SPI_WITHOUT_PSRAM_DEFAULT_CONFIG(
+#else
     ESP_LV_ADAPTER_DISPLAY_SPI_WITH_PSRAM_DEFAULT_CONFIG(
+#endif
       s_panel,
       s_panel_io,
       LM_CTRL_LCD_H_RES,
       LM_CTRL_LCD_V_RES,
       ESP_LV_ADAPTER_ROTATE_0
     );
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
+  ESP_LOGI(TAG, "Using internal partial LVGL draw buffer for ESP-IDF 5.x SPI DMA compatibility");
+#endif
   s_display = esp_lv_adapter_register_display(&display_config);
   if (s_display == NULL) {
     ESP_LOGE(TAG, "LVGL display registration failed");
