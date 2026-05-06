@@ -99,6 +99,47 @@ static int test_load_applies_descriptor_backed_wifi_fields(void) {
   return 0;
 }
 
+static int test_save_wifi_credentials_persists_and_updates_runtime_state(void) {
+  nvs_handle_t handle = 0;
+  char ssid[33] = {0};
+  char password[65] = {0};
+  char hostname[33] = {0};
+  char language_code[8] = {0};
+  size_t ssid_size = sizeof(ssid);
+  size_t password_size = sizeof(password);
+  size_t hostname_size = sizeof(hostname);
+  size_t language_code_size = sizeof(language_code);
+
+  test_nvs_reset();
+  reset_controller_settings_test_state();
+
+  ASSERT_EQ_INT(
+    ESP_OK,
+    lm_ctrl_settings_save_wifi_credentials("CafeWifi", "CafePass", "espresso", CTRL_LANGUAGE_DE)
+  );
+  ASSERT_TRUE(s_state.has_credentials);
+  ASSERT_TRUE(s_state.sta_connecting);
+  ASSERT_FALSE(s_state.sta_connected);
+  ASSERT_STREQ("", s_state.sta_ip);
+  ASSERT_STREQ("CafeWifi", s_state.sta_ssid);
+  ASSERT_STREQ("CafePass", s_state.sta_password);
+  ASSERT_STREQ("espresso", s_state.hostname);
+  ASSERT_EQ_INT(CTRL_LANGUAGE_DE, s_state.language);
+
+  ASSERT_EQ_INT(ESP_OK, nvs_open(LM_CTRL_WIFI_NAMESPACE, NVS_READONLY, &handle));
+  ASSERT_EQ_INT(ESP_OK, nvs_get_str(handle, LM_CTRL_WIFI_KEY_SSID, ssid, &ssid_size));
+  ASSERT_EQ_INT(ESP_OK, nvs_get_str(handle, LM_CTRL_WIFI_KEY_PASS, password, &password_size));
+  ASSERT_EQ_INT(ESP_OK, nvs_get_str(handle, LM_CTRL_WIFI_KEY_HOST, hostname, &hostname_size));
+  ASSERT_EQ_INT(ESP_OK, nvs_get_str(handle, LM_CTRL_WIFI_KEY_LANG, language_code, &language_code_size));
+  nvs_close(handle);
+
+  ASSERT_STREQ("CafeWifi", ssid);
+  ASSERT_STREQ("CafePass", password);
+  ASSERT_STREQ("espresso", hostname);
+  ASSERT_STREQ("de", language_code);
+  return 0;
+}
+
 static int test_ensure_cloud_provisioning_generates_and_persists_missing_installation(void) {
   lm_ctrl_cloud_provisioning_blob_t stored = {0};
 
@@ -176,6 +217,7 @@ static int test_factory_reset_clears_provisioning_and_next_ensure_regenerates_it
 
 int run_controller_settings_tests(void) {
   RUN_TEST(test_load_applies_descriptor_backed_wifi_fields);
+  RUN_TEST(test_save_wifi_credentials_persists_and_updates_runtime_state);
   RUN_TEST(test_ensure_cloud_provisioning_generates_and_persists_missing_installation);
   RUN_TEST(test_reset_network_keeps_cloud_provisioning_blob_and_runtime_state);
   RUN_TEST(test_factory_reset_clears_provisioning_and_next_ensure_regenerates_it);

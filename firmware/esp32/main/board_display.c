@@ -3,6 +3,7 @@
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "esp_check.h"
+#include "esp_idf_version.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_st77916.h"
@@ -215,7 +216,7 @@ esp_err_t lm_ctrl_display_init(lv_disp_t **out_display) {
     LM_CTRL_LCD_D1,
     LM_CTRL_LCD_D2,
     LM_CTRL_LCD_D3,
-    LM_CTRL_LCD_H_RES * LM_CTRL_LCD_V_RES * LM_CTRL_LCD_BPP / 8
+    LM_CTRL_LCD_SPI_MAX_TRANSFER_SZ
   );
   ESP_RETURN_ON_ERROR(spi_bus_initialize(LM_CTRL_LCD_HOST, &buscfg, SPI_DMA_CH_AUTO), TAG, "SPI init failed");
 
@@ -284,6 +285,31 @@ esp_err_t lm_ctrl_display_init(lv_disp_t **out_display) {
   esp_lv_adapter_config_t adapter_config = ESP_LV_ADAPTER_DEFAULT_CONFIG();
   ESP_RETURN_ON_ERROR(esp_lv_adapter_init(&adapter_config), TAG, "LVGL adapter init failed");
 
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
+  /*
+   * ESP-IDF 5.5 SPI LCD IO does not mark PSRAM color buffers for PSRAM DMA.
+   * Keep LVGL flushes in a small internal buffer and cap SPI transfers to avoid
+   * transient internal DMA bounce-buffer/descriptor allocation failures after
+   * Wi-Fi/BLE/UI startup.
+   */
+  esp_lv_adapter_display_config_t display_config = {
+    .panel = s_panel,
+    .panel_io = s_panel_io,
+    .profile = {
+      .interface = ESP_LV_ADAPTER_PANEL_IF_OTHER,
+      .rotation = ESP_LV_ADAPTER_ROTATE_0,
+      .hor_res = LM_CTRL_LCD_H_RES,
+      .ver_res = LM_CTRL_LCD_V_RES,
+      .buffer_height = LM_CTRL_LCD_DRAW_BUF_ROWS,
+      .use_psram = false,
+      .enable_ppa_accel = false,
+      .require_double_buffer = false,
+      .mono_layout = ESP_LV_ADAPTER_MONO_LAYOUT_NONE,
+    },
+    .tear_avoid_mode = ESP_LV_ADAPTER_TEAR_AVOID_MODE_DEFAULT,
+    .te_sync = ESP_LV_ADAPTER_TE_SYNC_DISABLED(),
+  };
+#else
   esp_lv_adapter_display_config_t display_config =
     ESP_LV_ADAPTER_DISPLAY_SPI_WITH_PSRAM_DEFAULT_CONFIG(
       s_panel,
@@ -292,6 +318,14 @@ esp_err_t lm_ctrl_display_init(lv_disp_t **out_display) {
       LM_CTRL_LCD_V_RES,
       ESP_LV_ADAPTER_ROTATE_0
     );
+#endif
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
+  ESP_LOGI(
+    TAG,
+    "Using %d-row internal LVGL draw buffer for ESP-IDF 5.x SPI DMA compatibility",
+    LM_CTRL_LCD_DRAW_BUF_ROWS
+  );
+#endif
   s_display = esp_lv_adapter_register_display(&display_config);
   if (s_display == NULL) {
     ESP_LOGE(TAG, "LVGL display registration failed");

@@ -28,7 +28,7 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
   char password[128];
   char selected_serial[32];
   char *response_body = NULL;
-  lm_ctrl_cloud_machine_t machines[LM_CTRL_CLOUD_MAX_FLEET] = {0};
+  lm_ctrl_cloud_machine_t *machines = NULL;
   size_t machine_count = 0;
   int status_code = 0;
   esp_err_t ret;
@@ -36,7 +36,7 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
   bool auto_selected = false;
   lm_ctrl_cloud_machine_t selected_machine = {0};
   lm_ctrl_cloud_http_header_t headers[5];
-  lm_ctrl_cloud_request_auth_t auth = {0};
+  lm_ctrl_cloud_request_auth_t *auth = NULL;
 
   if (selection_changed != NULL) {
     *selection_changed = false;
@@ -52,19 +52,30 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
     if (banner_text != NULL && banner_text_size > 0) {
       snprintf(banner_text, banner_text_size, "Save your cloud account first.");
     }
-    return ESP_ERR_INVALID_STATE;
+    ret = ESP_ERR_INVALID_STATE;
+    goto cleanup;
   }
 
-  ret = lm_ctrl_cloud_auth_prepare_request_auth(username, password, &auth, banner_text, banner_text_size);
+  machines = calloc(LM_CTRL_CLOUD_MAX_FLEET, sizeof(*machines));
+  auth = calloc(1, sizeof(*auth));
+  if (machines == NULL || auth == NULL) {
+    if (banner_text != NULL && banner_text_size > 0) {
+      snprintf(banner_text, banner_text_size, "Not enough memory to refresh cloud machines.");
+    }
+    ret = ESP_ERR_NO_MEM;
+    goto cleanup;
+  }
+
+  ret = lm_ctrl_cloud_auth_prepare_request_auth(username, password, auth, banner_text, banner_text_size);
   if (ret != ESP_OK) {
-    return ret;
+    goto cleanup;
   }
 
-  headers[0] = (lm_ctrl_cloud_http_header_t){ .name = "Authorization", .value = auth.auth_header };
-  headers[1] = (lm_ctrl_cloud_http_header_t){ .name = "X-App-Installation-Id", .value = auth.installation_id };
-  headers[2] = (lm_ctrl_cloud_http_header_t){ .name = "X-Timestamp", .value = auth.timestamp };
-  headers[3] = (lm_ctrl_cloud_http_header_t){ .name = "X-Nonce", .value = auth.nonce };
-  headers[4] = (lm_ctrl_cloud_http_header_t){ .name = "X-Request-Signature", .value = auth.signature_b64 };
+  headers[0] = (lm_ctrl_cloud_http_header_t){ .name = "Authorization", .value = auth->auth_header };
+  headers[1] = (lm_ctrl_cloud_http_header_t){ .name = "X-App-Installation-Id", .value = auth->installation_id };
+  headers[2] = (lm_ctrl_cloud_http_header_t){ .name = "X-Timestamp", .value = auth->timestamp };
+  headers[3] = (lm_ctrl_cloud_http_header_t){ .name = "X-Nonce", .value = auth->nonce };
+  headers[4] = (lm_ctrl_cloud_http_header_t){ .name = "X-Request-Signature", .value = auth->signature_b64 };
 
   ret = lm_ctrl_cloud_auth_http_request_capture(
     LM_CTRL_CLOUD_HOST,
@@ -83,7 +94,7 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
     if (banner_text != NULL && banner_text_size > 0) {
       snprintf(banner_text, banner_text_size, "Machine lookup request failed.");
     }
-    return ret;
+    goto cleanup;
   }
 
   if (status_code < 200 || status_code >= 300) {
@@ -92,14 +103,17 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
     }
     ESP_LOGW(TAG, "Machine lookup failed with status %d: %.200s", status_code, response_body != NULL ? response_body : "");
     free(response_body);
+    response_body = NULL;
     if (banner_text != NULL && banner_text_size > 0) {
       snprintf(banner_text, banner_text_size, "Machine lookup failed with status %d.", status_code);
     }
-    return ESP_FAIL;
+    ret = ESP_FAIL;
+    goto cleanup;
   }
 
   ret = parse_customer_fleet(response_body, machines, LM_CTRL_CLOUD_MAX_FLEET, &machine_count);
   free(response_body);
+  response_body = NULL;
   if (ret != ESP_OK) {
     if (banner_text != NULL && banner_text_size > 0) {
       snprintf(banner_text, banner_text_size, "No machines found in the La Marzocco account.");
@@ -109,7 +123,7 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
     clear_selected_machine_locked();
     mark_status_dirty_locked();
     unlock_state();
-    return ret;
+    goto cleanup;
   }
 
   lock_state();
@@ -143,7 +157,7 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
       if (banner_text != NULL && banner_text_size > 0) {
         snprintf(banner_text, banner_text_size, "Machines loaded, but saving the selection failed.");
       }
-      return ret;
+      goto cleanup;
     }
     if (selection_changed != NULL) {
       *selection_changed = true;
@@ -158,7 +172,23 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
     }
   }
 
-  return ESP_OK;
+  ret = ESP_OK;
+
+cleanup:
+  free(response_body);
+  if (auth != NULL) {
+    secure_zero(auth, sizeof(*auth));
+    free(auth);
+  }
+  secure_zero(username, sizeof(username));
+  secure_zero(password, sizeof(password));
+  secure_zero(selected_serial, sizeof(selected_serial));
+  secure_zero(&selected_machine, sizeof(selected_machine));
+  if (machines != NULL) {
+    secure_zero(machines, LM_CTRL_CLOUD_MAX_FLEET * sizeof(*machines));
+  }
+  free(machines);
+  return ret;
 }
 
 static void parse_cloud_command_response_body(const char *response_body, lm_ctrl_cloud_command_result_t *result) {
