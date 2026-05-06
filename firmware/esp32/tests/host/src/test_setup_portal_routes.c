@@ -11,6 +11,12 @@ static int s_stub_wifi_store_count;
 static int s_stub_wifi_apply_count;
 static esp_err_t s_stub_wifi_store_ret;
 static esp_err_t s_stub_wifi_apply_ret;
+static char s_stub_cloud_username[96];
+static char s_stub_cloud_password[128];
+static int s_stub_cloud_store_count;
+static int s_stub_cloud_refresh_count;
+static esp_err_t s_stub_cloud_store_ret;
+static esp_err_t s_stub_cloud_refresh_ret;
 
 #include "../../../main/setup_portal_routes.c"
 
@@ -28,6 +34,12 @@ static void reset_route_test_state(void) {
   s_stub_wifi_apply_count = 0;
   s_stub_wifi_store_ret = ESP_OK;
   s_stub_wifi_apply_ret = ESP_OK;
+  memset(s_stub_cloud_username, 0, sizeof(s_stub_cloud_username));
+  memset(s_stub_cloud_password, 0, sizeof(s_stub_cloud_password));
+  s_stub_cloud_store_count = 0;
+  s_stub_cloud_refresh_count = 0;
+  s_stub_cloud_store_ret = ESP_OK;
+  s_stub_cloud_refresh_ret = ESP_OK;
   s_state.web_auth_mode = LM_CTRL_WEB_AUTH_UNSET;
   strcpy(s_state.hostname, LM_CTRL_WIFI_DEFAULT_HOSTNAME);
 }
@@ -78,13 +90,14 @@ int64_t current_epoch_ms(void) {
 }
 
 esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_text_size, bool *selection_changed) {
+  s_stub_cloud_refresh_count++;
   if (banner_text != NULL && banner_text_size > 0) {
-    banner_text[0] = '\0';
+    copy_text(banner_text, banner_text_size, "Cloud machines loaded.");
   }
   if (selection_changed != NULL) {
     *selection_changed = false;
   }
-  return ESP_OK;
+  return s_stub_cloud_refresh_ret;
 }
 
 void lm_ctrl_cloud_live_updates_stop(bool wait_for_shutdown) {
@@ -96,12 +109,13 @@ esp_err_t lm_ctrl_cloud_live_updates_ensure_task(void) {
 }
 
 esp_err_t lm_ctrl_settings_save_cloud_credentials(const char *username, const char *password, bool *credentials_changed) {
-  (void)username;
-  (void)password;
+  s_stub_cloud_store_count++;
+  copy_text(s_stub_cloud_username, sizeof(s_stub_cloud_username), username);
+  copy_text(s_stub_cloud_password, sizeof(s_stub_cloud_password), password);
   if (credentials_changed != NULL) {
     *credentials_changed = true;
   }
-  return ESP_OK;
+  return s_stub_cloud_store_ret;
 }
 
 esp_err_t lm_ctrl_settings_save_machine_selection(const lm_ctrl_cloud_machine_t *machine) {
@@ -475,6 +489,51 @@ static int test_login_post_creates_usable_session_for_protected_post(void) {
   return 0;
 }
 
+static int test_cloud_post_uses_authenticated_session_with_admin_password(void) {
+  httpd_req_t *login_req = test_httpd_request_create();
+  httpd_req_t *cloud_req = test_httpd_request_create();
+  char csrf_token[LM_CTRL_RANDOM_TOKEN_HEX_LEN] = {0};
+  char body[256];
+
+  ASSERT_TRUE(login_req != NULL);
+  ASSERT_TRUE(cloud_req != NULL);
+  reset_route_test_state();
+  copy_text(s_stub_web_password, sizeof(s_stub_web_password), "secret123");
+  s_state.web_auth_mode = LM_CTRL_WEB_AUTH_ENABLED;
+  s_state.has_cloud_provisioning = true;
+  copy_text(s_state.hostname, sizeof(s_state.hostname), LM_CTRL_WIFI_DEFAULT_HOSTNAME);
+
+  test_httpd_request_set_uri(login_req, "/login");
+  ASSERT_EQ_INT(ESP_OK, test_httpd_request_set_body(login_req, "password=secret123"));
+  ASSERT_EQ_INT(ESP_OK, handle_login_post(login_req));
+  extract_csrf_token(test_httpd_request_body(login_req), csrf_token, sizeof(csrf_token));
+  ASSERT_TRUE(csrf_token[0] != '\0');
+
+  test_httpd_request_set_uri(cloud_req, "/cloud");
+  ASSERT_EQ_INT(ESP_OK, test_httpd_request_set_cookie(cloud_req, test_httpd_response_header(login_req, "Set-Cookie")));
+  snprintf(
+    body,
+    sizeof(body),
+    "cloud_username=user%%40example.com&cloud_password=cloudsecret&csrf_token=%s",
+    csrf_token
+  );
+  ASSERT_EQ_INT(ESP_OK, test_httpd_request_set_body(cloud_req, body));
+
+  ASSERT_EQ_INT(ESP_OK, handle_cloud_post(cloud_req));
+  ASSERT_EQ_INT(1, s_stub_cloud_store_count);
+  ASSERT_EQ_INT(1, s_stub_cloud_refresh_count);
+  ASSERT_STREQ("user@example.com", s_stub_cloud_username);
+  ASSERT_STREQ("cloudsecret", s_stub_cloud_password);
+  ASSERT_STREQ("text/html; charset=utf-8", test_httpd_request_type(cloud_req));
+  ASSERT_CONTAINS(test_httpd_request_body(cloud_req), "Cloud machines loaded.");
+  ASSERT_CONTAINS(test_httpd_request_body(cloud_req), "csrf_token");
+  ASSERT_FALSE(strstr(test_httpd_request_body(cloud_req), "Controller Login") != NULL);
+
+  test_httpd_request_destroy(login_req);
+  test_httpd_request_destroy(cloud_req);
+  return 0;
+}
+
 static int test_clearing_password_returns_portal_to_open_mode(void) {
   httpd_req_t *login_req = test_httpd_request_create();
   httpd_req_t *clear_req = test_httpd_request_create();
@@ -588,6 +647,7 @@ int run_setup_portal_route_tests(void) {
   RUN_TEST(test_validate_advanced_form_accepts_confirmed_reduction_and_regular_updates);
   RUN_TEST(test_access_setup_post_with_password_renders_portal_and_sets_cookie);
   RUN_TEST(test_login_post_creates_usable_session_for_protected_post);
+  RUN_TEST(test_cloud_post_uses_authenticated_session_with_admin_password);
   RUN_TEST(test_clearing_password_returns_portal_to_open_mode);
   RUN_TEST(test_wifi_post_stores_credentials_and_renders_success);
   RUN_TEST(test_wifi_post_reuses_stored_password_for_same_ssid);
