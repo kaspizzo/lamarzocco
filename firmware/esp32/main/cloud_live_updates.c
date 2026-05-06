@@ -793,13 +793,15 @@ void lm_ctrl_cloud_live_updates_stop(bool wait_for_stop) {
   task = s_state.cloud_ws_task;
   unlock_state();
 
-  ESP_LOGW(
-    TAG,
-    "Cloud websocket stop requested wait=%d client=%p task=%p",
-    wait_for_stop ? 1 : 0,
-    (void *)client,
-    (void *)task
-  );
+  if (client != NULL || task != NULL || wait_for_stop) {
+    ESP_LOGI(
+      TAG,
+      "Cloud websocket stop requested wait=%d client=%p task=%p",
+      wait_for_stop ? 1 : 0,
+      (void *)client,
+      (void *)task
+    );
+  }
 
   if (client != NULL && esp_websocket_client_is_connected(client)) {
     esp_websocket_client_stop(client);

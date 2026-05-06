@@ -771,7 +771,7 @@ esp_err_t lm_ctrl_cloud_auth_prepare_request_auth(
   char *error_text,
   size_t error_text_size
 ) {
-  char access_token[LM_CTRL_CLOUD_WS_TOKEN_LEN];
+  char *access_token = NULL;
   uint8_t secret[LM_CTRL_CLOUD_SECRET_LEN];
   uint8_t private_key_der[LM_CTRL_PRIVATE_KEY_DER_MAX];
   size_t private_key_der_len = 0;
@@ -782,11 +782,19 @@ esp_err_t lm_ctrl_cloud_auth_prepare_request_auth(
   }
 
   memset(auth, 0, sizeof(*auth));
+  access_token = calloc(1, LM_CTRL_CLOUD_WS_TOKEN_LEN);
+  if (access_token == NULL) {
+    if (error_text != NULL && error_text_size > 0) {
+      snprintf(error_text, error_text_size, "Not enough memory to prepare cloud authentication.");
+    }
+    return ESP_ERR_NO_MEM;
+  }
+
   ret = lm_ctrl_cloud_session_fetch_access_token_cached(
     username,
     password,
     access_token,
-    sizeof(access_token),
+    LM_CTRL_CLOUD_WS_TOKEN_LEN,
     error_text,
     error_text_size
   );
@@ -832,7 +840,10 @@ esp_err_t lm_ctrl_cloud_auth_prepare_request_auth(
   ret = ESP_OK;
 
 cleanup:
-  secure_zero(access_token, sizeof(access_token));
+  if (access_token != NULL) {
+    secure_zero(access_token, LM_CTRL_CLOUD_WS_TOKEN_LEN);
+    free(access_token);
+  }
   clear_installation_material(NULL, 0, secret, sizeof(secret), private_key_der, sizeof(private_key_der));
   return ret;
 }

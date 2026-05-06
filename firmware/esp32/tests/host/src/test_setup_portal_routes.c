@@ -534,6 +534,43 @@ static int test_cloud_post_uses_authenticated_session_with_admin_password(void) 
   return 0;
 }
 
+static int test_cloud_refresh_post_uses_authenticated_session_with_admin_password(void) {
+  httpd_req_t *login_req = test_httpd_request_create();
+  httpd_req_t *refresh_req = test_httpd_request_create();
+  char csrf_token[LM_CTRL_RANDOM_TOKEN_HEX_LEN] = {0};
+  char body[128];
+
+  ASSERT_TRUE(login_req != NULL);
+  ASSERT_TRUE(refresh_req != NULL);
+  reset_route_test_state();
+  copy_text(s_stub_web_password, sizeof(s_stub_web_password), "secret123");
+  s_state.web_auth_mode = LM_CTRL_WEB_AUTH_ENABLED;
+  s_state.has_cloud_credentials = true;
+  copy_text(s_state.hostname, sizeof(s_state.hostname), LM_CTRL_WIFI_DEFAULT_HOSTNAME);
+
+  test_httpd_request_set_uri(login_req, "/login");
+  ASSERT_EQ_INT(ESP_OK, test_httpd_request_set_body(login_req, "password=secret123"));
+  ASSERT_EQ_INT(ESP_OK, handle_login_post(login_req));
+  extract_csrf_token(test_httpd_request_body(login_req), csrf_token, sizeof(csrf_token));
+  ASSERT_TRUE(csrf_token[0] != '\0');
+
+  test_httpd_request_set_uri(refresh_req, "/cloud-refresh");
+  ASSERT_EQ_INT(ESP_OK, test_httpd_request_set_cookie(refresh_req, test_httpd_response_header(login_req, "Set-Cookie")));
+  snprintf(body, sizeof(body), "csrf_token=%s", csrf_token);
+  ASSERT_EQ_INT(ESP_OK, test_httpd_request_set_body(refresh_req, body));
+
+  ASSERT_EQ_INT(ESP_OK, handle_cloud_refresh_post(refresh_req));
+  ASSERT_EQ_INT(1, s_stub_cloud_refresh_count);
+  ASSERT_STREQ("text/html; charset=utf-8", test_httpd_request_type(refresh_req));
+  ASSERT_CONTAINS(test_httpd_request_body(refresh_req), "Cloud machines loaded.");
+  ASSERT_CONTAINS(test_httpd_request_body(refresh_req), "csrf_token");
+  ASSERT_FALSE(strstr(test_httpd_request_body(refresh_req), "Controller Login") != NULL);
+
+  test_httpd_request_destroy(login_req);
+  test_httpd_request_destroy(refresh_req);
+  return 0;
+}
+
 static int test_clearing_password_returns_portal_to_open_mode(void) {
   httpd_req_t *login_req = test_httpd_request_create();
   httpd_req_t *clear_req = test_httpd_request_create();
@@ -648,6 +685,7 @@ int run_setup_portal_route_tests(void) {
   RUN_TEST(test_access_setup_post_with_password_renders_portal_and_sets_cookie);
   RUN_TEST(test_login_post_creates_usable_session_for_protected_post);
   RUN_TEST(test_cloud_post_uses_authenticated_session_with_admin_password);
+  RUN_TEST(test_cloud_refresh_post_uses_authenticated_session_with_admin_password);
   RUN_TEST(test_clearing_password_returns_portal_to_open_mode);
   RUN_TEST(test_wifi_post_stores_credentials_and_renders_success);
   RUN_TEST(test_wifi_post_reuses_stored_password_for_same_ssid);
