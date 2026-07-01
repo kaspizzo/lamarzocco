@@ -90,9 +90,10 @@ Local controller setup portal preview:
 If you want to flash the controller:
 
 1. Read the flashing guide in [`docs/controller/FLASHING_CONTROLLER.md`](docs/controller/FLASHING_CONTROLLER.md)
-2. Read the setup flow in [`docs/controller/SETUP_GUIDE.md`](docs/controller/SETUP_GUIDE.md)
-3. For firmware-specific notes, see [`firmware/esp32/README.md`](firmware/esp32/README.md)
-4. For controller UI screenshots, see [`docs/controller/SCREENSHOTS.md`](docs/controller/SCREENSHOTS.md)
+2. On macOS, the beginner-friendly walkthrough is [`docs/controller/FLASHING_CONTROLLER_MAC.md`](docs/controller/FLASHING_CONTROLLER_MAC.md)
+3. Read the setup flow in [`docs/controller/SETUP_GUIDE.md`](docs/controller/SETUP_GUIDE.md)
+4. For firmware-specific notes, see [`firmware/esp32/README.md`](firmware/esp32/README.md)
+5. For controller UI screenshots, see [`docs/controller/SCREENSHOTS.md`](docs/controller/SCREENSHOTS.md)
 
 ## Setup notes
 
