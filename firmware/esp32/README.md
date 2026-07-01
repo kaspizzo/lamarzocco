@@ -302,4 +302,5 @@ Use an ESP-IDF-managed terminal such as `ESP-IDF PowerShell` or `ESP-IDF Command
 Detailed flashing guide and setup notes:
 
 - `docs/controller/FLASHING_CONTROLLER.md`
+- `docs/controller/FLASHING_CONTROLLER_MAC.md`
 - `docs/controller/SETUP_GUIDE.md`

@@ -121,3 +121,4 @@ The current firmware provides a real local setup path:
 For step-by-step flashing instructions, see:
 
 - [FLASHING_CONTROLLER.md](./FLASHING_CONTROLLER.md)
+- [FLASHING_CONTROLLER_MAC.md](./FLASHING_CONTROLLER_MAC.md)

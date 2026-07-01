@@ -9,6 +9,9 @@ This repository currently supports two documented flashing paths:
 - `macOS/Linux`: use the local Bash helper `./dev.sh`
 - `Windows (native)`: use the official ESP-IDF Windows environment with `idf.py`
 
+For a slower, beginner-friendly macOS walkthrough, see
+[`FLASHING_CONTROLLER_MAC.md`](./FLASHING_CONTROLLER_MAC.md).
+
 ## 1. Requirements
 
 - a USB data cable
@@ -174,6 +177,7 @@ This is the standard Windows path for this repository. Windows uses `COMx` seria
 
 ## 5. See Also
 
+- [`FLASHING_CONTROLLER_MAC.md`](./FLASHING_CONTROLLER_MAC.md)
 - [`firmware/esp32/README.md`](../../firmware/esp32/README.md)
 - [`SETUP_GUIDE.md`](./SETUP_GUIDE.md)
 - [`SCREENSHOTS.md`](./SCREENSHOTS.md)
