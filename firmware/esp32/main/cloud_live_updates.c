@@ -825,6 +825,32 @@ void lm_ctrl_cloud_live_updates_stop(bool wait_for_stop) {
   set_brew_timer_state(false, 0);
 }
 
+esp_err_t lm_ctrl_cloud_live_updates_pause_for_http(void) {
+  TaskHandle_t websocket_task = NULL;
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+
+  lock_state();
+  websocket_task = s_state.cloud_ws_task;
+  unlock_state();
+
+  if (websocket_task == NULL || websocket_task == current_task) {
+    return ESP_OK;
+  }
+
+  ESP_LOGI(TAG, "Pausing cloud websocket to reserve internal DMA memory for HTTPS");
+  lm_ctrl_cloud_live_updates_stop(true);
+
+  lock_state();
+  websocket_task = s_state.cloud_ws_task;
+  unlock_state();
+  if (websocket_task != NULL) {
+    ESP_LOGW(TAG, "Cloud websocket did not stop before HTTPS deadline");
+    return ESP_ERR_TIMEOUT;
+  }
+
+  return ESP_OK;
+}
+
 esp_err_t lm_ctrl_cloud_live_updates_ensure_task(void) {
   esp_err_t ret = ESP_OK;
   bool should_run = false;

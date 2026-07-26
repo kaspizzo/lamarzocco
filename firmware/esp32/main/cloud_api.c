@@ -15,6 +15,7 @@
 
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -416,7 +417,7 @@ static esp_err_t http_buffer_append(lm_ctrl_http_buffer_t *buffer, const char *d
       return ESP_ERR_NO_MEM;
     }
 
-    new_data = realloc(buffer->data, new_capacity);
+    new_data = heap_caps_realloc(buffer->data, new_capacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (new_data == NULL) {
       buffer->append_error = ESP_ERR_NO_MEM;
       return ESP_ERR_NO_MEM;
@@ -570,8 +571,8 @@ esp_err_t lm_ctrl_cloud_http_request(
     .event_handler = http_event_handler,
     .crt_bundle_attach = esp_crt_bundle_attach,
     .addr_type = HTTP_ADDR_TYPE_INET,
-    .buffer_size = 4096,
-    .buffer_size_tx = 2048,
+    .buffer_size = 2048,
+    .buffer_size_tx = 1024,
   };
   esp_http_client_handle_t client;
   lm_ctrl_http_buffer_t buffer = {0};
@@ -607,6 +608,17 @@ esp_err_t lm_ctrl_cloud_http_request(
 
   ret = esp_http_client_perform(client);
   *status_code = esp_http_client_get_status_code(client);
+  if (ret != ESP_OK) {
+    ESP_LOGE(
+      TAG,
+      "HTTP perform failed before cleanup internal=%u largest_internal=%u dma=%u largest_dma=%u: %s",
+      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+      (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
+      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA),
+      esp_err_to_name(ret)
+    );
+  }
   esp_http_client_cleanup(client);
 
   if (ret != ESP_OK) {
