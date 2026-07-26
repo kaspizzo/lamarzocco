@@ -18,6 +18,8 @@ esp_err_t lm_ctrl_cloud_live_updates_request_start(void);
 esp_err_t lm_ctrl_cloud_live_updates_ensure_task(void);
 /** Stop the websocket worker and optionally wait for its task to exit. */
 void lm_ctrl_cloud_live_updates_stop(bool wait_for_stop);
+/** Stop a websocket owned by another task before starting a standalone HTTPS request. */
+esp_err_t lm_ctrl_cloud_live_updates_pause_for_http(void);
 /** Return whether the websocket path is starting or already connected. */
 bool lm_ctrl_cloud_live_updates_active(void);
 /** Return whether the websocket is fully connected and subscribed. */

@@ -982,6 +982,10 @@ esp_err_t lm_ctrl_wifi_init(void) {
   if (s_state.cloud_auth_lock == NULL) {
     return ESP_ERR_NO_MEM;
   }
+  s_state.cloud_http_lock = xSemaphoreCreateMutex();
+  if (s_state.cloud_http_lock == NULL) {
+    return ESP_ERR_NO_MEM;
+  }
 
   ESP_RETURN_ON_ERROR(lm_ctrl_secure_storage_init(), TAG, "Failed to initialize encrypted controller storage");
   ret = lm_ctrl_settings_load();

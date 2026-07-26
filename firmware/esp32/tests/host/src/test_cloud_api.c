@@ -1,6 +1,7 @@
 #include "cloud_api.h"
 #include "cJSON.h"
 #include "esp_http_client.h"
+#include "esp_heap_caps.h"
 #include "mbedtls/base64.h"
 #include "machine_link_types.h"
 #include "test_psa.h"
@@ -360,6 +361,12 @@ static int test_http_request_collects_body_and_server_date_metadata(void) {
   ASSERT_STREQ(RESPONSE, response_body);
   ASSERT_EQ_INT(200, status_code);
   ASSERT_EQ_I64(1700000000000LL, response_meta.server_epoch_ms);
+  ASSERT_EQ_INT(2048, test_http_client_get_last_buffer_size());
+  ASSERT_EQ_INT(1024, test_http_client_get_last_tx_buffer_size());
+  ASSERT_EQ_U32(
+    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
+    test_heap_caps_get_last_realloc_caps()
+  );
 
   free(response_body);
   return 0;

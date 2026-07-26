@@ -106,14 +106,16 @@ typedef struct {
    *
    * 1. `lock` protects the shared `s_state` snapshot and should only be held
    *    for short, in-memory reads/writes.
-   * 2. `cloud_auth_lock` serializes token/sign-in work and must only be taken
-   *    after `lock` has been released again.
+   * 2. `cloud_auth_lock` serializes token/sign-in work and `cloud_http_lock`
+   *    serializes complete HTTPS requests. Both must only be taken after
+   *    `lock` has been released again.
    * 3. Blocking work such as HTTP, websocket operations, NVS I/O, or other
    *    cross-module callbacks should run on copied state after releasing
    *    `lock`, so future changes keep a simple apply-then-notify pattern.
    */
   SemaphoreHandle_t lock;
   SemaphoreHandle_t cloud_auth_lock;
+  SemaphoreHandle_t cloud_http_lock;
 } lm_ctrl_wifi_state_t;
 
 extern lm_ctrl_wifi_state_t s_state;

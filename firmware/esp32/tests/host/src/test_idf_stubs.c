@@ -1,6 +1,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_err.h"
 #include "esp_http_client.h"
+#include "esp_heap_caps.h"
 #include "nvs_sec_provider.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -56,6 +57,9 @@ static test_http_client_event_spec_t s_http_client_events[16];
 static size_t s_http_client_event_count = 0;
 static int s_http_client_status_code = 0;
 static esp_err_t s_http_client_perform_result = ESP_FAIL;
+static int s_http_client_last_buffer_size = 0;
+static int s_http_client_last_tx_buffer_size = 0;
+static uint32_t s_heap_caps_last_realloc_caps = 0;
 
 void test_psa_reset(void) {
   memset(s_psa_keys, 0, sizeof(s_psa_keys));
@@ -324,6 +328,25 @@ const char *esp_err_to_name(esp_err_t err) {
   }
 }
 
+void *heap_caps_realloc(void *ptr, size_t size, uint32_t caps) {
+  s_heap_caps_last_realloc_caps = caps;
+  return realloc(ptr, size);
+}
+
+size_t heap_caps_get_free_size(uint32_t caps) {
+  (void)caps;
+  return 1024U * 1024U;
+}
+
+size_t heap_caps_get_largest_free_block(uint32_t caps) {
+  (void)caps;
+  return 512U * 1024U;
+}
+
+uint32_t test_heap_caps_get_last_realloc_caps(void) {
+  return s_heap_caps_last_realloc_caps;
+}
+
 esp_err_t esp_crt_bundle_attach(void *config) {
   (void)config;
   return ESP_OK;
@@ -343,6 +366,8 @@ esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *co
 
   client->config = *config;
   client->status_code = s_http_client_status_code;
+  s_http_client_last_buffer_size = config->buffer_size;
+  s_http_client_last_tx_buffer_size = config->buffer_size_tx;
   return client;
 }
 
@@ -408,6 +433,9 @@ void test_http_client_reset(void) {
   s_http_client_event_count = 0;
   s_http_client_status_code = 0;
   s_http_client_perform_result = ESP_FAIL;
+  s_http_client_last_buffer_size = 0;
+  s_http_client_last_tx_buffer_size = 0;
+  s_heap_caps_last_realloc_caps = 0;
 }
 
 void test_http_client_set_status_code(int status_code) {
@@ -416,6 +444,14 @@ void test_http_client_set_status_code(int status_code) {
 
 void test_http_client_set_perform_result(esp_err_t result) {
   s_http_client_perform_result = result;
+}
+
+int test_http_client_get_last_buffer_size(void) {
+  return s_http_client_last_buffer_size;
+}
+
+int test_http_client_get_last_tx_buffer_size(void) {
+  return s_http_client_last_tx_buffer_size;
 }
 
 void test_http_client_set_response_events(const test_http_client_event_spec_t *events, size_t event_count) {

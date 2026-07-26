@@ -69,7 +69,7 @@ static void mark_cloud_http_request_started(void) {
   unlock_state();
 }
 
-static void mark_cloud_http_request_finished(void) {
+static bool mark_cloud_http_request_finished(void) {
   bool should_reconsider_websocket = false;
 
   lock_state();
@@ -79,9 +79,7 @@ static void mark_cloud_http_request_finished(void) {
   should_reconsider_websocket = s_state.cloud_http_requests_in_flight == 0;
   unlock_state();
 
-  if (should_reconsider_websocket) {
-    (void)lm_ctrl_cloud_live_updates_ensure_task();
-  }
+  return should_reconsider_websocket;
 }
 
 esp_err_t lm_ctrl_cloud_auth_http_request_capture(
@@ -98,20 +96,49 @@ esp_err_t lm_ctrl_cloud_auth_http_request_capture(
   lm_ctrl_cloud_http_response_meta_t *response_meta
 ) {
   esp_err_t ret;
+  esp_err_t pause_ret;
+  SemaphoreHandle_t http_lock = NULL;
+  bool should_reconsider_websocket = false;
   lm_ctrl_cloud_http_response_meta_t local_response_meta = {0};
   lm_ctrl_cloud_http_response_meta_t *effective_response_meta =
     response_meta != NULL ? response_meta : &local_response_meta;
 
+  lock_state();
+  http_lock = s_state.cloud_http_lock;
+  unlock_state();
+  if (http_lock != NULL) {
+    xSemaphoreTake(http_lock, portMAX_DELAY);
+  }
+
+  /*
+   * Keep at most one TLS client alive while an HTTP request is active. On the
+   * ESP32-S3 the hardware AES path needs transient DMA-capable internal RAM,
+   * which is easy to exhaust when the websocket TLS client is alive too.
+   */
+  mark_cloud_http_request_started();
+  pause_ret = lm_ctrl_cloud_live_updates_pause_for_http();
+  if (pause_ret != ESP_OK) {
+    should_reconsider_websocket = mark_cloud_http_request_finished();
+    if (http_lock != NULL) {
+      xSemaphoreGive(http_lock);
+    }
+    if (should_reconsider_websocket) {
+      (void)lm_ctrl_cloud_live_updates_ensure_task();
+    }
+    return pause_ret;
+  }
+
   ESP_LOGI(
     TAG,
-    "HTTP request: %s%s heap=%u internal=%u largest_internal=%u",
+    "HTTP request: %s%s heap=%u internal=%u largest_internal=%u dma=%u largest_dma=%u",
     host,
     path,
     (unsigned)esp_get_free_heap_size(),
     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)
+    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+    (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
+    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA)
   );
-  mark_cloud_http_request_started();
   ret = lm_ctrl_cloud_http_request(
     host,
     path,
@@ -128,16 +155,24 @@ esp_err_t lm_ctrl_cloud_auth_http_request_capture(
   if (ret == ESP_OK && effective_response_meta->server_epoch_ms > 0) {
     note_cloud_server_epoch_ms(effective_response_meta->server_epoch_ms);
   }
-  mark_cloud_http_request_finished();
+  should_reconsider_websocket = mark_cloud_http_request_finished();
+  if (http_lock != NULL) {
+    xSemaphoreGive(http_lock);
+  }
+  if (should_reconsider_websocket) {
+    (void)lm_ctrl_cloud_live_updates_ensure_task();
+  }
   if (ret != ESP_OK) {
     ESP_LOGE(
       TAG,
-      "HTTP request failed for %s%s heap=%u internal=%u largest_internal=%u: %s",
+      "HTTP request failed for %s%s heap=%u internal=%u largest_internal=%u dma=%u largest_dma=%u: %s",
       host,
       path,
       (unsigned)esp_get_free_heap_size(),
       (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+      (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
+      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA),
       esp_err_to_name(ret)
     );
   }

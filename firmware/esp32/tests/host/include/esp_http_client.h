@@ -60,3 +60,5 @@ void test_http_client_reset(void);
 void test_http_client_set_status_code(int status_code);
 void test_http_client_set_perform_result(esp_err_t result);
 void test_http_client_set_response_events(const test_http_client_event_spec_t *events, size_t event_count);
+int test_http_client_get_last_buffer_size(void);
+int test_http_client_get_last_tx_buffer_size(void);
