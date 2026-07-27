@@ -895,7 +895,10 @@ static void cloud_probe_task(void *arg) {
   char username[96];
   char password[128];
   char access_token[768];
+  char fleet_status[160];
   bool should_probe = false;
+  bool should_refresh_fleet = false;
+  bool fleet_refreshed = false;
   TaskHandle_t current_task;
 
   (void)arg;
@@ -903,6 +906,7 @@ static void cloud_probe_task(void *arg) {
 
   lock_state();
   should_probe = s_state.sta_connected && s_state.has_cloud_credentials;
+  should_refresh_fleet = s_state.has_machine_selection && s_state.fleet_count == 0;
   copy_text(username, sizeof(username), s_state.cloud_username);
   copy_text(password, sizeof(password), s_state.cloud_password);
   unlock_state();
@@ -911,11 +915,49 @@ static void cloud_probe_task(void *arg) {
     set_cloud_connected(false);
   } else {
     char error_text[160];
+    esp_err_t auth_ret;
 
     error_text[0] = '\0';
-    (void)lm_ctrl_cloud_session_fetch_access_token_cached(username, password, access_token, sizeof(access_token), error_text, sizeof(error_text));
+    auth_ret = lm_ctrl_cloud_session_fetch_access_token_cached(
+      username,
+      password,
+      access_token,
+      sizeof(access_token),
+      error_text,
+      sizeof(error_text)
+    );
+    if (auth_ret == ESP_OK && should_refresh_fleet) {
+      bool selection_changed = false;
+      esp_err_t fleet_ret;
+
+      fleet_status[0] = '\0';
+      ESP_LOGI(TAG, "Refreshing stored machine selection on first Lion connection");
+      fleet_ret = lm_ctrl_cloud_session_refresh_fleet_on_connect(
+        fleet_status,
+        sizeof(fleet_status),
+        &selection_changed
+      );
+      if (fleet_ret == ESP_OK) {
+        fleet_refreshed = true;
+        ESP_LOGI(
+          TAG,
+          "Stored machine selection refreshed%s",
+          selection_changed ? " and updated" : ""
+        );
+      } else {
+        ESP_LOGW(
+          TAG,
+          "Initial machine refresh failed; continuing with stored selection: %s (%s)",
+          fleet_status[0] != '\0' ? fleet_status : esp_err_to_name(fleet_ret),
+          esp_err_to_name(fleet_ret)
+        );
+      }
+    }
   }
 
+  if (fleet_refreshed) {
+    (void)lm_ctrl_machine_link_request_sync();
+  }
   lock_state();
   if (s_state.cloud_probe_task == current_task) {
     s_state.cloud_probe_task = NULL;

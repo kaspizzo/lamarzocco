@@ -23,6 +23,15 @@ typedef struct {
 
 /** Refresh the customer fleet from the cloud account and optionally persist an auto-restored selection. */
 esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_text_size, bool *selection_changed);
+/**
+ * Refresh the customer fleet during startup without discarding a previously
+ * stored machine when Lion temporarily returns an empty or incomplete list.
+ */
+esp_err_t lm_ctrl_cloud_session_refresh_fleet_on_connect(
+  char *status_text,
+  size_t status_text_size,
+  bool *selection_changed
+);
 /** Execute a signed cloud command against the currently selected machine. */
 esp_err_t lm_ctrl_cloud_session_execute_machine_command(
   const char *command,
