@@ -23,7 +23,12 @@ static esp_err_t parse_customer_fleet(
   return lm_ctrl_cloud_parse_customer_fleet(response_body, machines, max_machines, machine_count);
 }
 
-esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_text_size, bool *selection_changed) {
+static esp_err_t refresh_fleet(
+  char *banner_text,
+  size_t banner_text_size,
+  bool *selection_changed,
+  bool preserve_existing_selection
+) {
   char username[96];
   char password[128];
   char selected_serial[32];
@@ -34,6 +39,7 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
   esp_err_t ret;
   bool restored_selection = false;
   bool auto_selected = false;
+  bool preserved_selection = false;
   lm_ctrl_cloud_machine_t selected_machine = {0};
   lm_ctrl_cloud_http_header_t headers[5];
   lm_ctrl_cloud_request_auth_t *auth = NULL;
@@ -118,11 +124,13 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
     if (banner_text != NULL && banner_text_size > 0) {
       snprintf(banner_text, banner_text_size, "No machines found in the La Marzocco account.");
     }
-    lock_state();
-    clear_fleet_locked();
-    clear_selected_machine_locked();
-    mark_status_dirty_locked();
-    unlock_state();
+    if (!preserve_existing_selection) {
+      lock_state();
+      clear_fleet_locked();
+      clear_selected_machine_locked();
+      mark_status_dirty_locked();
+      unlock_state();
+    }
     goto cleanup;
   }
 
@@ -131,7 +139,7 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
   memcpy(s_state.fleet, machines, machine_count * sizeof(machines[0]));
   s_state.fleet_count = machine_count;
   restored_selection = lm_ctrl_cloud_find_machine_by_serial(selected_serial, machines, machine_count, &selected_machine);
-  if (!restored_selection) {
+  if (!restored_selection && (!preserve_existing_selection || selected_serial[0] == '\0')) {
     restored_selection = lm_ctrl_cloud_resolve_effective_machine_selection(
       NULL,
       false,
@@ -145,8 +153,10 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
     s_state.selected_machine = selected_machine;
     s_state.cloud_machine_status = selected_machine.cloud_status;
     s_state.has_machine_selection = true;
-  } else if (selected_serial[0] != '\0') {
+  } else if (selected_serial[0] != '\0' && !preserve_existing_selection) {
     clear_selected_machine_locked();
+  } else if (selected_serial[0] != '\0') {
+    preserved_selection = true;
   }
   mark_status_dirty_locked();
   unlock_state();
@@ -167,6 +177,8 @@ esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_t
   if (banner_text != NULL && banner_text_size > 0) {
     if (auto_selected) {
       snprintf(banner_text, banner_text_size, "Cloud account verified. One machine was found and selected automatically.");
+    } else if (preserved_selection) {
+      snprintf(banner_text, banner_text_size, "Cloud account verified. Existing machine selection retained.");
     } else {
       snprintf(banner_text, banner_text_size, "Cloud account verified. Select your machine below.");
     }
@@ -189,6 +201,18 @@ cleanup:
   }
   free(machines);
   return ret;
+}
+
+esp_err_t lm_ctrl_cloud_session_refresh_fleet(char *banner_text, size_t banner_text_size, bool *selection_changed) {
+  return refresh_fleet(banner_text, banner_text_size, selection_changed, false);
+}
+
+esp_err_t lm_ctrl_cloud_session_refresh_fleet_on_connect(
+  char *status_text,
+  size_t status_text_size,
+  bool *selection_changed
+) {
+  return refresh_fleet(status_text, status_text_size, selection_changed, true);
 }
 
 static void parse_cloud_command_response_body(const char *response_body, lm_ctrl_cloud_command_result_t *result) {
