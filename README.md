@@ -22,8 +22,8 @@ Today the strongest areas are:
 If you want to help fund hardware testing, you can support the project here:
 [PayPal.Me](https://paypal.me/kaspizzo)
 
-The next bigger hardware-dependent step is proper Brew by Weight support.
-For that, I need an Acaia Lunar with USB-C. My older Lunar with Mini-USB is unfortunately not supported by the implementation path I need for this controller.
+The next bigger hardware-dependent step is validating Brew by Weight support.
+An experimental controller-hosted adapter now connects the older Mini-USB Acaia Lunar and exposes a compatible virtual scale to the machine. Source measurements and reconnection after one scale power cycle were tested on hardware; persistent location calibration and weight-stop precision still need validation. See the [scale setup and troubleshooting guide](docs/controller/SCALE_ADAPTER.md) and [firmware implementation notes](firmware/esp32/README.md#experimental-ble-scale-adapter). BOOKOO Mini/Ultra drivers are available for beta testing and have not been tested on hardware.
 
 ## What is in this repo
 

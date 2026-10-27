@@ -15,6 +15,15 @@ The published screenshots intentionally show the shipped text header and not an 
 | --- | --- | --- |
 | ![Steam boiler screen](./images/steam-boiler.png) | ![Status screen](./images/status.png) | ![Preset screen](./images/preset-view.png) |
 
+## Presets with Brew by Weight
+
+Load/Save follow the summary height so BBW mode and both dose targets remain
+above the buttons. The renderer checks text separation, translated button
+labels and touch targets against the round display boundary in both languages.
+Published screenshots use English.
+
+![Preset with BBW mode and dose targets](./images/preset-bbw-en.png)
+
 ## Setup screens
 
 | First setup AP | Setup with Wi-Fi connected |
@@ -23,7 +32,7 @@ The published screenshots intentionally show the shipped text header and not an 
 
 ## Local setup portal
 
-This screenshot is generated locally from `tools/controller_screenshot_renderer/controller_setup_portal_preview.html`, a preview page that mirrors the current setup portal structure and styling with representative example values. The preview tracks the current `Overview`, `Controller`, `Network`, `Cloud`, `Recipes`, `Advanced`, and `Diagnostics` layout while keeping the shipped presentation text-only.
+This screenshot is generated locally from `tools/controller_screenshot_renderer/controller_setup_portal_preview.html`, a preview page that mirrors the setup portal structure and styling with representative example values. The preview includes `Overview`, `Controller`, `Network`, `Cloud`, `Recipes`, `Scale Adapter`, `Advanced`, and `Diagnostics` while keeping the shipped header text-only. It is a static example; use the live portal to operate the controller.
 
 ![Local controller setup portal preview](./images/controller-setup-portal.png)
 

@@ -20,11 +20,20 @@ static esp_err_t s_stub_cloud_refresh_ret;
 
 #include "../../../main/setup_portal_routes.c"
 
+static lm_scale_adapter_config_t s_stub_scale_config;
+static unsigned s_stub_scale_saves;
+esp_err_t lm_scale_adapter_configure(const lm_scale_adapter_config_t *config) {
+  s_stub_scale_config = *config;
+  ++s_stub_scale_saves;
+  return ESP_OK;
+}
+
 lm_ctrl_wifi_state_t s_state;
 lv_img_dsc_t s_custom_logo_dsc;
 
 static void reset_route_test_state(void) {
   memset(&s_state, 0, sizeof(s_state));
+  s_stub_scale_saves = 0;
   memset(s_stub_web_password, 0, sizeof(s_stub_web_password));
   memset(s_stub_wifi_ssid, 0, sizeof(s_stub_wifi_ssid));
   memset(s_stub_wifi_password, 0, sizeof(s_stub_wifi_password));
@@ -670,7 +679,7 @@ static int test_http_server_start_uses_explicit_stack_budget(void) {
   ASSERT_EQ_INT(ESP_OK, lm_ctrl_setup_portal_start_http_server());
   config = test_httpd_last_config();
   ASSERT_TRUE(config != NULL);
-  ASSERT_EQ_INT(35, config->max_uri_handlers);
+  ASSERT_EQ_INT(36, config->max_uri_handlers);
   ASSERT_EQ_INT(LM_CTRL_SETUP_PORTAL_HTTPD_STACK_SIZE, config->stack_size);
   ASSERT_TRUE(config->uri_match_fn != NULL);
 
@@ -678,7 +687,42 @@ static int test_http_server_start_uses_explicit_stack_budget(void) {
   return 0;
 }
 
+static int test_scale_adapter_post_requires_auth_and_csrf_and_keeps_binding(void) {
+  httpd_req_t *login = test_httpd_request_create();
+  httpd_req_t *req = test_httpd_request_create();
+  ASSERT_TRUE(login != NULL && req != NULL);
+  reset_route_test_state();
+  strcpy(s_stub_web_password, "secret123");
+  s_state.web_auth_mode = LM_CTRL_WEB_AUTH_ENABLED;
+  test_httpd_request_set_uri(req, "/scale-adapter");
+  const char *fields = "enabled=1&driver=acaia_legacy&name=LUNAR-C&address=AA%3ABB%3ACC%3ADD%3AEE%3AFF&address_type=1&manual_mode=1";
+  ASSERT_EQ_INT(ESP_OK, test_httpd_request_set_body(req, fields));
+  ASSERT_EQ_INT(ESP_OK, handle_scale_adapter_post(req));
+  ASSERT_EQ_INT(0, s_stub_scale_saves);
+  test_httpd_request_set_uri(login, "/login");
+  ASSERT_EQ_INT(ESP_OK, test_httpd_request_set_body(login, "password=secret123"));
+  ASSERT_EQ_INT(ESP_OK, handle_login_post(login));
+  ASSERT_EQ_INT(ESP_OK, test_httpd_request_set_cookie(req, test_httpd_response_header(login, "Set-Cookie")));
+  ASSERT_EQ_INT(ESP_OK, test_httpd_request_set_body(req, fields));
+  ASSERT_EQ_INT(ESP_OK, handle_scale_adapter_post(req));
+  ASSERT_EQ_INT(0, s_stub_scale_saves); /* Authenticated, but missing CSRF. */
+  char csrf[LM_CTRL_RANDOM_TOKEN_HEX_LEN], body[384];
+  extract_csrf_token(test_httpd_request_body(login), csrf, sizeof(csrf));
+  snprintf(body, sizeof(body), "%s&csrf_token=%s", fields, csrf);
+  ASSERT_EQ_INT(ESP_OK, test_httpd_request_set_body(req, body));
+  ASSERT_EQ_INT(ESP_OK, handle_scale_adapter_post(req));
+  ASSERT_EQ_INT(1, s_stub_scale_saves);
+  ASSERT_STREQ("AA:BB:CC:DD:EE:FF", s_stub_scale_config.address);
+  ASSERT_STREQ("acaia_legacy", s_stub_scale_config.driver);
+  ASSERT_EQ_INT(1, s_stub_scale_config.address_type);
+  ASSERT_EQ_INT(1, s_stub_scale_config.manual_mode);
+  test_httpd_request_destroy(login);
+  test_httpd_request_destroy(req);
+  return 0;
+}
+
 int run_setup_portal_route_tests(void) {
+  RUN_TEST(test_scale_adapter_post_requires_auth_and_csrf_and_keeps_binding);
   RUN_TEST(test_parse_advanced_form_reads_supported_values);
   RUN_TEST(test_validate_advanced_form_rejects_invalid_values_and_missing_confirm);
   RUN_TEST(test_validate_advanced_form_accepts_confirmed_reduction_and_regular_updates);

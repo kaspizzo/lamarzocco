@@ -239,3 +239,5 @@ void machine_link_host_task(void *param);
 void machine_link_on_reset(int reason);
 void machine_link_on_sync(void);
 int ble_gap_event(struct ble_gap_event *event, void *arg);
+
+void maybe_restore_scale_registration(void);

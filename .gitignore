@@ -18,6 +18,9 @@ firmware/esp32/dependencies.lock
 firmware/esp32/sdkconfig
 firmware/esp32/sdkconfig.old
 
+# Downloaded vendor firmware and private provenance (local analysis only)
+firmware/vendor/
+
 # Local renderer build artifacts
 tools/controller_screenshot_renderer/build/
 tools/controller_screenshot_renderer/out/

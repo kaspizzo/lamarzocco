@@ -27,6 +27,8 @@ mkdir -p "${BUILD_DIR}"
   -I"${ROOT_DIR}/main" \
   -I"${CJSON_DIR}" \
   "${HOST_DIR}/src/test_runner.c" \
+  "${HOST_DIR}/src/test_scale_adapter.c" \
+  "${HOST_DIR}/src/test_scale_bookoo.c" \
   "${HOST_DIR}/src/test_idf_stubs.c" \
   "${HOST_DIR}/src/test_nvs.c" \
   "${HOST_DIR}/src/test_httpd.c" \
@@ -42,6 +44,12 @@ mkdir -p "${BUILD_DIR}"
   "${HOST_DIR}/src/test_storage_security.c" \
   "${HOST_DIR}/src/test_setup_portal_page.c" \
   "${HOST_DIR}/src/test_setup_portal_routes.c" \
+  "${ROOT_DIR}/main/scale_protocol.c" \
+  "${ROOT_DIR}/main/scale_registration_policy.c" \
+  "${ROOT_DIR}/main/scale_acaia.c" \
+  "${ROOT_DIR}/main/scale_bookoo.c" \
+  "${ROOT_DIR}/main/scale_drivers.c" \
+  "${ROOT_DIR}/main/scale_adapter_core.c" \
   "${ROOT_DIR}/main/controller_state.c" \
   "${ROOT_DIR}/main/controller_heat_session.c" \
   "${ROOT_DIR}/main/controller_connectivity.c" \

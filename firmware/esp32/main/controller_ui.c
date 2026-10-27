@@ -26,6 +26,7 @@ static const lv_color_t COLOR_WATER = LV_COLOR_MAKE(0x73, 0xC8, 0xFF);
 static const lv_color_t COLOR_BUTTON = LV_COLOR_MAKE(0x3A, 0x2A, 0x21);
 static const char *BATTERY_CHARGING_SYMBOL = LV_SYMBOL_BATTERY_FULL LV_SYMBOL_CHARGE;
 static const char *ICON_SLASH_SYMBOL = "/";
+static const char *ICON_SCALE_SYMBOL = "\xef\x89\x8e"; /* Font Awesome balance-scale, U+F24E. */
 
 #define UI_FONT_14 (&lm_ctrl_font_montserrat_14)
 #define UI_FONT_16 (&lm_ctrl_font_montserrat_16)
@@ -734,7 +735,7 @@ static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *v
     const char *symbol;
     lv_color_t color;
   } icon_slot_t;
-  icon_slot_t slots[6];
+  icon_slot_t slots[7];
   lm_ctrl_indicator_state_t wifi_indicator = LM_CTRL_INDICATOR_HIDDEN;
   bool wifi_crossed = false;
   size_t visible_count = 0;
@@ -754,6 +755,7 @@ static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *v
   set_hidden(ui->heat_icon, true);
   set_hidden(ui->water_icon, true);
   set_hidden(ui->ble_icon, true);
+  set_hidden(ui->scale_icon, true);
 
   switch (wifi_indicator) {
     case LM_CTRL_INDICATOR_CROSSED:
@@ -797,6 +799,14 @@ static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *v
       .obj = ui->ble_icon,
       .symbol = LV_SYMBOL_BLUETOOTH,
       .color = view->ble_authenticated ? COLOR_ACTIVE : COLOR_MUTED,
+    };
+  }
+
+  if (view->scale_visible) {
+    slots[visible_count++] = (icon_slot_t){
+      .obj = ui->scale_icon,
+      .symbol = ICON_SCALE_SYMBOL,
+      .color = COLOR_ACTIVE,
     };
   }
 
@@ -887,6 +897,12 @@ static void render_presets_screen(
     style_disabled_button(ui->presets_load_button, ui->presets_load_label);
   }
   style_action_button(ui->presets_save_button, ui->presets_save_label, false);
+
+  /* Text height depends on BBW availability and localization. Keep the touch
+   * targets below the actual summary instead of at a fixed card position. */
+  lv_obj_update_layout(ui->presets_card);
+  lv_obj_align_to(ui->presets_load_button, ui->presets_body, LV_ALIGN_OUT_BOTTOM_MID, -52, 12);
+  lv_obj_align_to(ui->presets_save_button, ui->presets_body, LV_ALIGN_OUT_BOTTOM_MID, 52, 12);
 }
 
 static void render_setup_screen(lm_ctrl_ui_t *ui, const ctrl_state_t *state, const lm_ctrl_ui_view_t *view) {
@@ -1059,6 +1075,11 @@ esp_err_t lm_ctrl_ui_init(
   lv_obj_set_style_text_font(ui->ble_icon, UI_FONT_14, 0);
   lv_obj_align(ui->ble_icon, LV_ALIGN_TOP_MID, 0, 48);
 
+  ui->scale_icon = lv_label_create(ui->screen);
+  lv_obj_set_style_text_font(ui->scale_icon, &lm_ctrl_font_scale_14, 0);
+  lv_obj_align(ui->scale_icon, LV_ALIGN_TOP_MID, 0, 48);
+  set_hidden(ui->scale_icon, true);
+
   ui->page_label = lv_label_create(ui->screen);
   lv_obj_set_style_text_font(ui->page_label, UI_FONT_14, 0);
   lv_obj_align(ui->page_label, LV_ALIGN_TOP_MID, 0, 46);
@@ -1151,13 +1172,16 @@ esp_err_t lm_ctrl_ui_init(
   lv_obj_set_style_text_font(ui->power_hint, UI_FONT_14, 0);
   lv_obj_align(ui->power_hint, LV_ALIGN_BOTTOM_MID, 0, -14);
 
-  ui->presets_card = create_panel(ui->screen, 282, 196);
+  /* Six recipe lines with BBW need their own area above the action row. */
+  ui->presets_card = create_panel(ui->screen, 282, 232);
+  lv_obj_align(ui->presets_card, LV_ALIGN_CENTER, 0, 12);
   ui->presets_title = lv_label_create(ui->presets_card);
   lv_obj_set_style_text_font(ui->presets_title, UI_FONT_20, 0);
   lv_obj_align(ui->presets_title, LV_ALIGN_TOP_MID, 0, 14);
 
   ui->presets_name = lv_label_create(ui->presets_card);
   lv_obj_set_width(ui->presets_name, 230);
+  lv_obj_set_height(ui->presets_name, lv_font_get_line_height(UI_FONT_14));
   lv_label_set_long_mode(ui->presets_name, LV_LABEL_LONG_DOT);
   lv_obj_set_style_text_font(ui->presets_name, UI_FONT_14, 0);
   lv_obj_set_style_text_align(ui->presets_name, LV_TEXT_ALIGN_CENTER, 0);
@@ -1170,8 +1194,8 @@ esp_err_t lm_ctrl_ui_init(
   lv_obj_set_style_text_align(ui->presets_body, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_align(ui->presets_body, LV_ALIGN_TOP_MID, 0, 68);
 
-  ui->presets_load_button = create_button(ui->presets_card, 74, 36, -44, 66, &ui->presets_load_label);
-  ui->presets_save_button = create_button(ui->presets_card, 74, 36, 44, 66, &ui->presets_save_label);
+  ui->presets_load_button = create_button(ui->presets_card, 90, 38, -52, 0, &ui->presets_load_label);
+  ui->presets_save_button = create_button(ui->presets_card, 90, 38, 52, 0, &ui->presets_save_label);
   bind_button(ui, BIND_PRESET_LOAD, ui->presets_load_button, LM_CTRL_UI_ACTION_LOAD_PRESET, CTRL_FOCUS_TEMPERATURE);
   bind_button(ui, BIND_PRESET_SAVE, ui->presets_save_button, LM_CTRL_UI_ACTION_SAVE_PRESET, CTRL_FOCUS_TEMPERATURE);
   set_label_text(ui->presets_load_label, "Load", COLOR_BG);

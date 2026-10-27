@@ -78,6 +78,7 @@ static void send_nav(httpd_req_t *req) {
     "<a href=\"#network-section\">Network</a>"
     "<a href=\"#cloud-section\">Cloud</a>"
     "<a href=\"#recipes-section\">Recipes</a>"
+    "<a href=\"#scale-section\">Scale Adapter</a>"
     "<a href=\"#advanced-section\">Advanced</a>"
     "<a href=\"#diagnostics-section\">Diagnostics</a>"
     "</nav>"
@@ -437,6 +438,69 @@ static void render_advanced_section(httpd_req_t *req, const lm_ctrl_setup_portal
   httpd_resp_sendstr_chunk(req, "<h3>System Actions</h3><div class=\"section-note\">Use these actions when you want to restart the controller or wipe onboarding data.</div><div class=\"button-row\"><button class=\"secondary\" type=\"submit\" formaction=\"/reboot\" formmethod=\"post\">Reboot Controller</button><button class=\"secondary\" type=\"submit\" formaction=\"/reset-network\" formmethod=\"post\" onclick=\"return confirm('Clear Wi-Fi, cloud account, and machine selection?');\">Reset Network Setup</button><button class=\"danger\" type=\"submit\" formaction=\"/factory-reset\" formmethod=\"post\" onclick=\"return confirm('Factory reset the controller and erase presets?');\">Factory Reset</button></div></form></section>");
 }
 
+static void render_scale_section(httpd_req_t *req, const lm_ctrl_setup_portal_view_t *view) {
+  const lm_scale_adapter_info_t *info = &view->scale_info;
+  char escaped[256], line[256];
+  httpd_resp_sendstr_chunk(req, "<section id=\"scale-section\" class=\"section-card\"><h2>BLE Scale Adapter</h2><p>Connect a scale to this controller and expose it to the machine as a compatible scale. Acaia Lunar and experimental BOOKOO Mini/Ultra bridges.</p><pre>");
+  html_escape_text(info->status, escaped, sizeof(escaped));
+  send_chunk_if_not_empty(req, escaped);
+  snprintf(line, sizeof(line), "\nSource: %s | Machine scale link: %s\nWeight: %.2f g | Battery: %u%%\nSource sessions: %lu | Machine sessions: %lu | Registration requests: %lu\n",
+    info->source_fresh ? "fresh" : info->source_connected ? "connected, awaiting data" : "disconnected",
+    info->gateway_connected ? "connected" : info->advertising ? "advertising" : "waiting",
+    info->grams, info->battery, (unsigned long)info->source_sessions,
+    (unsigned long)info->gateway_sessions, (unsigned long)info->registration_attempts);
+  httpd_resp_sendstr_chunk(req, line);
+  html_escape_text(info->registration_status, escaped, sizeof(escaped));
+  send_chunk_if_not_empty(req, escaped);
+  httpd_resp_sendstr_chunk(req, "</pre><form method=\"post\" action=\"/scale-adapter\">");
+  send_csrf_hidden_input(req, view);
+  httpd_resp_sendstr_chunk(req, "<label class=\"toggle-row\"><input type=\"checkbox\" name=\"enabled\" value=\"1\"");
+  if (info->config.enabled) httpd_resp_sendstr_chunk(req, " checked");
+  httpd_resp_sendstr_chunk(req, "><span>Enable Scale Adapter</span></label><label>Scale Driver</label><select name=\"driver\"><option value=\"acaia_legacy\"");
+  if (!strcmp(info->config.driver, "acaia_legacy")) httpd_resp_sendstr_chunk(req, " selected");
+  httpd_resp_sendstr_chunk(req, ">Acaia Lunar (legacy)</option><option value=\"bookoo_mini\"");
+  if (!strcmp(info->config.driver, "bookoo_mini")) httpd_resp_sendstr_chunk(req, " selected");
+  httpd_resp_sendstr_chunk(req, ">BOOKOO Mini (experimental)</option><option value=\"bookoo_ultra\"");
+  if (!strcmp(info->config.driver, "bookoo_ultra")) httpd_resp_sendstr_chunk(req, " selected");
+  httpd_resp_sendstr_chunk(req, ">BOOKOO Ultra (experimental)</option></select><label>Source BLE Address</label><input id=\"scale-address\" name=\"address\" maxlength=\"17\" list=\"scale-candidates\" placeholder=\"AA:BB:CC:DD:EE:FF\" value=\"");
+  html_escape_text(info->config.address, escaped, sizeof(escaped));
+  send_chunk_if_not_empty(req, escaped);
+  httpd_resp_sendstr_chunk(req, "\"><datalist id=\"scale-candidates\">");
+  for (size_t i = 0; i < info->candidate_count && i < LM_SCALE_CANDIDATE_LIMIT; ++i) {
+    html_escape_text(info->candidates[i].address, escaped, sizeof(escaped));
+    snprintf(line, sizeof(line), "<option data-address-type=\"%u\" value=\"", info->candidates[i].address_type);
+    httpd_resp_sendstr_chunk(req, line);
+    send_chunk_if_not_empty(req, escaped);
+    html_escape_text(info->candidates[i].name, escaped, sizeof(escaped));
+    httpd_resp_sendstr_chunk(req, "\">");
+    send_chunk_if_not_empty(req, escaped);
+    httpd_resp_sendstr_chunk(req, "</option>");
+  }
+  httpd_resp_sendstr_chunk(req, "</datalist><label>Source Address Type</label><select id=\"scale-address-type\" name=\"address_type\"><option value=\"0\"");
+  if (!info->config.address_type) httpd_resp_sendstr_chunk(req, " selected");
+  httpd_resp_sendstr_chunk(req, ">Public</option><option value=\"1\"");
+  if (info->config.address_type) httpd_resp_sendstr_chunk(req, " selected");
+  httpd_resp_sendstr_chunk(req, ">Random</option></select><label>Virtual Scale Name</label><input name=\"name\" maxlength=\"20\" value=\"");
+  html_escape_text(info->config.name[0] ? info->config.name : "LUNAR-C", escaped, sizeof(escaped));
+  send_chunk_if_not_empty(req, escaped);
+  httpd_resp_sendstr_chunk(req, "\"><label class=\"toggle-row\"><input type=\"checkbox\" name=\"manual_mode\" value=\"1\"");
+  if (info->config.manual_mode) httpd_resp_sendstr_chunk(req, " checked");
+  httpd_resp_sendstr_chunk(req, "><span>The scale is in manual weight/timer mode (Acaia: Mode 2), using grams.</span></label><p>To discover the source, enable the adapter with its address empty, wake the scale, close other scale apps, then reload this page. Select its address and matching type below. Keep the virtual name and controller position stable for location calibration.</p><button type=\"submit\">Save Scale Adapter</button></form>");
+  if (info->candidate_count) {
+    httpd_resp_sendstr_chunk(req, "<h3>Observed Scales</h3><pre>");
+    for (size_t i = 0; i < info->candidate_count && i < LM_SCALE_CANDIDATE_LIMIT; ++i) {
+      const lm_scale_candidate_t *c = &info->candidates[i];
+      snprintf(line, sizeof(line), "%s | %s | %s | %d dBm\n", c->name, c->address,
+        c->address_type ? "Random" : "Public", c->rssi);
+      html_escape_text(line, escaped, sizeof(escaped));
+      send_chunk_if_not_empty(req, escaped);
+    }
+    httpd_resp_sendstr_chunk(req, "</pre>");
+  }
+  httpd_resp_sendstr_chunk(req, "<p>BOOKOO support is untested on hardware. The machine bridge and automatic registration are enabled for testing. Use manual timing mode with grams (Ultra: timing-mode or a manual timing submode); automatic modes and charging may ignore controls. Tare/timer completion is inferred from returned weight/timer state. An unconfirmed command stops the adapter. Select Mini or Ultra explicitly; the BLE name alone does not identify the model.</p>");
+  httpd_resp_sendstr_chunk(req, "<p>Missing machine registrations are retried automatically with backoff while source data is fresh. A present registration is retained while the machine reconnects. Calibration completion, persistence and weight-stop precision still require hardware validation. After a protocol/control fault, correct the source setup and save again to retry.</p></section>");
+}
+
 static void render_diagnostics_section(httpd_req_t *req, const lm_ctrl_setup_portal_view_t *view) {
   httpd_resp_sendstr_chunk(req, "<section id=\"diagnostics-section\" class=\"stack preset-anchor\"><div class=\"section-head\"><h2>Diagnostics</h2><p>Read-only controller and link state for debugging reconnect or sync issues.</p></div><section class=\"section-card\"><pre>");
   httpd_resp_sendstr_chunk(req, view->debug_status_html);
@@ -485,6 +549,7 @@ static void send_page_script(httpd_req_t *req, const lm_ctrl_setup_portal_view_t
 }
 
 const char *lm_ctrl_setup_portal_history_target(const char *uri) {
+  if (uri && strcmp(uri, "/scale-adapter") == 0) return "/#scale-section";
   if (uri == NULL) {
     return NULL;
   }
@@ -583,6 +648,8 @@ esp_err_t lm_ctrl_setup_portal_send_page(
   render_network_section(req, view);
   render_cloud_section(req, view);
   render_recipes_section(req, view);
+  render_scale_section(req, view);
+  httpd_resp_sendstr_chunk(req, "<script>{const address=document.getElementById('scale-address');const type=document.getElementById('scale-address-type');const candidates=document.getElementById('scale-candidates');address.addEventListener('input',()=>{const option=Array.from(candidates.options).find(o=>o.value===address.value);if(option){type.value=option.dataset.addressType;}});}</script>");
   render_advanced_section(req, view);
   render_diagnostics_section(req, view);
   send_page_script(req, view, history_target);

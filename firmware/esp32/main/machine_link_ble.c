@@ -2,6 +2,8 @@
  * BLE transport, authentication, and direct machine command execution.
  */
 #include "machine_link_internal.h"
+#include "scale_adapter.h"
+#include "scale_registration_policy.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -1071,6 +1073,9 @@ bool fetch_values_via_ble(
   if (!machine_link_ble_transport_enabled()) {
     return false;
   }
+  /* Periodic GATT reads compete with the scale's time-sensitive stream.
+   * Dashboard/WS updates remain available; explicit controls still use BLE. */
+  if (lm_scale_adapter_source_active()) return false;
   if (binding == NULL || binding->communication_key[0] == '\0') {
     return false;
   }
@@ -1410,6 +1415,9 @@ static esp_err_t start_scan(void) {
   char target_serial[sizeof(s_link.target_serial)];
   int rc;
 
+  /* Another central procedure may belong to the source-scale adapter. */
+  if (ble_gap_disc_active() || ble_gap_conn_active()) return ESP_ERR_NOT_FINISHED;
+
   portENTER_CRITICAL(&s_link_lock);
   if (s_link.scanning || s_link.connect_in_progress || s_link.connected) {
     portEXIT_CRITICAL(&s_link_lock);
@@ -1544,6 +1552,11 @@ esp_err_t ensure_connected_and_authenticated(const lm_ctrl_machine_binding_t *bi
   if (!machine_link_ble_transport_enabled()) {
     return ESP_ERR_NOT_SUPPORTED;
   }
+  lm_scale_adapter_info_t scale;
+  lm_scale_adapter_get_info(&scale);
+  /* The gateway already has a link to this controller's BLE identity. A
+   * second connection to the same peer in the opposite role is rejected. */
+  if (scale.gateway_connected) return ESP_ERR_NOT_SUPPORTED;
 
   if (!refresh_binding(binding)) {
     return ESP_ERR_INVALID_STATE;
@@ -1599,6 +1612,7 @@ void machine_link_host_task(void *param) {
 }
 
 void machine_link_on_reset(int reason) {
+  lm_scale_adapter_on_reset();
   portENTER_CRITICAL(&s_link_lock);
   s_link.host_ready = false;
   portEXIT_CRITICAL(&s_link_lock);
@@ -1618,6 +1632,7 @@ void machine_link_on_sync(void) {
   s_link.host_ready = true;
   portEXIT_CRITICAL(&s_link_lock);
 
+  lm_scale_adapter_on_sync();
   set_statusf("BLE host ready.");
 
   if (s_link.worker_task != NULL) {
@@ -1798,4 +1813,69 @@ int ble_gap_event(struct ble_gap_event *event, void *arg) {
     default:
       return 0;
   }
+}
+
+/* The machine worker owns this command channel, including registration recovery.
+ * A runtime entry is not proof of persisted calibration. Existing entries are
+ * never repeatedly recalibrated merely because their radio link is down. */
+static void release_machine_owner_connection(void) {
+  uint16_t conn;
+  portENTER_CRITICAL(&s_link_lock);
+  conn = s_link.connected ? s_link.conn_handle : BLE_HS_CONN_HANDLE_NONE;
+  portEXIT_CRITICAL(&s_link_lock);
+  if (conn != BLE_HS_CONN_HANDLE_NONE) (void)ble_gap_terminate(conn, BLE_ERR_REM_USER_CONN_TERM);
+}
+
+void maybe_restore_scale_registration(void) {
+  char name[21];
+  lm_ctrl_machine_binding_t binding = {0};
+  char response[LM_CTRL_MACHINE_RESPONSE_MAX];
+  if (!machine_link_ble_transport_enabled()) return;
+  if (!lm_scale_adapter_registration_due(name, sizeof(name))) {
+    if (lm_scale_adapter_source_active()) release_machine_owner_connection();
+    return;
+  }
+  if (!s_deps.get_machine_binding || !s_deps.get_machine_binding(&binding) ||
+      !binding.configured || !binding.serial[0] || !binding.communication_key[0]) {
+    lm_scale_adapter_registration_result("Waiting for a local machine binding", false);
+    goto release_owner;
+  }
+  if (ensure_connected_and_authenticated(&binding) != ESP_OK) {
+    lm_scale_adapter_registration_result("Machine BLE unavailable; registration check will retry", false);
+    goto release_owner;
+  }
+  if (request_machine_read_value(LM_CTRL_MACHINE_READ_MACHINE_MODE, response, sizeof(response)) != ESP_OK ||
+      !response_matches_machine_mode(response, LM_CTRL_MACHINE_MODE_BREWING)) {
+    lm_scale_adapter_registration_result("Waiting for machine BrewingMode", false);
+    goto release_owner;
+  }
+  if (request_machine_read_value("scales", response, sizeof(response)) != ESP_OK) {
+    lm_scale_adapter_registration_result("Could not read scale registrations; retrying later", false);
+    goto release_owner;
+  }
+  lm_scale_registration_t registration = lm_scale_registration_classify(response, name);
+  if (registration != LM_SCALE_REGISTRATION_MISSING) {
+    lm_scale_adapter_registration_result(registration == LM_SCALE_REGISTRATION_PRESENT ?
+      "Registration present; waiting for machine scale connection" : registration == LM_SCALE_REGISTRATION_OTHER ?
+      "Another scale is registered; automatic registration deferred" :
+      "Unknown registration response; no write sent", false);
+    goto release_owner;
+  }
+  /* Recheck after blocking BLE operations: never register an old configuration
+   * or interrupt a gateway that connected while its registration was queried. */
+  lm_scale_adapter_info_t info;
+  lm_scale_adapter_get_info(&info);
+  if (!info.config.enabled || !info.source_fresh || info.gateway_connected || info.faulted || strcmp(info.config.name, name)) goto release_owner;
+  char command[192];
+  snprintf(command, sizeof(command),
+    "{\"id\":\"ctrl-scale-%lld\",\"name\":\"SetScalePosition\",\"parameter\":{\"scale\":\"%s\",\"force\":false}}",
+    (long long)esp_timer_get_time(), name);
+  /* Read-back cannot be used as a persistence claim. Release this owner link
+   * after delivery so it does not obstruct the gateway's scale connection. */
+  esp_err_t err = run_write_operation(s_link.write_handle, command, strlen(command) + 1, false, 0, NULL, 0);
+  lm_scale_adapter_registration_result(err == ESP_OK ?
+    "Registration requested; calibration completion and persistence unverified" :
+    "Registration delivery failed; retrying with backoff", true);
+release_owner:
+  release_machine_owner_connection();
 }

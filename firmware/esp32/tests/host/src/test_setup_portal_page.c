@@ -182,7 +182,70 @@ static int test_rendered_page_hides_manual_provisioning_ui_when_generation_faile
   return 0;
 }
 
+static int test_scale_adapter_page_escapes_radio_names_and_shows_status(void) {
+  lm_ctrl_setup_portal_view_t view;
+  init_view(&view);
+  strcpy(view.scale_info.config.name, "LUNAR-C");
+  strcpy(view.scale_info.status, "Source connected");
+  view.scale_info.source_fresh = true;
+  view.scale_info.candidate_count = 1;
+  strcpy(view.scale_info.candidates[0].address, "AA:BB:CC:DD:EE:FF");
+  strcpy(view.scale_info.candidates[0].name, "<script>bad</script>");
+  httpd_req_t *req = test_httpd_request_create();
+  ASSERT_TRUE(req != NULL);
+  ASSERT_EQ_INT(ESP_OK, lm_ctrl_setup_portal_send_page(req, &view, NULL));
+  ASSERT_CONTAINS(test_httpd_request_body(req), "action=\"/scale-adapter\"");
+  ASSERT_CONTAINS(test_httpd_request_body(req), "Source: fresh");
+  ASSERT_CONTAINS(test_httpd_request_body(req), "&lt;script&gt;bad&lt;/script&gt;");
+  ASSERT_TRUE(strstr(test_httpd_request_body(req), "<script>bad</script>") == NULL);
+  ASSERT_STREQ("/#scale-section", lm_ctrl_setup_portal_history_target("/scale-adapter"));
+  test_httpd_request_destroy(req);
+  return 0;
+}
+
+static int test_empty_scale_fields_do_not_end_chunked_response(void) {
+  lm_ctrl_setup_portal_view_t view;
+  init_view(&view);
+  strcpy(view.debug_status_html, "ready");
+  httpd_req_t *req = test_httpd_request_create();
+  ASSERT_TRUE(req != NULL);
+  ASSERT_EQ_INT(ESP_OK, lm_ctrl_setup_portal_send_page(req, &view, NULL));
+  ASSERT_EQ_INT(0, req->empty_text_chunk_count);
+  ASSERT_CONTAINS(test_httpd_request_body(req), "Save Scale Adapter");
+  ASSERT_CONTAINS(test_httpd_request_body(req), "</main></body></html>");
+  test_httpd_request_destroy(req);
+  return 0;
+}
+
+static int test_bookoo_selection_and_experimental_warning(void) {
+  const char *ids[] = {"bookoo_mini", "bookoo_ultra"};
+  for (size_t i = 0; i < 2; ++i) {
+    lm_ctrl_setup_portal_view_t view;
+    init_view(&view);
+    strcpy(view.debug_status_html, "ready");
+    strcpy(view.scale_info.config.driver, ids[i]);
+    httpd_req_t *req = test_httpd_request_create();
+    ASSERT_TRUE(req != NULL);
+    ASSERT_EQ_INT(ESP_OK, lm_ctrl_setup_portal_send_page(req, &view, NULL));
+    char selected[80];
+    snprintf(selected, sizeof(selected), "value=\"%s\" selected", ids[i]);
+    ASSERT_CONTAINS(test_httpd_request_body(req), selected);
+    ASSERT_CONTAINS(test_httpd_request_body(req), "BOOKOO Mini (experimental)");
+    ASSERT_CONTAINS(test_httpd_request_body(req), "BOOKOO Ultra (experimental)");
+    ASSERT_CONTAINS(test_httpd_request_body(req), "untested on hardware");
+    ASSERT_CONTAINS(test_httpd_request_body(req), "automatic registration are enabled for testing");
+    ASSERT_CONTAINS(test_httpd_request_body(req), "manual timing mode");
+    ASSERT_NOT_CONTAINS(test_httpd_request_body(req), "receive only");
+    ASSERT_EQ_INT(0, req->empty_text_chunk_count);
+    test_httpd_request_destroy(req);
+  }
+  return 0;
+}
+
 int run_setup_portal_page_tests(void) {
+  RUN_TEST(test_bookoo_selection_and_experimental_warning);
+  RUN_TEST(test_empty_scale_fields_do_not_end_chunked_response);
+  RUN_TEST(test_scale_adapter_page_escapes_radio_names_and_shows_status);
   RUN_TEST(test_history_target_maps_known_sections);
   RUN_TEST(test_rendered_page_escapes_fleet_and_preset_values);
   RUN_TEST(test_rendered_page_shows_bbw_section_when_feature_is_present);

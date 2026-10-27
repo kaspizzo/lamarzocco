@@ -1,0 +1,16 @@
+# Optional registry dependencies reference LVGL 9 flags that the pinned LVGL 8
+# does not define. Prompts are required to export false values to sdkconfig.json
+# with ESP-IDF 5.5's kconfgen; hidden false symbols are omitted by that version.
+menu "LVGL registry compatibility (LVGL 8: leave disabled)"
+config LV_USE_LIBPNG
+    bool "LVGL 9 libpng option (unused with LVGL 8)"
+    default n
+
+config LV_USE_LIBJPEG_TURBO
+    bool "LVGL 9 JPEG turbo option (unused with LVGL 8)"
+    default n
+
+config LV_USE_LZ4
+    bool "LVGL 9 LZ4 option (unused with LVGL 8)"
+    default n
+endmenu

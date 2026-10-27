@@ -19,6 +19,7 @@
 #include "controller_connectivity.h"
 #include "machine_link.h"
 #include "machine_link_policy.h"
+#include "scale_adapter.h"
 #include "wifi_setup.h"
 
 static const char *TAG = "lm_ctrl_runtime";
@@ -996,6 +997,12 @@ void lm_ctrl_runtime_tick(lm_ctrl_runtime_t *runtime, bool *needs_render) {
     return;
   }
 
+  bool scale_visible = lm_scale_adapter_source_fresh();
+  if (runtime->last_scale_visible != scale_visible) {
+    runtime->last_scale_visible = scale_visible;
+    if (needs_render != NULL) *needs_render = true;
+  }
+
   maybe_request_cloud_probe(&runtime->last_cloud_probe_request_us);
   maybe_request_value_sync(&runtime->state);
   maybe_request_periodic_value_refresh(&runtime->last_ble_refresh_request_us, &runtime->last_cloud_refresh_request_us);
@@ -1056,6 +1063,7 @@ void lm_ctrl_runtime_build_ui_view(const lm_ctrl_runtime_t *runtime, lm_ctrl_ui_
   view->water_alert_visible = machine_info.water_status.available && machine_info.water_status.no_water;
   view->ble_visible = machine_info.connected || machine_info.authenticated;
   view->ble_authenticated = machine_info.authenticated;
+  view->scale_visible = lm_scale_adapter_source_fresh();
   view->readable_mask = access.readable_mask;
   view->editable_mask = access.editable_mask;
   view->preset_load_enabled = access.preset_load_enabled;
