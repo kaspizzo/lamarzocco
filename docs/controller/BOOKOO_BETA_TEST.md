@@ -32,7 +32,8 @@ implementation, not confirmed device compatibility or weight-stop accuracy.
 - Source connection: compare an empty platform, a known object and a negative
   value after removing a tared object with the portal weight and scale display.
 - Machine connection: record portal status, source/machine session counts and
-  registration attempts. The header icon only proves fresh scale reception.
+  registration attempts. The header icon is dimmed for a source connection;
+  full brightness requires fresh measurements and the machine scale link.
 - Tare before flow: with a cup on the scale, check that a tare requested through
   the machine makes the physical display return near zero.
 - Timer: check physical reset/start/stop, including starting again after a stop.

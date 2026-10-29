@@ -45,7 +45,7 @@ typedef struct {
   uint32_t last_power_status_version;
   uint32_t last_machine_status_version;
   uint32_t last_preset_version;
-  bool last_scale_visible;
+  lm_ctrl_scale_indicator_t last_scale_indicator;
   int64_t last_cloud_probe_request_us;
   int64_t last_ble_refresh_request_us;
   int64_t last_cloud_refresh_request_us;

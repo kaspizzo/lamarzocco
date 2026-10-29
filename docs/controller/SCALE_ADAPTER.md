@@ -83,7 +83,9 @@ connects to the controller's virtual scale. Both connections must work.
 
 | Indicator | Meaning |
 | --- | --- |
-| Balance-scale header icon | Fresh physical-scale measurements reach the controller. It disappears when the scale sleeps, disconnects or faults, or when the adapter is disabled. |
+| Dimmed balance-scale header icon | The physical scale is connected; the machine scale link or fresh measurements are still pending. |
+| Bright balance-scale header icon | Fresh physical-scale measurements and a subscribed machine scale link are both present. |
+| No balance-scale header icon | The physical scale is disconnected, the adapter is disabled or a protocol fault stopped it. |
 | `Source: connected, awaiting data` | BLE connected, but setup or the fresh measurement stream is incomplete. |
 | `Source: fresh` | Validated measurements are at most one second old. |
 | Machine link `advertising` | The virtual scale is available and waiting for the machine. |
@@ -132,6 +134,46 @@ lines remain above them. Long preset names are shortened to one line.
 
 ![Preset with BBW mode and both dose targets](images/preset-bbw-en.png)
 
+## Connection debug log
+
+To investigate intermittent failures over several days, open **Scale Adapter →
+Connection Debug Log** and select **Start Connection Log**. This changes only
+diagnostic capture; it does not change the selected scale, virtual name or
+location calibration. Leave the controller powered in its normal position.
+USB and a running computer are not required. Capture remains enabled after
+restarts until you select **Stop Log**; stopping retains its existing records.
+
+Select **Download Log** to obtain `scale-connection-log.txt`. Download after an
+incident and note its approximate local time. The file uses UTC, sequence
+numbers, a boot ID and monotonic uptime. The controller synchronizes its clock
+through NTP when WLAN is available. Entries before that boot's first NTP sync
+can receive an estimated UTC timestamp, marked `*`, using a same-boot anchor
+in the ring (up to 64 boot anchors per export). Otherwise they retain
+`UTC-unknown`, boot ID and uptime.
+
+Capture includes startup/build identification, selected adapter configuration,
+matching scale advertisements and their signal strength, connection results,
+handshake/subscription status, registration attempts, disconnect reason codes
+and failure context. A rejected source notification includes at most its first
+40 protocol bytes. There is no continuous weight recording, normal tare/timer
+trace, global serial-log interception or account/token payload capture.
+
+The last 1 MiB of the existing `storage` partition is reserved for the raw
+diagnostic journal. It holds up to 4,080 CRC-protected records; the oldest sector
+is reclaimed when full. Retention depends on event frequency, not a fixed
+number of days. Capture is limited to 60 queued events per minute, with a
+bounded RAM queue and overload counters. Flash writes run in a background task.
+An interrupted record is ignored after restart; the final queued events may be
+lost on abrupt power removal. Existing nonblank data without the journal's
+header is preserved and prevents initialization.
+
+**Clear Log** stops capture and erases the recognized journal. Factory reset
+also clears it. A normal app update or network reset retains the log and its
+capture setting. Downloads and controls follow the normal portal access rules;
+authenticated sessions require CSRF for state changes and clearing. The journal
+is diagnostic plaintext in flash, not encrypted account storage; downloads can contain scale
+identifiers and rejected protocol bytes, so inspect them before sharing.
+
 ## Troubleshooting
 
 | Status or symptom | Action |
@@ -140,9 +182,9 @@ lines remain above them. Long preset names are shortened to one line.
 | No observed scales | Wake the scale, close connected apps, clear the source address, enable and save, then reload. Check driver/model and proximity. Discovery lists known name prefixes; manual address entry remains available. |
 | Repeated setup timeout | Verify the selected address and public/random type, the legacy Acaia transport, Mode 2 and grams. |
 | Fresh source, machine still waiting | Turn the machine on, check its selected binding and registration status, and allow the retry backoff. Another scale's registration must be resolved before automatic registration can proceed. |
-| Invalid source protocol or non-gram-unit fault | Verify the physical display uses grams and the correct driver is selected, then save the settings again. If it recurs, capture the `lm_scale` rejection log over USB. |
+| Invalid source protocol or non-gram-unit fault | Verify the physical display uses grams and the correct driver is selected, then save the settings again. Enable the connection debug log before retrying and download it after a recurrence; USB `lm_scale` logs are another option. |
 | Control confirmation timeout | Check physical mode and whether tare/timer actually responded. Correct the setup, then save again to clear the fault. |
-| Header icon present but machine link absent | The icon confirms only physical-scale reception. Check the machine link and registration status in the portal. |
+| Dimmed icon and machine link absent | The scale is connected to the controller. Check its fresh-data status and the machine registration status in the portal. |
 
 Protocol/control faults stop the adapter until settings are saved again. The
 hardware debug session also observed an intermittent Acaia protocol
@@ -163,6 +205,11 @@ values around **2.89–2.91 g**. The machine independently reported `LUNAR-C`
 connected, the source battery and BBW availability. One scale off/on cycle
 restored both links without another position request. The revised preset layout
 was flashed and visually accepted on 2026-10-27.
+
+On 2026-10-29, hardware checks verified persistent diagnostic capture across
+three boot sessions, NTP synchronization, readable log downloads and estimated
+UTC timestamps for events before synchronization. Capture remained enabled
+after restart. Renderer checks cover dimmed/source and bright/machine icon states.
 
 To repeat the connection test, leave the paddle off, check zero and an object
 on the scale, power the scale off for about five seconds, then on. Confirm the

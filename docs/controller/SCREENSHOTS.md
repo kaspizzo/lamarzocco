@@ -24,6 +24,17 @@ Published screenshots use English.
 
 ![Preset with BBW mode and dose targets](./images/preset-bbw-en.png)
 
+## Scale connection states
+
+The scale icon is dimmed for a physical-scale connection and fully bright only
+with fresh readings and a subscribed machine scale link. The separate owner BLE
+icon is independent. These examples leave the ordinary machine controls offline
+to show that distinction.
+
+| Physical scale connected | Fresh scale and machine link |
+| --- | --- |
+| ![Dimmed scale icon](./images/scale-source-connected.png) | ![Bright scale icon](./images/scale-connected.png) |
+
 ## Setup screens
 
 | First setup AP | Setup with Wi-Fi connected |

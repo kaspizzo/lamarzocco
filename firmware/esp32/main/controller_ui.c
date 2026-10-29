@@ -802,7 +802,9 @@ static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *v
     };
   }
 
-  if (view->scale_visible) {
+  if (view->scale_indicator != LM_CTRL_SCALE_HIDDEN) {
+    lv_obj_set_style_text_opa(ui->scale_icon,
+      view->scale_indicator == LM_CTRL_SCALE_MACHINE_CONNECTED ? LV_OPA_COVER : LV_OPA_50, 0);
     slots[visible_count++] = (icon_slot_t){
       .obj = ui->scale_icon,
       .symbol = ICON_SCALE_SYMBOL,

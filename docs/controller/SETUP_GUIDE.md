@@ -76,7 +76,7 @@ The current firmware provides a real local setup path:
 ## Connectivity indicators
 
 - The Bluetooth icon is shown when the controller currently has a BLE path to the machine.
-- The balance-scale icon appears only while fresh measurements arrive from the selected physical scale. The separate machine-to-scale connection is shown in the portal's **Scale Adapter** section.
+- The balance-scale icon is dimmed while the physical scale is connected, and fully bright only with fresh readings and a subscribed machine scale link. It disappears when the source disconnects, faults or is disabled. The portal's **Scale Adapter** section shows both links and an optional persistent connection debug log.
 - A crossed Wi-Fi icon means the controller has network/account context but the selected machine is not currently reachable through cloud.
 - A solid Wi-Fi icon means the selected machine is reachable through cloud.
 - USB and battery indicators appear only when the controller reports USB power, charging, or low-battery state.

@@ -137,7 +137,7 @@ static void build_view(
   view->remote_path_state = access.remote_path_state;
   view->ble_visible = env->machine_info.connected || env->machine_info.authenticated;
   view->ble_authenticated = env->machine_info.authenticated;
-  view->scale_visible = env->scale_source_fresh;
+  view->scale_indicator = env->scale_indicator;
   if (env->all_status_icons) {
     view->remote_path_state = LM_CTRL_REMOTE_PATH_MACHINE_ONLINE;
     view->ble_visible = view->ble_authenticated = true;
@@ -212,11 +212,16 @@ static bool render_to_bmp(const char *path, const ctrl_state_t *state, const hos
       }
     }
   }
-  if (lv_obj_has_flag(ui.scale_icon, LV_OBJ_FLAG_HIDDEN) == view.scale_visible) {
-    fprintf(stderr, "Scale icon visibility does not match fresh source data.\n");
+  if (lv_obj_has_flag(ui.scale_icon, LV_OBJ_FLAG_HIDDEN) != (view.scale_indicator == LM_CTRL_SCALE_HIDDEN)) {
+    fprintf(stderr, "Scale icon visibility does not match the source connection.\n");
     return false;
   }
-  if (view.scale_visible) {
+  if (view.scale_indicator != LM_CTRL_SCALE_HIDDEN) {
+    lv_opa_t expected = view.scale_indicator == LM_CTRL_SCALE_MACHINE_CONNECTED ? LV_OPA_COVER : LV_OPA_50;
+    if (lv_obj_get_style_text_opa(ui.scale_icon, LV_PART_MAIN) != expected) {
+      fprintf(stderr, "Scale icon brightness does not match the machine scale link.\n");
+      return false;
+    }
     lv_font_glyph_dsc_t glyph;
     if (!lv_font_get_glyph_dsc(&lm_ctrl_font_scale_14, &glyph, 0xf24e, 0)) {
       fprintf(stderr, "Scale icon glyph is missing.\n");
@@ -431,15 +436,19 @@ static int generate_scale_screens(const char *output_dir) {
   host_stub_env_t env = base_env();
   ctrl_state_t state = base_state();
   char path[512];
-  /* Acaia data alone lights the icon; a machine BLE link is not required. */
+  /* The owner BLE link is independent of the machine-to-scale subscription. */
   env.machine_info.connected = env.machine_info.authenticated = false;
-  env.scale_source_fresh = true;
+  env.scale_indicator = LM_CTRL_SCALE_SOURCE_CONNECTED;
+  snprintf(path, sizeof(path), "%s/scale-source-connected.bmp", output_dir);
+  if (!render_to_bmp(path, &state, &env, NULL)) return 1;
+  env.scale_indicator = LM_CTRL_SCALE_MACHINE_CONNECTED;
   snprintf(path, sizeof(path), "%s/scale-connected.bmp", output_dir);
   if (!render_to_bmp(path, &state, &env, NULL)) return 1;
-  env.scale_source_fresh = false;
+  env.scale_indicator = LM_CTRL_SCALE_HIDDEN;
   snprintf(path, sizeof(path), "%s/scale-disconnected.bmp", output_dir);
   if (!render_to_bmp(path, &state, &env, NULL)) return 1;
-  env.scale_source_fresh = env.all_status_icons = true;
+  env.scale_indicator = LM_CTRL_SCALE_MACHINE_CONNECTED;
+  env.all_status_icons = true;
   snprintf(path, sizeof(path), "%s/scale-all-icons.bmp", output_dir);
   return render_to_bmp(path, &state, &env, NULL) ? 0 : 1;
 }

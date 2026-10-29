@@ -989,6 +989,13 @@ void lm_ctrl_runtime_handle_preset_change(lm_ctrl_runtime_t *runtime, bool *need
   }
 }
 
+static lm_ctrl_scale_indicator_t scale_indicator(void) {
+  lm_scale_adapter_info_t info;
+  lm_scale_adapter_get_info(&info);
+  if (!info.config.enabled || info.faulted || !info.source_connected) return LM_CTRL_SCALE_HIDDEN;
+  return info.source_fresh && info.gateway_connected ? LM_CTRL_SCALE_MACHINE_CONNECTED : LM_CTRL_SCALE_SOURCE_CONNECTED;
+}
+
 void lm_ctrl_runtime_tick(lm_ctrl_runtime_t *runtime, bool *needs_render) {
   int32_t remaining_s;
   int32_t progress_permille;
@@ -997,9 +1004,9 @@ void lm_ctrl_runtime_tick(lm_ctrl_runtime_t *runtime, bool *needs_render) {
     return;
   }
 
-  bool scale_visible = lm_scale_adapter_source_fresh();
-  if (runtime->last_scale_visible != scale_visible) {
-    runtime->last_scale_visible = scale_visible;
+  lm_ctrl_scale_indicator_t indicator = scale_indicator();
+  if (runtime->last_scale_indicator != indicator) {
+    runtime->last_scale_indicator = indicator;
     if (needs_render != NULL) *needs_render = true;
   }
 
@@ -1063,7 +1070,7 @@ void lm_ctrl_runtime_build_ui_view(const lm_ctrl_runtime_t *runtime, lm_ctrl_ui_
   view->water_alert_visible = machine_info.water_status.available && machine_info.water_status.no_water;
   view->ble_visible = machine_info.connected || machine_info.authenticated;
   view->ble_authenticated = machine_info.authenticated;
-  view->scale_visible = lm_scale_adapter_source_fresh();
+  view->scale_indicator = scale_indicator();
   view->readable_mask = access.readable_mask;
   view->editable_mask = access.editable_mask;
   view->preset_load_enabled = access.preset_load_enabled;

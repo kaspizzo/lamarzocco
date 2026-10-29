@@ -38,6 +38,8 @@ idf_component_register(
     "scale_drivers.c"
     "scale_adapter_core.c"
     "scale_adapter.c"
+    "scale_debug.c"
+    "scale_debug_store.c"
     "setup_portal_http.c"
     "setup_portal_page.c"
     "setup_portal_presenter.c"
@@ -50,6 +52,8 @@ idf_component_register(
     "."
   REQUIRES
     bt
+    esp_app_format
+    esp_partition
     mdns
     led_strip
     esp_adc

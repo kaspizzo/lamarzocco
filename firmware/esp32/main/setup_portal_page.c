@@ -498,7 +498,17 @@ static void render_scale_section(httpd_req_t *req, const lm_ctrl_setup_portal_vi
     httpd_resp_sendstr_chunk(req, "</pre>");
   }
   httpd_resp_sendstr_chunk(req, "<p>BOOKOO support is untested on hardware. The machine bridge and automatic registration are enabled for testing. Use manual timing mode with grams (Ultra: timing-mode or a manual timing submode); automatic modes and charging may ignore controls. Tare/timer completion is inferred from returned weight/timer state. An unconfirmed command stops the adapter. Select Mini or Ultra explicitly; the BLE name alone does not identify the model.</p>");
-  httpd_resp_sendstr_chunk(req, "<p>Missing machine registrations are retried automatically with backoff while source data is fresh. A present registration is retained while the machine reconnects. Calibration completion, persistence and weight-stop precision still require hardware validation. After a protocol/control fault, correct the source setup and save again to retry.</p></section>");
+  httpd_resp_sendstr_chunk(req, "<p>Missing machine registrations are retried automatically with backoff while source data is fresh. A present registration is retained while the machine reconnects. Calibration completion, persistence and weight-stop precision still require hardware validation. After a protocol/control fault, correct the source setup and save again to retry.</p>");
+  const lm_scale_debug_info_t *debug = &view->scale_debug_info;
+  snprintf(line, sizeof(line), "<h3>Connection Debug Log</h3><pre>Capture: %s | UTC clock: %s\nStored events: %lu / %lu | Dropped this boot: %lu\n",
+    debug->enabled ? "on" : "off", debug->clock_synced ? "synchronized" : "waiting for NTP",
+    (unsigned long)debug->retained, (unsigned long)debug->capacity, (unsigned long)debug->dropped);
+  httpd_resp_sendstr_chunk(req, line);
+  html_escape_text(debug->status, escaped, sizeof(escaped));
+  send_chunk_if_not_empty(req, escaped);
+  httpd_resp_sendstr_chunk(req, "</pre><p>Records connection setup, registration, disconnects and protocol failures locally, without a computer. No continuous weight or normal tare/timer logs. Capture survives restarts until stopped. The bounded ring overwrites its oldest events. NTP supplies UTC timestamps; boot IDs and uptime remain available without network time.</p><form method=\"post\" action=\"/scale-debug\">");
+  send_csrf_hidden_input(req, view);
+  httpd_resp_sendstr_chunk(req, "<div class=\"button-row\"><button name=\"action\" value=\"start\" type=\"submit\">Start Connection Log</button><button class=\"secondary\" name=\"action\" value=\"stop\" type=\"submit\">Stop Log</button><a href=\"/scale-debug.txt\">Download Log</a><button class=\"danger\" name=\"action\" value=\"clear\" type=\"submit\" onclick=\"return confirm('Stop capture and delete the stored connection log?');\">Clear Log</button></div></form></section>");
 }
 
 static void render_diagnostics_section(httpd_req_t *req, const lm_ctrl_setup_portal_view_t *view) {
@@ -549,6 +559,7 @@ static void send_page_script(httpd_req_t *req, const lm_ctrl_setup_portal_view_t
 }
 
 const char *lm_ctrl_setup_portal_history_target(const char *uri) {
+  if (uri && strcmp(uri, "/scale-debug") == 0) return "/#scale-section";
   if (uri && strcmp(uri, "/scale-adapter") == 0) return "/#scale-section";
   if (uri == NULL) {
     return NULL;

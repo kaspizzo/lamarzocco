@@ -292,6 +292,7 @@ esp_err_t lm_ctrl_setup_portal_send_response(httpd_req_t *req, const char *banne
   memcpy(page_view.fleet, ctx->fleet, sizeof(page_view.fleet));
   page_view.fleet_count = ctx->fleet_count;
   lm_scale_adapter_get_info(&page_view.scale_info);
+  lm_scale_debug_get_info(&page_view.scale_debug_info);
 
   ret = lm_ctrl_setup_portal_send_page(req, &page_view, history_target);
   free(ctx);

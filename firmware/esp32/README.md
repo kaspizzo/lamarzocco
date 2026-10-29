@@ -70,10 +70,18 @@ and `CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3`; fresh configurations inherit these
 from `sdkconfig.defaults`.
 
 After selection, source connection and wake reconnection run automatically.
-The header shows a Font Awesome `balance-scale` icon only while fresh source
-measurements arrive. It disappears when the scale disconnects, sleeps or the
-adapter is disabled. This icon represents scale-to-controller reception; the
-separate gateway connection remains visible in the portal status.
+The header shows a dimmed Font Awesome `balance-scale` icon while the physical
+scale is connected. It reaches full brightness only with fresh source readings
+and a subscribed machine scale link. It is hidden when the source disconnects,
+the adapter is disabled or a protocol fault stops the adapter. Losing only the
+machine link dims the icon again. Both links also remain visible in the portal.
+
+The portal's **Connection Debug Log** optionally records initialization,
+registration, link failures and recovery in a persistent 1 MiB flash ring.
+Capture runs without USB and survives restarts until stopped. It does not
+record the weight stream or normal tare/timer traffic. WLAN time synchronization
+uses NTP; boot IDs and monotonic uptime preserve ordering before synchronization.
+See the [debug log workflow](../../docs/controller/SCALE_ADAPTER.md#connection-debug-log).
 The controller advertises the stable `LUNAR-C` virtual identity only after a new
 validated source handshake and a weight less than one second old. It withdraws
 advertising and invalidates all readings immediately when the source disappears,

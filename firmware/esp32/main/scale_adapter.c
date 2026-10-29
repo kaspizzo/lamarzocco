@@ -5,6 +5,7 @@
 #include "scale_adapter_core.h"
 #include "scale_registration_policy.h"
 #include "scale_link_lifecycle.h"
+#include "scale_debug.h"
 #include "lm_ctrl_nvs_keys.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -61,7 +62,10 @@ static void status(const char *text) {
   changed = strcmp(s_info.status, text) != 0;
   snprintf(s_info.status, sizeof(s_info.status), "%s", text);
   portEXIT_CRITICAL(&s_lock);
-  if (changed) ESP_LOGI(TAG, "%s", text);
+  if (changed) {
+    ESP_LOGI(TAG, "%s", text);
+    lm_scale_debug_record("status: %s", text);
+  }
 }
 static bool parse_address(const char *text, uint8_t type, ble_addr_t *out) {
   if (strlen(text) != 17 || type > 1) return false;
@@ -154,7 +158,10 @@ void lm_scale_adapter_registration_result(const char *text, bool attempted) {
   snprintf(s_info.registration_status, sizeof(s_info.registration_status), "%s", text);
   if (attempted) ++s_info.registration_attempts;
   portEXIT_CRITICAL(&s_lock);
-  if (changed || attempted) ESP_LOGI(TAG, "Registration: %s", text);
+  if (changed || attempted) {
+    ESP_LOGI(TAG, "Registration: %s", text);
+    lm_scale_debug_record("registration attempted=%u: %s", attempted, text);
+  }
 }
 static int source_written(uint16_t conn, const struct ble_gatt_error *error,
                           struct ble_gatt_attr *attr, void *arg) {
@@ -178,6 +185,10 @@ static bool send_control(void *ctx, lm_scale_control_t control) {
 }
 static void stop_links(const char *reason, bool fatal) {
   if (!lm_scale_link_begin_stop(&s_lifecycle, now_ms(), s_gateway != BLE_HS_CONN_HANDLE_NONE)) return;
+  lm_scale_debug_record("stop fatal=%u src=%u gw=%u ready=%u samples=%llu age_ms=%llu controls=%u replies=%u: %.72s",
+    fatal, s_source != BLE_HS_CONN_HANDLE_NONE, s_gateway != BLE_HS_CONN_HANDLE_NONE, s_core.ready,
+    (unsigned long long)s_core.weights, (unsigned long long)(now_ms() - s_core.updated),
+    (unsigned)s_core.control_count, (unsigned)s_core.reply_count, reason);
   if (!s_faulted || fatal) status(reason);
   ESP_LOGW(TAG, "%s", reason);
   s_faulted |= fatal;
@@ -318,6 +329,7 @@ static int source_gap(struct ble_gap_event *event, void *arg) {
       observe(&event->disc);
       if (s_selected && !s_connecting && event->disc.addr.type == s_target.type &&
           !memcmp(event->disc.addr.val, s_target.val, 6)) {
+        lm_scale_debug_record("selected source advertising rssi=%d type=%u", event->disc.rssi, event->disc.addr.type);
         /* Explicit cancellation has no DISC_COMPLETE callback. Release our
          * scan state here, then connect from a separate tick event. */
         s_connecting = true;
@@ -330,6 +342,7 @@ static int source_gap(struct ble_gap_event *event, void *arg) {
       break;
     case BLE_GAP_EVENT_CONNECT:
       s_connecting = s_connect_started = false;
+      lm_scale_debug_record("source connect result=%d", event->connect.status);
       if (!event->connect.status) {
         s_source = event->connect.conn_handle;
         lm_scale_core_init(&s_core);
@@ -356,6 +369,7 @@ static int source_gap(struct ble_gap_event *event, void *arg) {
       break;
     case BLE_GAP_EVENT_DISCONNECT:
       if (event->disconnect.conn.conn_handle == s_source) {
+        lm_scale_debug_record("source disconnected reason=%d", event->disconnect.reason);
         s_source = BLE_HS_CONN_HANDLE_NONE;
         stop_links("Source scale disconnected; waiting for its return", false);
       }
@@ -371,6 +385,11 @@ static int source_gap(struct ble_gap_event *event, void *arg) {
           /* Source-scale protocol only: never log machine authentication data. */
           ESP_LOGW(TAG, "Rejected scale notification: driver=%s bytes=%u", s_driver->id, (unsigned)size);
           ESP_LOG_BUFFER_HEX_LEVEL(TAG, data, size > 40 ? 40 : size, ESP_LOG_WARN);
+          char hex[81];
+          size_t limit = size > 40 ? 40 : size;
+          for (size_t i = 0; i < limit; ++i) snprintf(hex + i * 2, 3, "%02x", data[i]);
+          hex[limit * 2] = 0;
+          lm_scale_debug_record("source rejected driver=%s length=%u prefix=%s", s_driver->id, (unsigned)size, hex);
           stop_links("Invalid source protocol or source unit is not grams", true);
         }
       }
@@ -418,6 +437,7 @@ static int gateway_gap(struct ble_gap_event *event, void *arg) {
   (void)arg;
   switch (event->type) {
     case BLE_GAP_EVENT_CONNECT:
+      lm_scale_debug_record("machine scale connect result=%d", event->connect.status);
       if (!event->connect.status) {
         if (!lm_scale_driver_can_bridge(s_driver) || !lm_scale_link_allows_io(&s_lifecycle) ||
             s_gateway != BLE_HS_CONN_HANDLE_NONE || !lm_scale_core_fresh(&s_core, now_ms())) {
@@ -440,6 +460,7 @@ static int gateway_gap(struct ble_gap_event *event, void *arg) {
       if (event->subscribe.conn_handle == s_gateway && event->subscribe.attr_handle == s_notify) {
         s_subscribed = event->subscribe.cur_notify;
         ESP_LOGI(TAG, "Machine notifications %s", s_subscribed ? "subscribed" : "unsubscribed");
+        lm_scale_debug_record("machine scale notifications subscribed=%u", s_subscribed);
         if (!s_subscribed) {
           /* Discard late physical ACKs by starting a new physical session. */
           stop_links("Machine unsubscribed; resetting scale session", false);
@@ -448,6 +469,7 @@ static int gateway_gap(struct ble_gap_event *event, void *arg) {
       break;
     case BLE_GAP_EVENT_DISCONNECT:
       if (event->disconnect.conn.conn_handle == s_gateway) {
+        lm_scale_debug_record("machine scale disconnected reason=%d", event->disconnect.reason);
         bool pending = s_core.control_count != 0;
         s_gateway = BLE_HS_CONN_HANDLE_NONE;
         s_subscribed = false;
@@ -496,6 +518,8 @@ static void tick(struct ble_npl_event *event) {
       stop_links("Applying scale adapter settings", false);
     } else {
       s_config = desired;
+      lm_scale_debug_record("adapter config enabled=%u driver=%s source=%s type=%u virtual=%s manual=%u",
+        s_config.enabled, s_config.driver, s_config.address, s_config.address_type, s_config.name, s_config.manual_mode);
       portENTER_CRITICAL(&s_lock);
       s_applied_revision = revision;
       portEXIT_CRITICAL(&s_lock);
