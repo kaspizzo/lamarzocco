@@ -41,6 +41,7 @@ static uint64_t s_deadline, s_scan_after, s_identified, s_heartbeat;
 static lm_scale_link_lifecycle_t s_lifecycle;
 static bool s_connect_started;
 static uint64_t s_weight_log_at;
+static uint32_t s_frame_log_id;
 static bool s_stream_sent;
 static bool s_source_write_no_rsp;
 static ble_addr_t s_target;
@@ -183,8 +184,52 @@ static bool send_control(void *ctx, lm_scale_control_t control) {
   ESP_LOGI(TAG, "Source control queued: driver=%s control=%u", s_driver->id, (unsigned)control);
   return true;
 }
+static void log_source_bytes(const char *kind, const uint8_t *data, size_t size, bool complete, bool checksum_valid) {
+  if (!data || !size) return;
+  uint32_t id = ++s_frame_log_id;
+  lm_scale_debug_record("source-frame id=%lu kind=%s driver=%s complete=%u checksum=%u bytes=%u",
+    (unsigned long)id, kind, s_driver ? s_driver->id : "none", complete, checksum_valid, (unsigned)size);
+  /* At most 128 hex characters per record: a full frame cannot be truncated
+   * by the journal's 216-byte message limit. Offsets join the chunks exactly. */
+  for (size_t offset = 0; offset < size; offset += 64) {
+    char hex[129];
+    size_t n = size - offset < 64 ? size - offset : 64;
+    for (size_t i = 0; i < n; ++i) snprintf(hex + i * 2, 3, "%02x", data[offset + i]);
+    hex[n * 2] = 0;
+    lm_scale_debug_record("source-frame id=%lu offset=%u hex=%s", (unsigned long)id, (unsigned)offset, hex);
+  }
+}
+static void log_pending_control(void) {
+  lm_scale_control_info_t info;
+  if (!lm_scale_core_control_info(&s_core, now_ms(), &info)) return;
+  const lm_scale_transaction_t *c = &info.transaction;
+  lm_scale_debug_record("control id=%lu request=%s operation=%s elapsed_ms=%llu limit_ms=%lu sent=%u ack=%u reset_first=%u delivering=%u",
+    (unsigned long)c->id, lm_scale_control_name(c->command), lm_scale_control_name(c->operation),
+    (unsigned long long)info.elapsed_ms, (unsigned long)info.timeout_ms,
+    c->sent, c->acknowledged, c->reset_before_start, c->delivering);
+  lm_scale_debug_record("control id=%lu ack_delay_ms=%llu weights_after=%llu ack_count=%llu",
+    (unsigned long)c->id, (unsigned long long)info.ack_delay_ms,
+    (unsigned long long)info.weights_after, (unsigned long long)info.ack_count);
+  lm_scale_debug_record("control id=%lu last_ack=%s age_ms=%llu matched=%u wire=%u raw_id=%02x raw_code=%02x",
+    (unsigned long)c->id, info.ack_count ? lm_scale_control_name(info.last_ack_control) : "none",
+    (unsigned long long)info.last_ack_age_ms, info.last_ack_matched, info.last_ack_wire_valid,
+    info.last_ack_id, info.last_ack_code);
+  if (c->sent && s_driver && s_driver->control) {
+    lm_scale_frame_t tx = s_driver->control(c->operation);
+    log_source_bytes("control-tx", tx.data, tx.size, true, true);
+  }
+  if (s_driver && s_driver->diagnostics) {
+    lm_scale_source_diagnostics_t diagnostics;
+    s_driver->diagnostics(s_driver_state.bytes, &diagnostics);
+    if (diagnostics.last_ack_frame) {
+      const lm_scale_frame_t *ack = diagnostics.last_ack_frame;
+      log_source_bytes("last-ack", ack->data, ack->size, true, true);
+    }
+  }
+}
 static void stop_links(const char *reason, bool fatal) {
   if (!lm_scale_link_begin_stop(&s_lifecycle, now_ms(), s_gateway != BLE_HS_CONN_HANDLE_NONE)) return;
+  log_pending_control();
   lm_scale_debug_record("stop fatal=%u src=%u gw=%u ready=%u samples=%llu age_ms=%llu controls=%u replies=%u: %.72s",
     fatal, s_source != BLE_HS_CONN_HANDLE_NONE, s_gateway != BLE_HS_CONN_HANDLE_NONE, s_core.ready,
     (unsigned long long)s_core.weights, (unsigned long long)(now_ms() - s_core.updated),
@@ -222,6 +267,11 @@ static void stop_links(const char *reason, bool fatal) {
 }
 static bool source_event(void *ctx, const lm_scale_event_t *event) {
   (void)ctx;
+  if (event->kind == LM_SCALE_PROTOCOL_NOTE) {
+    lm_scale_debug_record("source note: %s", event->note ? event->note : "Ancillary frame");
+    if (event->frame) log_source_bytes("ignored", event->frame->data, event->frame->size, true, true);
+    return true;
+  }
   uint64_t now = now_ms();
   if (!lm_scale_core_event(&s_core, event, now)) return false;
   if (event->kind == LM_SCALE_READY) {
@@ -233,7 +283,7 @@ static bool source_event(void *ctx, const lm_scale_event_t *event) {
     s_weight_log_at = now;
     ESP_LOGI(TAG, "Source weight=%.2f g; samples=%llu", event->grams, (unsigned long long)s_core.weights);
   }
-  if (event->kind == LM_SCALE_ACK)
+  if (event->kind == LM_SCALE_ACK && event->control != LM_SCALE_CONTROL_UNKNOWN)
     ESP_LOGI(TAG, "Source control completion=%u (%s)", (unsigned)event->control,
              s_driver->observe_control ? "observed state, experimental" : "protocol ACK");
   return true;
@@ -385,12 +435,15 @@ static int source_gap(struct ble_gap_event *event, void *arg) {
           /* Source-scale protocol only: never log machine authentication data. */
           ESP_LOGW(TAG, "Rejected scale notification: driver=%s bytes=%u", s_driver->id, (unsigned)size);
           ESP_LOG_BUFFER_HEX_LEVEL(TAG, data, size > 40 ? 40 : size, ESP_LOG_WARN);
-          char hex[81];
-          size_t limit = size > 40 ? 40 : size;
-          for (size_t i = 0; i < limit; ++i) snprintf(hex + i * 2, 3, "%02x", data[i]);
-          hex[limit * 2] = 0;
-          lm_scale_debug_record("source rejected driver=%s length=%u prefix=%s", s_driver->id, (unsigned)size, hex);
-          stop_links("Invalid source protocol or source unit is not grams", true);
+          lm_scale_source_diagnostics_t diagnostics = {0};
+          if (s_driver->diagnostics) s_driver->diagnostics(s_driver_state.bytes, &diagnostics);
+          if (diagnostics.failure_frame) {
+            const lm_scale_frame_t *frame = diagnostics.failure_frame;
+            log_source_bytes("rejected", frame->data, frame->size, diagnostics.complete, diagnostics.checksum_valid);
+          } else log_source_bytes("unassembled-notify", data, size, false, false);
+          const char *reason = s_core.error ? s_core.error : diagnostics.error ? diagnostics.error : "Invalid source protocol";
+          lm_scale_debug_record("source rejected reason=%s notification_bytes=%u", reason, (unsigned)size);
+          stop_links(reason, true);
         }
       }
       break;

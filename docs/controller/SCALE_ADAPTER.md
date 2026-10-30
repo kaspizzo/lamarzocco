@@ -154,9 +154,25 @@ in the ring (up to 64 boot anchors per export). Otherwise they retain
 Capture includes startup/build identification, selected adapter configuration,
 matching scale advertisements and their signal strength, connection results,
 handshake/subscription status, registration attempts, disconnect reason codes
-and failure context. A rejected source notification includes at most its first
-40 protocol bytes. There is no continuous weight recording, normal tare/timer
-trace, global serial-log interception or account/token payload capture.
+and failure context. For Acaia, rejected frames are captured after assembling
+all BLE fragments, including header and checksum. `source-frame` records carry
+an ID, kind, byte count, completeness and checksum flags; following records
+contain hex chunks with byte offsets. Concatenate chunks with the same ID in
+offset order. `complete=0` explicitly marks an incomplete framing prefix.
+Unrecognized startup replies are also captured once per opcode/source session.
+
+When a control is pending at shutdown, `control` records identify the requested
+action and the current physical operation (for example, start versus its
+preceding reset), transaction ID, elapsed time, timeout, dispatch/ACK flags,
+ACK delay and post-command sample count. Last-ACK metadata includes its age,
+matching status, normalized operation and raw ID/code. The encoded source write
+and last assembled ACK frame are included when available. A dispatch attempt
+is not proof of over-air delivery or execution; unknown ACKs never confirm a
+control. The Acaia 450 ms control timeout is unchanged in this diagnostic build.
+
+There is no continuous weight recording, normal tare/timer trace, global
+serial-log interception or account/token payload capture. A full failure-context
+ACK frame may contain an embedded measurement.
 
 The last 1 MiB of the existing `storage` partition is reserved for the raw
 diagnostic journal. It holds up to 4,080 CRC-protected records; the oldest sector
@@ -182,16 +198,22 @@ identifiers and rejected protocol bytes, so inspect them before sharing.
 | No observed scales | Wake the scale, close connected apps, clear the source address, enable and save, then reload. Check driver/model and proximity. Discovery lists known name prefixes; manual address entry remains available. |
 | Repeated setup timeout | Verify the selected address and public/random type, the legacy Acaia transport, Mode 2 and grams. |
 | Fresh source, machine still waiting | Turn the machine on, check its selected binding and registration status, and allow the retry backoff. Another scale's registration must be resolved before automatic registration can proceed. |
-| Invalid source protocol or non-gram-unit fault | Verify the physical display uses grams and the correct driver is selected, then save the settings again. Enable the connection debug log before retrying and download it after a recurrence; USB `lm_scale` logs are another option. |
+| Source settings do not report grams / source protocol rejection | Verify the physical display uses grams and the correct driver is selected, then save the settings again. Enable the connection debug log before retrying and download its full rejected frame after a recurrence; USB `lm_scale` logs are another option. |
 | Control confirmation timeout | Check physical mode and whether tare/timer actually responded. Correct the setup, then save again to clear the fault. |
 | Dimmed icon and machine link absent | The scale is connected to the controller. Check its fresh-data status and the machine registration status in the portal. |
 
 Protocol/control faults stop the adapter until settings are saved again. The
 hardware debug session also observed an intermittent Acaia protocol
 fault while the display showed grams; the rejected packet was not captured.
-The firmware now logs the driver, length and first 40 source-protocol bytes of
-a rejected notification to help diagnose a recurrence. This is an open issue,
-not a confirmed unit-setting error.
+The later log captured the repeated body/checksum `070214023c14005718` during
+initialization, but not its complete header. The parser now tolerates validated
+ancillary replies and unrecognized startup layouts while waiting for a known
+gram handshake and fresh weight. These replies do not establish readiness or
+acknowledge controls. Supported seven-/nine-byte settings require the explicit
+gram unit and a valid battery; unknown settings after a gram handshake still
+stop the adapter. Bad checksums and malformed known records remain errors.
+The exact header/meaning of the captured startup body still needs confirmation
+from the next hardware run; tests use explicitly reconstructed header variants.
 
 For a report, include controller revision, scale model/firmware/mode, machine
 model/firmware, both link statuses, session counts and relevant `lm_scale` USB

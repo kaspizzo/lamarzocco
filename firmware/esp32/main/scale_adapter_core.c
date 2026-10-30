@@ -33,6 +33,7 @@ static bool ack(lm_scale_adapter_core_t *s, uint8_t kind, uint32_t id, uint64_t 
 }
 bool lm_scale_core_event(lm_scale_adapter_core_t *s, const lm_scale_event_t *e, uint64_t now) {
   if (s->error) return false;
+  if (e->kind == LM_SCALE_PROTOCOL_NOTE) return true;
   if (e->kind == LM_SCALE_READY || e->kind == LM_SCALE_BATTERY) {
     if (e->battery > 100) return fail(s, "Invalid battery value");
     s->battery = e->battery;
@@ -45,10 +46,23 @@ bool lm_scale_core_event(lm_scale_adapter_core_t *s, const lm_scale_event_t *e, 
     s->updated = now;
     s->weights++;
     if (s->streaming && !tare_pending(s)) s->weight_pending = true;
-  } else if (e->kind == LM_SCALE_ACK && s->control_count) {
-    lm_scale_transaction_t *c = &s->controls[0];
-    /* Late ACKs cannot complete an operation that has not been sent. */
-    if (c->sent && !c->delivering && c->operation == e->control) c->acknowledged = true;
+  } else if (e->kind == LM_SCALE_ACK) {
+    s->last_ack_at = now;
+    ++s->ack_count;
+    s->last_ack_control = e->control;
+    s->last_ack_id = e->ack_id;
+    s->last_ack_code = e->ack_code;
+    s->last_ack_wire_valid = e->ack_wire_valid;
+    s->last_ack_matched = false;
+    if (s->control_count) {
+      lm_scale_transaction_t *c = &s->controls[0];
+      /* A keepalive/unknown ACK never confirms a physical control. */
+      if (c->sent && !c->delivering && e->control != LM_SCALE_CONTROL_UNKNOWN && c->operation == e->control) {
+        s->last_ack_matched = true;
+        if (!c->acknowledged) c->acknowledged_at = now;
+        c->acknowledged = true;
+      }
+    }
   }
   return true;
 }
@@ -126,6 +140,7 @@ bool lm_scale_core_tick(lm_scale_adapter_core_t *s, uint64_t now, lm_scale_send_
     if (!c->acknowledged) return true;
     if (c->reset_before_start) {
       c->reset_before_start = c->sent = c->acknowledged = false;
+      c->acknowledged_at = 0;
       c->operation = LM_SCALE_TIMER_START;
     } else {
       if (c->command == LM_SCALE_TARE && s->weights <= c->weights_before) return true;
@@ -160,4 +175,26 @@ void lm_scale_core_delivered(lm_scale_adapter_core_t *s) {
   if (id && s->control_count && s->controls[0].id == id) {
     memmove(s->controls, s->controls + 1, --s->control_count * sizeof(s->controls[0]));
   }
+}
+const char *lm_scale_control_name(lm_scale_control_t control) {
+  switch (control) {
+    case LM_SCALE_TARE: return "tare";
+    case LM_SCALE_TIMER_START: return "timer-start";
+    case LM_SCALE_TIMER_STOP: return "timer-stop";
+    case LM_SCALE_TIMER_RESET: return "timer-reset";
+    default: return "unknown";
+  }
+}
+bool lm_scale_core_control_info(const lm_scale_adapter_core_t *s, uint64_t now, lm_scale_control_info_t *info) {
+  if (!s || !info || !s->control_count) return false;
+  const lm_scale_transaction_t *c = &s->controls[0];
+  *info = (lm_scale_control_info_t){.transaction = *c,
+    .elapsed_ms = c->sent && now >= c->started ? now - c->started : 0,
+    .ack_delay_ms = c->acknowledged && c->acknowledged_at >= c->started ? c->acknowledged_at - c->started : 0,
+    .weights_after = c->sent && s->weights >= c->weights_before ? s->weights - c->weights_before : 0,
+    .timeout_ms = s->control_timeout_ms, .ack_count = s->ack_count,
+    .last_ack_age_ms = s->ack_count && now >= s->last_ack_at ? now - s->last_ack_at : 0,
+    .last_ack_control = s->last_ack_control, .last_ack_id = s->last_ack_id, .last_ack_code = s->last_ack_code,
+    .last_ack_wire_valid = s->last_ack_wire_valid, .last_ack_matched = s->last_ack_matched};
+  return true;
 }

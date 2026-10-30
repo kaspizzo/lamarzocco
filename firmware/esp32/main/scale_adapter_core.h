@@ -12,6 +12,7 @@ typedef struct {
   lm_scale_control_t operation;
   uint32_t id;
   uint64_t started;
+  uint64_t acknowledged_at;
   uint64_t weights_before;
   bool sent, acknowledged, delivering, reset_before_start;
 } lm_scale_transaction_t;
@@ -26,6 +27,10 @@ typedef struct {
   bool stable;
   uint8_t battery;
   uint64_t updated, weights;
+  uint64_t last_ack_at, ack_count;
+  lm_scale_control_t last_ack_control;
+  uint8_t last_ack_id, last_ack_code;
+  bool last_ack_wire_valid, last_ack_matched;
   uint32_t next_id, last_id;
   uint32_t control_timeout_ms;
   lm_scale_control_t last_command;
@@ -36,6 +41,18 @@ typedef struct {
   size_t reply_count;
   const char *error;
 } lm_scale_adapter_core_t;
+
+typedef struct {
+  lm_scale_transaction_t transaction;
+  uint64_t elapsed_ms, ack_delay_ms, weights_after;
+  uint64_t ack_count, last_ack_age_ms;
+  lm_scale_control_t last_ack_control;
+  uint8_t last_ack_id, last_ack_code;
+  bool last_ack_wire_valid, last_ack_matched;
+  uint32_t timeout_ms;
+} lm_scale_control_info_t;
+const char *lm_scale_control_name(lm_scale_control_t control);
+bool lm_scale_core_control_info(const lm_scale_adapter_core_t *, uint64_t now, lm_scale_control_info_t *);
 
 void lm_scale_core_init(lm_scale_adapter_core_t *s);
 void lm_scale_core_end_gateway(lm_scale_adapter_core_t *s);

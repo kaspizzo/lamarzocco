@@ -133,6 +133,14 @@ Implementation: `scale_protocol.c` (framing), `scale_acaia.c` (Acaia driver),
 `scale_bookoo.c` (experimental BOOKOO drivers), `scale_drivers.c` (registry),
 `scale_adapter_core.c` (gateway session/transactions), `scale_adapter.c` (BLE
 runtime/configuration), and `scale_registration_policy.c` (recovery decisions).
+The Acaia parser accepts validated ancillary startup replies without treating
+them as a successful gram handshake. Recognized seven-/nine-byte settings
+validate the gram unit; unrecognized live settings fail closed. Diagnostic
+snapshots preserve assembled frames across BLE notification boundaries.
+On a pending-control failure, the persistent log includes requested/physical
+operations, ACK timing and raw ACK fields, post-command sample counts and full
+source command/last-ACK frames. Ordinary weights and successful controls remain
+outside persistent capture. See the [debug log guide](../../docs/controller/SCALE_ADAPTER.md#connection-debug-log).
 The host test suite exercises captured source frames, compound events,
 fragmentation/checksums, tare/timer ACKs and retries, stale sessions, portal
 access checks and registration response classification. BLE radio operation

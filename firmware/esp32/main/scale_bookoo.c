@@ -109,6 +109,8 @@ static bool observe_control(void *state, uint64_t now, lm_scale_event_cb emit, v
   s->observed_samples = s->samples;
   bool complete = false;
   switch (s->pending) {
+    case LM_SCALE_CONTROL_UNKNOWN:
+      return false;
     case LM_SCALE_TARE:
       /* Best-effort state confirmation, not a documented BOOKOO ACK. A tare
        * during fast inflow may never reach this threshold and will time out. */
