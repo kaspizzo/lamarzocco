@@ -13,7 +13,14 @@ int run_storage_security_tests(void);
 int run_setup_portal_page_tests(void);
 int run_setup_portal_route_tests(void);
 
+int run_scale_adapter_tests(void);
+int run_scale_bookoo_tests(void);
+int run_scale_debug_store_tests(void);
+
 int main(void) {
+  if (run_scale_debug_store_tests() != 0) return 1;
+  if (run_scale_adapter_tests() != 0) return 1;
+  if (run_scale_bookoo_tests() != 0) return 1;
   fprintf(stderr, "Running host-side firmware tests\n");
 
   if (run_controller_state_tests() != 0) {

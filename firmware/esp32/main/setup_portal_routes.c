@@ -15,6 +15,8 @@
 #include "cloud_machine_selection.h"
 #include "cloud_live_updates.h"
 #include "machine_link.h"
+#include "scale_adapter.h"
+#include "scale_debug.h"
 #include "setup_portal_http.h"
 #include "setup_portal_presenter.h"
 #include "wifi_setup_internal.h"
@@ -879,6 +881,75 @@ static esp_err_t handle_controller_advanced_post(httpd_req_t *req) {
     return lm_ctrl_setup_portal_send_response(req, "Could not store the advanced controller settings.", csrf_token);
   }
   return lm_ctrl_setup_portal_send_response(req, "Advanced controller settings saved.", csrf_token);
+}
+
+static esp_err_t handle_scale_adapter_post(httpd_req_t *req) {
+  char body[512];
+  char csrf_token[LM_CTRL_RANDOM_TOKEN_HEX_LEN] = {0};
+  char enabled[8] = {0}, manual[8] = {0}, type[8] = {0};
+  char driver[64] = {0}, name[64] = {0}, address[64] = {0};
+  lm_scale_adapter_config_t config = {.version = 1};
+  if (read_form_body(req, body, sizeof(body)) != ESP_OK) return ESP_FAIL;
+  if (!ensure_portal_html_access(req, body, true, csrf_token, sizeof(csrf_token))) return ESP_OK;
+  (void)parse_form_value(body, "enabled", enabled, sizeof(enabled));
+  (void)parse_form_value(body, "manual_mode", manual, sizeof(manual));
+  bool valid = parse_form_value(body, "driver", driver, sizeof(driver)) &&
+    parse_form_value(body, "name", name, sizeof(name)) &&
+    parse_form_value(body, "address_type", type, sizeof(type));
+  (void)parse_form_value(body, "address", address, sizeof(address));
+  valid = valid && strlen(driver) < sizeof(config.driver) && strlen(name) < sizeof(config.name) &&
+    strlen(address) < sizeof(config.address);
+  if (valid) {
+    memcpy(config.driver, driver, strlen(driver) + 1);
+    memcpy(config.name, name, strlen(name) + 1);
+    memcpy(config.address, address, strlen(address) + 1);
+  }
+  config.enabled = !strcmp(enabled, "1");
+  config.manual_mode = !strcmp(manual, "1");
+  valid = valid && (!strcmp(type, "0") || !strcmp(type, "1"));
+  config.address_type = !strcmp(type, "1");
+  esp_err_t err = valid ? lm_scale_adapter_configure(&config) : ESP_ERR_INVALID_ARG;
+  return lm_ctrl_setup_portal_send_response(req, err == ESP_OK ? "Scale adapter settings saved." :
+    "Could not save scale adapter. Check its address, name (LUNAR-...), driver and manual gram mode confirmation.", csrf_token);
+}
+
+static esp_err_t handle_scale_debug_post(httpd_req_t *req) {
+  char body[128], action[16] = {0}, csrf_token[LM_CTRL_RANDOM_TOKEN_HEX_LEN] = {0};
+  if (read_form_body(req, body, sizeof(body)) != ESP_OK) return ESP_FAIL;
+  if (!ensure_portal_html_access(req, body, true, csrf_token, sizeof(csrf_token))) return ESP_OK;
+  (void)parse_form_value(body, "action", action, sizeof(action));
+  esp_err_t err = ESP_ERR_INVALID_ARG;
+  if (!strcmp(action, "clear")) err = lm_scale_debug_clear();
+  else if (!strcmp(action, "start") || !strcmp(action, "stop"))
+    err = lm_scale_debug_configure(!strcmp(action, "start"));
+  if (err == ESP_OK && !strcmp(action, "start")) {
+    lm_scale_adapter_info_t info;
+    lm_scale_adapter_get_info(&info);
+    lm_scale_debug_record("capture snapshot driver=%s enabled=%u src=%u fresh=%u gw=%u fault=%u",
+      info.config.driver, info.config.enabled, info.source_connected, info.source_fresh, info.gateway_connected, info.faulted);
+  }
+  return lm_ctrl_setup_portal_send_response(req, err == ESP_OK ? "Connection log setting updated." :
+    "Could not update connection log. Check its storage status.", csrf_token);
+}
+
+typedef struct { httpd_req_t *req; bool started; } scale_debug_download_t;
+static bool send_scale_debug_chunk(void *ctx, const char *text) {
+  scale_debug_download_t *download = ctx;
+  download->started = true;
+  return httpd_resp_sendstr_chunk(download->req, text) == ESP_OK;
+}
+static esp_err_t handle_scale_debug_get(httpd_req_t *req) {
+  char csrf_token[LM_CTRL_RANDOM_TOKEN_HEX_LEN] = {0};
+  if (!ensure_portal_html_access(req, NULL, false, csrf_token, sizeof(csrf_token))) return ESP_OK;
+  httpd_resp_set_type(req, "text/plain; charset=utf-8");
+  httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=scale-connection-log.txt");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  scale_debug_download_t download = {.req = req};
+  esp_err_t err = lm_scale_debug_export(send_scale_debug_chunk, &download);
+  if (!download.started && err != ESP_OK)
+    return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "No readable connection log. Enable capture first.");
+  if (err != ESP_OK) (void)httpd_resp_sendstr_chunk(req, "\n# Export interrupted; retry the download.\n");
+  return httpd_resp_sendstr_chunk(req, NULL);
 }
 
 static esp_err_t handle_debug_screenshot_toggle_post(httpd_req_t *req) {
@@ -1798,6 +1869,15 @@ esp_err_t lm_ctrl_setup_portal_start_http_server(void) {
     .method = HTTP_GET,
     .handler = handle_logout_get,
   };
+  httpd_uri_t scale_adapter_uri = {
+    .uri = "/scale-adapter", .method = HTTP_POST, .handler = handle_scale_adapter_post,
+  };
+  httpd_uri_t scale_debug_post_uri = {
+    .uri = "/scale-debug", .method = HTTP_POST, .handler = handle_scale_debug_post,
+  };
+  httpd_uri_t scale_debug_get_uri = {
+    .uri = "/scale-debug.txt", .method = HTTP_GET, .handler = handle_scale_debug_get,
+  };
   httpd_uri_t controller_uri = {
     .uri = "/controller",
     .method = HTTP_POST,
@@ -1938,10 +2018,13 @@ esp_err_t lm_ctrl_setup_portal_start_http_server(void) {
     return ESP_OK;
   }
 
-  config.max_uri_handlers = 35;
+  config.max_uri_handlers = 38;
   config.stack_size = LM_CTRL_SETUP_PORTAL_HTTPD_STACK_SIZE;
   config.uri_match_fn = httpd_uri_match_wildcard;
   ESP_RETURN_ON_ERROR(httpd_start(&s_state.http_server, &config), TAG, "Failed to start setup web server");
+  ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &scale_adapter_uri), TAG, "Failed to register scale adapter handler");
+  ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &scale_debug_post_uri), TAG, "Failed to register scale debug handler");
+  ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &scale_debug_get_uri), TAG, "Failed to register scale debug download");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &root_uri), TAG, "Failed to register root handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &access_setup_get_uri), TAG, "Failed to register access setup GET handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &access_setup_post_uri), TAG, "Failed to register access setup POST handler");

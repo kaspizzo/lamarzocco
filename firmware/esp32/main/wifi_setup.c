@@ -19,6 +19,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
+#include "esp_netif_sntp.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -33,11 +34,30 @@
 #include "controller_settings.h"
 #include "setup_portal_routes.h"
 #include "storage_security.h"
+#include "scale_debug.h"
 #include "wifi_reconnect_policy.h"
 #include "wifi_setup_internal.h"
 #include "mdns.h"
 
 static const char *TAG = "lm_wifi";
+static bool s_ntp_initialized;
+
+static void clock_synchronized(struct timeval *time) {
+  (void)time;
+  lm_scale_debug_clock_synchronized();
+}
+
+static void start_network_clock(void) {
+  esp_err_t err;
+  if (!s_ntp_initialized) {
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    config.wait_for_sync = false;
+    config.sync_cb = clock_synchronized;
+    err = esp_netif_sntp_init(&config);
+    s_ntp_initialized = err == ESP_OK;
+  } else err = esp_netif_sntp_start();
+  if (err != ESP_OK) ESP_LOGW(TAG, "NTP initialization unavailable: %s", esp_err_to_name(err));
+}
 
 lm_ctrl_wifi_state_t s_state = {
   .hostname = LM_CTRL_WIFI_DEFAULT_HOSTNAME,
@@ -480,6 +500,9 @@ esp_err_t lm_ctrl_wifi_factory_reset(void) {
   esp_err_t ret;
 
   lm_ctrl_cloud_live_updates_stop(false);
+  esp_err_t debug_err = lm_scale_debug_clear();
+  if (debug_err != ESP_OK && debug_err != ESP_ERR_INVALID_STATE)
+    ESP_LOGW(TAG, "Could not clear scale diagnostic log: %s", esp_err_to_name(debug_err));
   ret = lm_ctrl_settings_factory_reset();
   if (ret != ESP_OK) {
     return ret;
@@ -933,6 +956,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     mark_status_dirty_locked();
     unlock_state();
     ensure_station_dns();
+    start_network_clock();
     (void)disable_setup_ap();
     (void)lm_ctrl_wifi_request_cloud_probe();
   }
@@ -988,6 +1012,8 @@ esp_err_t lm_ctrl_wifi_init(void) {
   }
 
   ESP_RETURN_ON_ERROR(lm_ctrl_secure_storage_init(), TAG, "Failed to initialize encrypted controller storage");
+  ret = lm_scale_debug_init();
+  if (ret != ESP_OK) ESP_LOGW(TAG, "Scale debug capture unavailable: %s", esp_err_to_name(ret));
   ret = lm_ctrl_settings_load();
   ESP_RETURN_ON_ERROR(ret, TAG, "Failed to load Wi-Fi credentials");
   ret = lm_ctrl_settings_ensure_cloud_provisioning();

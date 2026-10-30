@@ -21,6 +21,7 @@ idf_component_register(
     "controller_ui.c"
     "controller_shot_timer.c"
     "fonts/lm_ctrl_font_montserrat_14.c"
+    "fonts/lm_ctrl_font_scale_14.c"
     "fonts/lm_ctrl_font_montserrat_16.c"
     "fonts/lm_ctrl_font_montserrat_20.c"
     "fonts/lm_ctrl_font_montserrat_28.c"
@@ -30,6 +31,15 @@ idf_component_register(
     "machine_link_ble.c"
     "machine_link_cloud.c"
     "machine_link_policy.c"
+    "scale_protocol.c"
+    "scale_registration_policy.c"
+    "scale_acaia.c"
+    "scale_bookoo.c"
+    "scale_drivers.c"
+    "scale_adapter_core.c"
+    "scale_adapter.c"
+    "scale_debug.c"
+    "scale_debug_store.c"
     "setup_portal_http.c"
     "setup_portal_page.c"
     "setup_portal_presenter.c"
@@ -42,6 +52,8 @@ idf_component_register(
     "."
   REQUIRES
     bt
+    esp_app_format
+    esp_partition
     mdns
     led_strip
     esp_adc

@@ -8,6 +8,7 @@
 
 #include "controller_connectivity.h"
 #include "controller_ui.h"
+#include "lm_ctrl_fonts.h"
 #include "stubs.h"
 
 static void dummy_action_cb(lm_ctrl_ui_action_t action, ctrl_focus_t focus, void *user_data) {
@@ -136,6 +137,12 @@ static void build_view(
   view->remote_path_state = access.remote_path_state;
   view->ble_visible = env->machine_info.connected || env->machine_info.authenticated;
   view->ble_authenticated = env->machine_info.authenticated;
+  view->scale_indicator = env->scale_indicator;
+  if (env->all_status_icons) {
+    view->remote_path_state = LM_CTRL_REMOTE_PATH_MACHINE_ONLINE;
+    view->ble_visible = view->ble_authenticated = true;
+    view->usb_visible = view->battery_visible = view->heat_visible = view->water_alert_visible = true;
+  }
   view->readable_mask = access.readable_mask;
   view->editable_mask = access.editable_mask;
   view->preset_load_enabled = access.preset_load_enabled;
@@ -166,6 +173,73 @@ static bool render_to_bmp(const char *path, const ctrl_state_t *state, const hos
   }
 
   lv_timer_handler();
+  lv_obj_update_layout(ui.screen);
+  if (state->screen == CTRL_SCREEN_PRESETS) {
+    lv_area_t title, name, body, load, save;
+    lv_obj_get_coords(ui.presets_title, &title);
+    lv_obj_get_coords(ui.presets_name, &name);
+    lv_obj_get_coords(ui.presets_body, &body);
+    lv_obj_get_coords(ui.presets_load_button, &load);
+    lv_obj_get_coords(ui.presets_save_button, &save);
+    if (title.y2 >= name.y1 || name.y2 >= body.y1 ||
+        body.y2 + 8 >= load.y1 || body.y2 + 8 >= save.y1 || load.x2 >= save.x1) {
+      fprintf(stderr, "Preset text overlaps its title, name or action buttons: %s\n", path);
+      return false;
+    }
+    if (load.y1 != body.y2 + 13 || save.y1 != load.y1) {
+      fprintf(stderr, "Preset buttons do not follow the summary height: %s\n", path);
+      return false;
+    }
+    lv_obj_t *buttons[] = {ui.presets_load_button, ui.presets_save_button};
+    lv_obj_t *labels[] = {ui.presets_load_label, ui.presets_save_label};
+    for (unsigned i = 0; i < 2; ++i) {
+      lv_area_t button, label;
+      lv_obj_get_coords(buttons[i], &button);
+      lv_obj_get_coords(labels[i], &label);
+      if (label.x1 < button.x1 || label.x2 > button.x2 ||
+          label.y1 < button.y1 || label.y2 > button.y2) {
+        fprintf(stderr, "Preset button label does not fit: %s\n", path);
+        return false;
+      }
+      /* The entire touch target must remain inside the round screen's ring. */
+      for (unsigned corner = 0; corner < 4; ++corner) {
+        int dx = ((corner & 1) ? button.x2 : button.x1) - 180;
+        int dy = ((corner & 2) ? button.y2 : button.y1) - 180;
+        if (dx * dx + dy * dy > 160 * 160) {
+          fprintf(stderr, "Preset button extends beyond the round screen: %s\n", path);
+          return false;
+        }
+      }
+    }
+  }
+  if (lv_obj_has_flag(ui.scale_icon, LV_OBJ_FLAG_HIDDEN) != (view.scale_indicator == LM_CTRL_SCALE_HIDDEN)) {
+    fprintf(stderr, "Scale icon visibility does not match the source connection.\n");
+    return false;
+  }
+  if (view.scale_indicator != LM_CTRL_SCALE_HIDDEN) {
+    lv_opa_t expected = view.scale_indicator == LM_CTRL_SCALE_MACHINE_CONNECTED ? LV_OPA_COVER : LV_OPA_50;
+    if (lv_obj_get_style_text_opa(ui.scale_icon, LV_PART_MAIN) != expected) {
+      fprintf(stderr, "Scale icon brightness does not match the machine scale link.\n");
+      return false;
+    }
+    lv_font_glyph_dsc_t glyph;
+    if (!lv_font_get_glyph_dsc(&lm_ctrl_font_scale_14, &glyph, 0xf24e, 0)) {
+      fprintf(stderr, "Scale icon glyph is missing.\n");
+      return false;
+    }
+  }
+  if (env->all_status_icons) {
+    lv_obj_t *icons[] = {ui.wifi_icon, ui.ble_icon, ui.scale_icon, ui.usb_icon,
+                        ui.battery_icon, ui.heat_icon, ui.water_icon};
+    for (size_t i = 0; i < sizeof(icons) / sizeof(icons[0]); ++i) {
+      lv_area_t bounds;
+      lv_obj_get_coords(icons[i], &bounds);
+      if (lv_obj_has_flag(icons[i], LV_OBJ_FLAG_HIDDEN) || bounds.x1 < 0 || bounds.x2 >= 360) {
+        fprintf(stderr, "Status icon overflow with all seven indicators visible.\n");
+        return false;
+      }
+    }
+  }
   snapshot = lv_snapshot_take(ui.screen, LV_IMG_CF_TRUE_COLOR);
   if (snapshot != NULL) {
     ok = write_bmp(path, snapshot);
@@ -267,6 +341,7 @@ static int generate_main_screens(const char *output_dir) {
 
   state.screen = CTRL_SCREEN_PRESETS;
   state.preset_index = 0;
+  state.preset_count = 1;
   snprintf(path, sizeof(path), "%s/preset-view.bmp", output_dir);
   if (!render_to_bmp(path, &state, &env, NULL)) {
     return 1;
@@ -357,6 +432,58 @@ static int generate_german_screens(const char *output_dir) {
   return 0;
 }
 
+static int generate_scale_screens(const char *output_dir) {
+  host_stub_env_t env = base_env();
+  ctrl_state_t state = base_state();
+  char path[512];
+  /* The owner BLE link is independent of the machine-to-scale subscription. */
+  env.machine_info.connected = env.machine_info.authenticated = false;
+  env.scale_indicator = LM_CTRL_SCALE_SOURCE_CONNECTED;
+  snprintf(path, sizeof(path), "%s/scale-source-connected.bmp", output_dir);
+  if (!render_to_bmp(path, &state, &env, NULL)) return 1;
+  env.scale_indicator = LM_CTRL_SCALE_MACHINE_CONNECTED;
+  snprintf(path, sizeof(path), "%s/scale-connected.bmp", output_dir);
+  if (!render_to_bmp(path, &state, &env, NULL)) return 1;
+  env.scale_indicator = LM_CTRL_SCALE_HIDDEN;
+  snprintf(path, sizeof(path), "%s/scale-disconnected.bmp", output_dir);
+  if (!render_to_bmp(path, &state, &env, NULL)) return 1;
+  env.scale_indicator = LM_CTRL_SCALE_MACHINE_CONNECTED;
+  env.all_status_icons = true;
+  snprintf(path, sizeof(path), "%s/scale-all-icons.bmp", output_dir);
+  return render_to_bmp(path, &state, &env, NULL) ? 0 : 1;
+}
+
+static int generate_preset_layout_screens(const char *output_dir) {
+  host_stub_env_t env = base_env();
+  ctrl_state_t state = base_state();
+  char path[512];
+  state.screen = CTRL_SCREEN_PRESETS;
+  state.preset_count = 2;
+  state.feature_mask = CTRL_FEATURE_BBW;
+  strcpy(state.presets[0].name, "Light Roast");
+  state.presets[0].values = (ctrl_values_t){
+    .temperature_c = 95, .infuse_s = 2, .pause_s = 9,
+    .bbw_mode = CTRL_BBW_MODE_DOSE_1, .bbw_dose_1_g = 32, .bbw_dose_2_g = 34,
+  };
+  for (unsigned language = 0; language < 2; ++language) {
+    env.wifi_info.language = language ? CTRL_LANGUAGE_DE : CTRL_LANGUAGE_EN;
+    snprintf(path, sizeof(path), "%s/preset-bbw-%s.bmp", output_dir, language ? "de" : "en");
+    if (!render_to_bmp(path, &state, &env, NULL)) return 1;
+    ctrl_preset_t saved = state.presets[0];
+    strcpy(state.presets[0].name, "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEF");
+    state.presets[0].values.bbw_mode = CTRL_BBW_MODE_CONTINUOUS;
+    state.presets[0].values.bbw_dose_1_g = state.presets[0].values.bbw_dose_2_g = 100;
+    snprintf(path, sizeof(path), "%s/preset-bbw-long-%s.bmp", output_dir, language ? "de" : "en");
+    if (!render_to_bmp(path, &state, &env, NULL)) return 1;
+    state.presets[0] = saved;
+    state.feature_mask = 0;
+    snprintf(path, sizeof(path), "%s/preset-basic-%s.bmp", output_dir, language ? "de" : "en");
+    if (!render_to_bmp(path, &state, &env, NULL)) return 1;
+    state.feature_mask = CTRL_FEATURE_BBW;
+  }
+  return 0;
+}
+
 int main(void) {
   static lv_color_t display_buffer[360 * 360];
   static lv_disp_draw_buf_t draw_buf;
@@ -388,7 +515,9 @@ int main(void) {
 
   if (generate_main_screens(output_dir) != 0 ||
       generate_setup_screens(output_dir) != 0 ||
-      generate_german_screens(output_dir) != 0) {
+      generate_german_screens(output_dir) != 0 ||
+      generate_scale_screens(output_dir) != 0 ||
+      generate_preset_layout_screens(output_dir) != 0) {
     fprintf(stderr, "Failed to render controller screenshots.\n");
     return 1;
   }

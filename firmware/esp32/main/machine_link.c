@@ -2,6 +2,7 @@
  * Machine link core state, worker orchestration, and public API.
  */
 #include "machine_link_internal.h"
+#include "scale_adapter.h"
 
 #include <stdarg.h>
 #include <string.h>
@@ -610,6 +611,11 @@ static void machine_link_worker(void *arg) {
     }
 
     expire_pending_cloud_commands();
+    /* User value changes and explicit sync requests take priority over recovery. */
+    portENTER_CRITICAL(&s_link_lock);
+    bool idle = s_link.pending_mask == 0 && s_link.sync_request_flags == LM_CTRL_MACHINE_SYNC_NONE;
+    portEXIT_CRITICAL(&s_link_lock);
+    if (idle) maybe_restore_scale_registration();
 
     while (1) {
       portENTER_CRITICAL(&s_link_lock);
@@ -877,6 +883,8 @@ esp_err_t lm_ctrl_machine_link_init(const lm_ctrl_machine_link_deps_t *deps) {
   if (rc != ESP_OK) {
     return rc;
   }
+
+  ESP_RETURN_ON_ERROR(lm_scale_adapter_init(), "lm_scale", "Scale adapter init failed");
 
   ble_hs_cfg.reset_cb = machine_link_on_reset;
   ble_hs_cfg.sync_cb = machine_link_on_sync;

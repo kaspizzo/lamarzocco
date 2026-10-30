@@ -9,6 +9,8 @@
 #include "controller_state.h"
 #include "machine_link_types.h"
 #include "wifi_setup_types.h"
+#include "scale_adapter.h"
+#include "scale_debug.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,6 +39,8 @@ typedef struct {
   lm_ctrl_machine_link_info_t machine_info;
   lm_ctrl_cloud_machine_t fleet[8];
   size_t fleet_count;
+  lm_scale_adapter_info_t scale_info;
+  lm_scale_debug_info_t scale_debug_info;
 } lm_ctrl_setup_portal_view_t;
 
 const char *lm_ctrl_setup_portal_history_target(const char *uri);

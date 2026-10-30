@@ -10,6 +10,152 @@ The current target is a JC3636K718-style round controller board with:
 - physical outer ring
 - DRV2605L haptics
 
+## Experimental BLE scale adapter
+
+For setup, status interpretation, reconnect troubleshooting and a repeatable
+hardware test, see the [scale adapter guide](../../docs/controller/SCALE_ADAPTER.md).
+
+The controller can act as a BLE central for a physical scale and as a virtual
+Acaia-compatible peripheral for the La Marzocco gateway at the same time. The
+first source driver is `acaia_legacy`, for the owner's Mini-USB Lunar. Experimental
+`bookoo_mini` and `bookoo_ultra` drivers also enable the machine bridge for beta
+testing. Additional BLE scale protocols belong behind `scale_driver.h`; they must provide gram
+measurements, session/battery information and confirmed tare/timer operations.
+Newer Acaia transports and other brands are not implemented yet.
+
+BOOKOO has **not been tested on hardware**. Select Mini or Ultra explicitly in
+the portal; the BLE name alone cannot distinguish them. The shared FFE service,
+FF11 notifications and FF12 command encoders follow the manufacturer's
+[Mini protocol](https://github.com/BooKooCode/OpenSource/blob/main/bookoo_mini_scale/protocols.md)
+and [Ultra protocol](https://github.com/BooKooCode/OpenSource/blob/main/bookoo_ultra_scale/protocols.md).
+The decoder validates the 20-byte `03 0B` envelope and XOR checksum, and decodes
+signed grams, battery, elapsed milliseconds and flow. Ultra packets still carry
+grams when its display uses ounces. The manufacturer does not specify sign-byte
+values; ASCII `+`/`-`, space and zero follow the interoperability convention in
+[Open Brew by Weight](https://github.com/Cheerpipe/Open-Brew-by-Weight/blob/main/libraries/EspressoScaleBLE/src/protocols/GenericFf11.cpp).
+Unknown weight signs are rejected. Ultra `03 0D`/`03 0F` packets do not refresh
+live weight or acknowledge commands. No Acaia handshake, heartbeat or
+firmware-dependent BOOKOO mode/shutdown commands are sent.
+
+BOOKOO control writes, virtual-scale advertising and automatic machine
+registration are enabled. Use manual timing mode with grams; for Ultra use
+timing-mode or a manual timing submode. Automatic modes and charging can ignore
+controls. Command writes use Write Without Response when offered, otherwise
+Write Request; ATT success alone never completes a gateway command.
+
+The public protocol has no documented explicit command ACK. The experimental
+driver infers completion from new `03 0B` measurements after a queued write:
+tare requires weight within 0.10 g of zero; reset requires timer zero; start
+requires the 24-bit timer to advance; stop requires a timer plateau across
+separate notifications for at least 200 ms. These observations are heuristics,
+not proof that a specific command executed. An already-zero state can satisfy
+tare/reset; already-running/stopped states and timer quantization can also
+affect detection. Tare during inflow may never reach zero and will time out.
+BOOKOO gets a two-second control timeout, with the same one-second stale-data
+limit. Acaia retains its protocol ACKs and 450 ms control timeout. Missing
+completion stops the adapter without fabricating an ACK. Real hardware must
+still validate radio behavior, command timing and brew-by-weight accuracy.
+See the [BOOKOO beta test guide](../../docs/controller/BOOKOO_BETA_TEST.md).
+
+In the local setup portal, open **Scale Adapter**, enable it with the source
+address empty, wake the Lunar and reload the page after a scan. Select its BLE
+address and the reported public/random type, confirm manual weight/timer
+Mode 2 with grams, and save. Close other apps that hold the real scale's BLE
+connection. The selected address, driver, mode confirmation and virtual name
+are saved in encrypted controller NVS. Factory reset clears them; network reset
+retains them. The default is disabled, and no physical scale is selected
+implicitly from its name. Existing generated `sdkconfig` files must enable
+`CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y`, `CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y`
+and `CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3`; fresh configurations inherit these
+from `sdkconfig.defaults`.
+
+After selection, source connection and wake reconnection run automatically.
+The header shows a dimmed Font Awesome `balance-scale` icon while the physical
+scale is connected. It reaches full brightness only with fresh source readings
+and a subscribed machine scale link. It is hidden when the source disconnects,
+the adapter is disabled or a protocol fault stops the adapter. Losing only the
+machine link dims the icon again. Both links also remain visible in the portal.
+
+The portal's **Connection Debug Log** optionally records initialization,
+registration, link failures and recovery in a persistent 1 MiB flash ring.
+Capture runs without USB and survives restarts until stopped. It does not
+record the weight stream or normal tare/timer traffic. WLAN time synchronization
+uses NTP; boot IDs and monotonic uptime preserve ordering before synchronization.
+See the [debug log workflow](../../docs/controller/SCALE_ADAPTER.md#connection-debug-log).
+The controller advertises the stable `LUNAR-C` virtual identity only after a new
+validated source handshake and a weight less than one second old. It withdraws
+advertising and invalidates all readings immediately when the source disappears,
+sends the native disconnect event to a subscribed gateway and closes that link.
+A new physical session requires a new handshake and new weight. The virtual GATT
+service remains registered across source sessions. Three BLE slots are configured, with host buffers in PSRAM to preserve internal
+RAM for Wi-Fi/TLS. The direct controller-to-machine owner link is temporary: it
+is released while the scale is active so the machine can initiate its scale
+connection to the same controller identity. Periodic status reads then use the
+cloud dashboard/websocket; explicit controls fall back to cloud while the gateway
+scale link is established. When the scale is inactive, normal local BLE reads
+resume.
+Scanning/connecting procedures share the existing NimBLE host, without a second
+stack or host task. Source scans yield between two-second windows.
+
+While fresh source data is available and the machine scale link is absent,
+the existing machine worker checks the machine's `scales` list. If this adapter's
+registration is missing and no other scale is listed, it sends normal
+`SetScalePosition` with `force:false`, then releases the owner BLE connection. Registration checks also release that
+connection when an entry is already present or a check fails.
+Attempts continue with 30/60/120/240-second backoff while needed. Machine
+standby, unknown/malformed responses and another scale's registration do not
+cause a write. An existing entry is retained while waiting for reconnection;
+a disconnected entry is not evidence of a missing registration. Controller
+reboot or a new successful gateway connection resets the backoff.
+
+Keep the controller at its intended permanent position during location training:
+the gateway measures the controller's signal, rather than the real scale's.
+Delivery of a position request, a runtime scale entry and `calibrated:true`
+are **not proof of persisted location calibration**. Command completion,
+persistence across machine restarts still needs validation. A controller test
+on 2026-10-26 confirmed source wake reconnection and gateway reconnection after
+one physical Lunar power cycle, without another position request. Repeated forced reference resets are not used.
+
+The virtual facade handles mode/auto-tare/target/beep settings for its own
+session. Real tare and timer operations use driver confirmations (BOOKOO:
+inferred from returned state as described above); native timer
+start resets the physical timer before starting it. Consecutive retries are
+coalesced until the final gateway ACK is accepted by NimBLE, while distinct
+Start/Stop/Start commands remain ordered. Tare withholds old readings until a
+real ACK and a post-command measurement arrive, including nonzero weight when
+water is already arriving. Missing confirmations, malformed protocols, unsupported
+controls or excessive gateway backpressure stop the adapter until settings are
+saved again. NimBLE notification acceptance does not prove over-air delivery.
+The adapter never issues pump/valve commands; automatic weight-stop accuracy is
+not yet validated on controller hardware.
+
+Implementation: `scale_protocol.c` (framing), `scale_acaia.c` (Acaia driver),
+`scale_bookoo.c` (experimental BOOKOO drivers), `scale_drivers.c` (registry),
+`scale_adapter_core.c` (gateway session/transactions), `scale_adapter.c` (BLE
+runtime/configuration), and `scale_registration_policy.c` (recovery decisions).
+The Acaia parser accepts validated ancillary startup replies without treating
+them as a successful gram handshake. Recognized seven-/nine-byte settings
+validate the gram unit; unrecognized live settings fail closed. Diagnostic
+snapshots preserve assembled frames across BLE notification boundaries.
+On a pending-control failure, the persistent log includes requested/physical
+operations, ACK timing and raw ACK fields, post-command sample counts and full
+source command/last-ACK frames. Ordinary weights and successful controls remain
+outside persistent capture. See the [debug log guide](../../docs/controller/SCALE_ADAPTER.md#connection-debug-log).
+The host test suite exercises captured source frames, compound events,
+fragmentation/checksums, tare/timer ACKs and retries, stale sessions, portal
+access checks and registration response classification. BLE radio operation
+requires a hardware test. BOOKOO fixtures are synthetic, not recorded scale
+traffic; these tests do not establish hardware compatibility.
+
+Hardware smoke test (2026-10-26): the owner's legacy Lunar connected directly
+to the controller, with a reported 2.9 g matching received values around
+2.89–2.91 g. The machine subscribed to `LUNAR-C`; its cloud dashboard independently
+reported scale connected, the real battery value and BBW availability. After one
+Lunar off/on cycle, both source and gateway reconnected automatically, with no
+new position request. Controller settings survived the firmware updates. This
+was a connection/measurement test with the paddle off; machine-restart persistence,
+location-calibration persistence and automatic weight-stop accuracy remain untested.
+
 ## Current feature set
 
 - `controller_state.[ch]`
@@ -120,6 +266,11 @@ They currently store and load:
 - prebrewing on-time
 - prebrewing off-time
 - brew-by-weight mode, dose 1, and dose 2 when the selected machine reports BBW support
+
+On the preset screen, Load/Save follow the actual summary height with a fixed
+12-pixel gap. BBW adds its mode and both dose targets above the buttons; long
+names are shortened to one line. The touch targets stay inside the round display
+in both English and German.
 
 They do not store or restore:
 
@@ -245,6 +396,10 @@ The firmware requires ESP-IDF 5.5 or newer. ESP-IDF 5.4 is no longer supported
 because the managed component set requires `idf >=5.5.0`.
 The WebSocket component is constrained below 1.6.0 because the 1.6.x redirect
 support expects transport APIs that are not present in all ESP-IDF 5.5 installs.
+The scale adapter build was verified with stable ESP-IDF 5.5.4. Its NimBLE
+configuration changes also apply to existing checkouts: follow the
+[upgrade instructions](../../docs/controller/SCALE_ADAPTER.md#building-and-updating)
+before building with an older generated `sdkconfig`.
 
 ### macOS / Linux
 

@@ -211,6 +211,7 @@
       <a href="#network-section">Network</a>
       <a href="#cloud-section">Cloud</a>
       <a href="#recipes-section">Recipes</a>
+      <a href="#scale-section">Scale Adapter</a>
       <a href="#advanced-section">Advanced</a>
       <a href="#diagnostics-section">Diagnostics</a>
     </nav>
@@ -326,6 +327,30 @@ Header logo: default text</pre>
           </details>
         </div>
       </section>
+    </section>
+
+    <section id="scale-section" class="stack">
+      <div class="section-head">
+        <h2>BLE Scale Adapter</h2>
+        <p>Connect a physical scale through the controller's virtual scale.</p>
+      </div>
+      <form class="section-card">
+        <pre>Machine connected to virtual scale
+Source: fresh | Machine scale link: connected
+Weight: 2.90 g | Battery: 84%
+Source sessions: 1 | Machine sessions: 1 | Registration requests: 1</pre>
+        <label><input type="checkbox" checked> Enable Scale Adapter</label>
+        <div class="field-grid">
+          <div><label>Scale Driver</label><select><option selected>Acaia Lunar (legacy)</option><option>BOOKOO Mini (experimental)</option><option>BOOKOO Ultra (experimental)</option></select></div>
+          <div><label>Source BLE Address</label><input value="AA:BB:CC:DD:EE:FF"></div>
+          <div><label>Source Address Type</label><select><option selected>Public</option><option>Random</option></select></div>
+          <div><label>Virtual Scale Name</label><input value="LUNAR-C"></div>
+        </div>
+        <label><input type="checkbox" checked> The scale is in manual weight/timer mode (Acaia: Mode 2), using grams.</label>
+        <p>For discovery, enable with the source address empty, wake the scale and reload. Select its exact address and matching type, then save again.</p>
+        <button type="button">Save Scale Adapter</button>
+        <p>BOOKOO support is untested on hardware. Calibration persistence and automatic weight-stop precision still require hardware validation.</p>
+      </form>
     </section>
 
     <section id="advanced-section" class="stack">

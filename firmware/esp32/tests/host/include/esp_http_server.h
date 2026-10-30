@@ -25,6 +25,7 @@ typedef struct httpd_req {
   char *body;
   size_t body_len;
   size_t body_capacity;
+  size_t empty_text_chunk_count;
   test_httpd_header_t response_headers[16];
   size_t response_header_count;
 } httpd_req_t;

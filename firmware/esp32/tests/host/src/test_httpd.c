@@ -297,6 +297,9 @@ esp_err_t httpd_resp_sendstr_chunk(httpd_req_t *req, const char *str) {
     return ESP_OK;
   }
 
+  /* ESP-IDF sends a terminating zero chunk for an empty string as well. */
+  if (str[0] == '\0') ++req->empty_text_chunk_count;
+
   return append_text(req, str);
 }
 

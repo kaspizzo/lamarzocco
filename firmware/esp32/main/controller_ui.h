@@ -15,6 +15,13 @@
 /** Maximum setup QR payload length passed into the UI view model. */
 #define LM_CTRL_UI_SETUP_QR_LEN 192
 
+/** Separate physical-scale reception from the machine's virtual-scale link. */
+typedef enum {
+  LM_CTRL_SCALE_HIDDEN = 0,
+  LM_CTRL_SCALE_SOURCE_CONNECTED,
+  LM_CTRL_SCALE_MACHINE_CONNECTED,
+} lm_ctrl_scale_indicator_t;
+
 /** Read-only UI view model built by the runtime layer. */
 typedef struct {
   ctrl_language_t language;
@@ -28,6 +35,7 @@ typedef struct {
   bool water_alert_visible;
   bool ble_visible;
   bool ble_authenticated;
+  lm_ctrl_scale_indicator_t scale_indicator;
   bool shot_timer_visible;
   bool shot_timer_dismissable;
   uint32_t readable_mask;
@@ -81,6 +89,7 @@ struct lm_ctrl_ui_s {
   lv_obj_t *heat_icon;
   lv_obj_t *water_icon;
   lv_obj_t *ble_icon;
+  lv_obj_t *scale_icon;
   lv_obj_t *heat_arc;
   lv_obj_t *page_label;
   lv_obj_t *page_dots[LM_CTRL_UI_MAIN_PAGE_COUNT];
