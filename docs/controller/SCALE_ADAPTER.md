@@ -6,9 +6,11 @@ handles its connection and reconnects when the scale wakes up. A phone or Mac
 does not need to run the adapter.
 
 The legacy Mini-USB Acaia Lunar has passed a connection and measurement smoke
-test. BOOKOO Mini/Ultra support is experimental and has only synthetic host
-tests; follow the separate [BOOKOO beta guide](BOOKOO_BETA_TEST.md). Newer Acaia
-transports and other brands need their own drivers.
+test. Lunar 2021 / USB-C with standard Acaia firmware and BOOKOO Mini/Ultra support
+are experimental and have only synthetic host tests; follow the separate
+[Lunar 2021 beta guide](LUNAR_2021_BETA_TEST.md) or
+[BOOKOO beta guide](BOOKOO_BETA_TEST.md). Other Acaia protocols and brands need
+their own drivers.
 
 ## Building and updating
 
@@ -57,7 +59,9 @@ normal adapter update.
 2. Turn on the Acaia in **Mode 2**, with the display using **grams**. Close
    Acaia/La Marzocco apps or other devices holding a direct BLE connection to
    the scale. Leave the machine switched on and its paddle off during setup.
-3. Open **Scale Adapter**. Select **Acaia Lunar (legacy)**, check
+3. Open **Scale Adapter**. Select **Acaia Lunar (legacy / Mini-USB)** for the older
+   Lunar or **Acaia Lunar 2021 / USB-C (experimental)** for the 2021 generation
+   with standard Acaia firmware. Check
    **Enable Scale Adapter**, leave **Source BLE Address** empty and save.
    The controller scans in short windows; reload the page after a few seconds.
 4. Find the physical scale under **Observed Scales** and select its exact

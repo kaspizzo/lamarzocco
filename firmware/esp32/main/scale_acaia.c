@@ -127,6 +127,13 @@ static lm_scale_frame_t identify(void) {
   const uint8_t p[15] = {45,45,45,45,45,45,45,45,45,45,45,45,45,45,45};
   return lm_scale_packet(11, p, sizeof(p));
 }
+static lm_scale_frame_t identify_2021(void) {
+  /* Lunar 2021 uses the transparent UART transport and this client identity.
+   * Protocol references and the hardware validation checklist are in
+   * docs/controller/LUNAR_2021_BETA_TEST.md. */
+  const uint8_t p[] = "012345678901234";
+  return lm_scale_packet(11, p, sizeof(p) - 1);
+}
 static lm_scale_frame_t subscribe(void) {
   const uint8_t p[] = {9, 0, 1, 1, 2, 2, 5, 3, 4};
   return lm_scale_packet(12, p, sizeof(p));
@@ -148,5 +155,16 @@ const lm_scale_driver_t lm_scale_acaia_legacy_driver = {
   .write_uuid = "00002a80-0000-1000-8000-00805f9b34fb",
   .state_size = sizeof(acaia_t), .reset = reset, .feed = feed,
   .identify = identify, .subscribe = subscribe, .heartbeat = heartbeat, .control = control,
+  .diagnostics = diagnostics,
+};
+/* Experimental: the wire protocol is shared with the legacy driver, while
+ * service discovery and client identification differ. No hardware claim. */
+const lm_scale_driver_t lm_scale_acaia_2021_driver = {
+  .id = "acaia_2021", .confirmed_controls = true,
+  .service_uuid = "49535343-fe7d-4ae5-8fa9-9fafd205e455",
+  .notify_uuid = "49535343-1e4d-4bd9-ba61-23c647249616",
+  .write_uuid = "49535343-8841-43f4-a8d4-ecbe34729bb3",
+  .state_size = sizeof(acaia_t), .reset = reset, .feed = feed,
+  .identify = identify_2021, .subscribe = subscribe, .heartbeat = heartbeat, .control = control,
   .diagnostics = diagnostics,
 };

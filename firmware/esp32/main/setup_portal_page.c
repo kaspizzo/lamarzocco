@@ -458,7 +458,9 @@ static void render_scale_section(httpd_req_t *req, const lm_ctrl_setup_portal_vi
   if (info->config.enabled) httpd_resp_sendstr_chunk(req, " checked");
   httpd_resp_sendstr_chunk(req, "><span>Enable Scale Adapter</span></label><label>Scale Driver</label><select name=\"driver\"><option value=\"acaia_legacy\"");
   if (!strcmp(info->config.driver, "acaia_legacy")) httpd_resp_sendstr_chunk(req, " selected");
-  httpd_resp_sendstr_chunk(req, ">Acaia Lunar (legacy)</option><option value=\"bookoo_mini\"");
+  httpd_resp_sendstr_chunk(req, ">Acaia Lunar (legacy / Mini-USB)</option><option value=\"acaia_2021\"");
+  if (!strcmp(info->config.driver, "acaia_2021")) httpd_resp_sendstr_chunk(req, " selected");
+  httpd_resp_sendstr_chunk(req, ">Acaia Lunar 2021 / USB-C (experimental)</option><option value=\"bookoo_mini\"");
   if (!strcmp(info->config.driver, "bookoo_mini")) httpd_resp_sendstr_chunk(req, " selected");
   httpd_resp_sendstr_chunk(req, ">BOOKOO Mini (experimental)</option><option value=\"bookoo_ultra\"");
   if (!strcmp(info->config.driver, "bookoo_ultra")) httpd_resp_sendstr_chunk(req, " selected");
@@ -497,6 +499,7 @@ static void render_scale_section(httpd_req_t *req, const lm_ctrl_setup_portal_vi
     }
     httpd_resp_sendstr_chunk(req, "</pre>");
   }
+  httpd_resp_sendstr_chunk(req, "<p>Lunar 2021 / USB-C support is experimental and untested on hardware. Use standard Acaia firmware, Mode 2 and grams. Select the driver matching your Lunar generation; the controller does not change the scale firmware.</p>");
   httpd_resp_sendstr_chunk(req, "<p>BOOKOO support is untested on hardware. The machine bridge and automatic registration are enabled for testing. Use manual timing mode with grams (Ultra: timing-mode or a manual timing submode); automatic modes and charging may ignore controls. Tare/timer completion is inferred from returned weight/timer state. An unconfirmed command stops the adapter. Select Mini or Ultra explicitly; the BLE name alone does not identify the model.</p>");
   httpd_resp_sendstr_chunk(req, "<p>Missing machine registrations are retried automatically with backoff while source data is fresh. A present registration is retained while the machine reconnects. Calibration completion, persistence and weight-stop precision still require hardware validation. After a protocol/control fault, correct the source setup and save again to retry.</p>");
   const lm_scale_debug_info_t *debug = &view->scale_debug_info;
