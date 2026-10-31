@@ -217,9 +217,9 @@ static int test_empty_scale_fields_do_not_end_chunked_response(void) {
   return 0;
 }
 
-static int test_bookoo_selection_and_experimental_warning(void) {
-  const char *ids[] = {"bookoo_mini", "bookoo_ultra"};
-  for (size_t i = 0; i < 2; ++i) {
+static int test_experimental_scale_selection_and_warning(void) {
+  const char *ids[] = {"acaia_2021", "bookoo_mini", "bookoo_ultra"};
+  for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); ++i) {
     lm_ctrl_setup_portal_view_t view;
     init_view(&view);
     strcpy(view.debug_status_html, "ready");
@@ -230,6 +230,8 @@ static int test_bookoo_selection_and_experimental_warning(void) {
     char selected[80];
     snprintf(selected, sizeof(selected), "value=\"%s\" selected", ids[i]);
     ASSERT_CONTAINS(test_httpd_request_body(req), selected);
+    ASSERT_CONTAINS(test_httpd_request_body(req), "Acaia Lunar 2021 / USB-C (experimental)");
+    ASSERT_CONTAINS(test_httpd_request_body(req), "Use standard Acaia firmware, Mode 2 and grams");
     ASSERT_CONTAINS(test_httpd_request_body(req), "BOOKOO Mini (experimental)");
     ASSERT_CONTAINS(test_httpd_request_body(req), "BOOKOO Ultra (experimental)");
     ASSERT_CONTAINS(test_httpd_request_body(req), "untested on hardware");
@@ -243,7 +245,7 @@ static int test_bookoo_selection_and_experimental_warning(void) {
 }
 
 int run_setup_portal_page_tests(void) {
-  RUN_TEST(test_bookoo_selection_and_experimental_warning);
+  RUN_TEST(test_experimental_scale_selection_and_warning);
   RUN_TEST(test_empty_scale_fields_do_not_end_chunked_response);
   RUN_TEST(test_scale_adapter_page_escapes_radio_names_and_shows_status);
   RUN_TEST(test_history_target_maps_known_sections);

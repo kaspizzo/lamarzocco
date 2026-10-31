@@ -51,6 +51,149 @@ static void acknowledge(lm_scale_adapter_core_t *s, lm_scale_control_t c, uint64
   const lm_scale_event_t e = {.kind = LM_SCALE_ACK, .control = c};
   lm_scale_core_event(s, &e, now);
 }
+static int test_lunar_2021_profile_and_published_command_bytes(void) {
+  const lm_scale_driver_t *d = lm_scale_driver_find("acaia_2021");
+  ASSERT_TRUE(d != NULL && lm_scale_driver_can_bridge(d));
+  ASSERT_TRUE(d->state_size <= 512);
+  ASSERT_STREQ("49535343-fe7d-4ae5-8fa9-9fafd205e455", d->service_uuid);
+  ASSERT_STREQ("49535343-1e4d-4bd9-ba61-23c647249616", d->notify_uuid);
+  ASSERT_STREQ("49535343-8841-43f4-a8d4-ecbe34729bb3", d->write_uuid);
+  /* Published Lunar 2021 command bytes, independent of our packet encoder.
+   * References are pinned in LUNAR_2021_BETA_TEST.md. */
+  const uint8_t identity[] = {0xef,0xdd,0x0b,0x30,0x31,0x32,0x33,0x34,0x35,
+    0x36,0x37,0x38,0x39,0x30,0x31,0x32,0x33,0x34,0x9a,0x6d};
+  const uint8_t stream[] = {0xef,0xdd,0x0c,9,0,1,1,2,2,5,3,4,0x15,6};
+  const uint8_t heartbeat[] = {0xef,0xdd,0,2,0,2,0};
+  lm_scale_frame_t f = d->identify();
+  ASSERT_EQ_INT(sizeof(identity), f.size);
+  ASSERT_TRUE(!memcmp(identity, f.data, sizeof(identity)));
+  f = d->subscribe();
+  ASSERT_EQ_INT(sizeof(stream), f.size);
+  ASSERT_TRUE(!memcmp(stream, f.data, sizeof(stream)));
+  f = d->heartbeat();
+  ASSERT_EQ_INT(sizeof(heartbeat), f.size);
+  ASSERT_TRUE(!memcmp(heartbeat, f.data, sizeof(heartbeat)));
+  const uint8_t controls[][7] = {
+    {0xef,0xdd,4,0,0,0}, {0xef,0xdd,13,0,0,0,0},
+    {0xef,0xdd,13,0,2,0,2}, {0xef,0xdd,13,0,1,0,1},
+  };
+  for (unsigned i = 0; i < 4; ++i) {
+    f = d->control((lm_scale_control_t)i);
+    ASSERT_EQ_INT(i == LM_SCALE_TARE ? 6 : 7, f.size);
+    ASSERT_TRUE(!memcmp(controls[i], f.data, f.size));
+  }
+  ASSERT_EQ_INT(0, d->control(LM_SCALE_CONTROL_UNKNOWN).size);
+  const lm_scale_driver_t *legacy = lm_scale_driver_find("acaia_legacy");
+  f = legacy->identify();
+  ASSERT_EQ_INT(45, f.data[3]); /* Existing saved Mini-USB profiles retain their identity. */
+  ASSERT_TRUE(strcmp(legacy->service_uuid, d->service_uuid) != 0);
+  return 0;
+}
+static int test_lunar_2021_compound_measurements_at_every_fragment_boundary(void) {
+  const lm_scale_driver_t *d = lm_scale_driver_find("acaia_2021");
+  /* Synthetic, checksum-valid fixtures from the published compound layout:
+   * settings, 18.50 g + 1:02.3 timer, then a negative heartbeat weight. */
+  const uint8_t settings[] = {0xef,0xdd,8,9,85,2,16,1,0,1,1,0,0x0d,0x66};
+  const uint8_t timed_weight[] = {0xef,0xdd,12,12,5,0x3a,7,0,0,2,1,7,1,2,3,0x51,0x11};
+  lm_scale_frame_t heartbeat_weight = lm_scale_packet(12,
+    (const uint8_t[]){11,11,7,0xe0,5,0x3a,7,0,0,2,2}, 11);
+  uint8_t trace[sizeof(settings) + sizeof(timed_weight) + 16];
+  memcpy(trace, settings, sizeof(settings));
+  memcpy(trace + sizeof(settings), timed_weight, sizeof(timed_weight));
+  memcpy(trace + sizeof(settings) + sizeof(timed_weight), heartbeat_weight.data, heartbeat_weight.size);
+  for (size_t stride = 1; stride <= sizeof(trace); ++stride) {
+    union { uint64_t alignment; uint8_t data[512]; } state;
+    d->reset(state.data);
+    event_count = 0;
+    for (size_t pos = 0; pos < sizeof(trace); pos += stride) {
+      size_t n = sizeof(trace) - pos < stride ? sizeof(trace) - pos : stride;
+      ASSERT_TRUE(d->feed(state.data, trace + pos, n, collect, NULL));
+    }
+    ASSERT_EQ_INT(4, event_count);
+    ASSERT_EQ_INT(LM_SCALE_READY, events[0].kind);
+    ASSERT_EQ_INT(85, events[0].battery);
+    ASSERT_EQ_INT(LM_SCALE_WEIGHT, events[1].kind);
+    ASSERT_FLOAT_EQ(18.50, events[1].grams, .00001);
+    ASSERT_EQ_INT(LM_SCALE_ACK, events[2].kind);
+    ASSERT_EQ_INT(LM_SCALE_CONTROL_UNKNOWN, events[2].control);
+    ASSERT_FLOAT_EQ(-18.50, events[3].grams, .00001);
+    lm_scale_adapter_core_t core;
+    lm_scale_core_init(&core);
+    for (size_t i = 0; i < event_count; ++i) ASSERT_TRUE(lm_scale_core_event(&core, &events[i], 100));
+    ASSERT_TRUE(lm_scale_core_fresh(&core, 100));
+    ASSERT_FALSE(lm_scale_core_fresh(&core, 1101));
+  }
+  return 0;
+}
+static bool feed_2021_ack(const lm_scale_driver_t *d, void *state, lm_scale_adapter_core_t *core,
+                          uint8_t code, uint64_t now) {
+  lm_scale_frame_t f = lm_scale_packet(12, (const uint8_t[]){4,11,0,code}, 4);
+  event_count = 0;
+  if (!d->feed(state, f.data, f.size, collect, NULL) || event_count != 1) return false;
+  return lm_scale_core_event(core, &events[0], now);
+}
+static int test_lunar_2021_control_ack_and_tare_measurement_gate(void) {
+  const lm_scale_driver_t *d = lm_scale_driver_find("acaia_2021");
+  union { uint64_t alignment; uint8_t data[512]; } state;
+  d->reset(state.data);
+  lm_scale_adapter_core_t core;
+  make_ready(&core);
+  ASSERT_TRUE(control(&core, 0, 100));
+  ASSERT_TRUE(lm_scale_core_tick(&core, 100, send, NULL));
+  ASSERT_EQ_INT(LM_SCALE_TIMER_RESET, sent[0]);
+  ASSERT_TRUE(feed_2021_ack(d, state.data, &core, 0xe0, 105));
+  ASSERT_FALSE(core.controls[0].acknowledged);
+  ASSERT_TRUE(feed_2021_ack(d, state.data, &core, 0x41, 110));
+  ASSERT_TRUE(lm_scale_core_tick(&core, 110, send, NULL));
+  ASSERT_EQ_INT(LM_SCALE_TIMER_START, sent[1]);
+  ASSERT_EQ_INT(0, core.reply_count);
+  ASSERT_TRUE(feed_2021_ack(d, state.data, &core, 0x01, 120));
+  ASSERT_TRUE(lm_scale_core_tick(&core, 120, send, NULL));
+  ASSERT_EQ_INT(1, core.reply_count);
+  lm_scale_core_delivered(&core);
+  ASSERT_TRUE(command(&core, 4, (const uint8_t[]){0}, 1, 130));
+  ASSERT_TRUE(lm_scale_core_tick(&core, 130, send, NULL));
+  ASSERT_TRUE(feed_2021_ack(d, state.data, &core, 0x80, 140));
+  ASSERT_TRUE(lm_scale_core_tick(&core, 140, send, NULL));
+  ASSERT_EQ_INT(0, core.reply_count); /* Tare ACK alone cannot expose old weight. */
+  event_count = 0;
+  ASSERT_TRUE(d->feed(state.data, weight, sizeof(weight), collect, NULL));
+  ASSERT_TRUE(lm_scale_core_event(&core, &events[0], 150));
+  ASSERT_TRUE(lm_scale_core_tick(&core, 150, send, NULL));
+  ASSERT_EQ_INT(1, core.reply_count);
+  lm_scale_core_delivered(&core);
+  ASSERT_TRUE(control(&core, 1, 200));
+  ASSERT_TRUE(lm_scale_core_tick(&core, 200, send, NULL));
+  ASSERT_TRUE(feed_2021_ack(d, state.data, &core, 0x01, 210)); /* Wrong operation. */
+  ASSERT_FALSE(core.controls[0].acknowledged);
+  ASSERT_FALSE(lm_scale_core_tick(&core, 651, send, NULL));
+  ASSERT_STREQ("Real scale control confirmation timed out", core.error);
+  return 0;
+}
+static int test_lunar_2021_rejects_non_grams_bad_checksum_and_malformed_compound(void) {
+  const lm_scale_driver_t *d = lm_scale_driver_find("acaia_2021");
+  union { uint64_t alignment; uint8_t data[512]; } state;
+  lm_scale_frame_t f = lm_scale_packet(8, (const uint8_t[]){9,85,5,16,1,0,1,1,0}, 9);
+  d->reset(state.data);
+  event_count = 0;
+  ASSERT_FALSE(d->feed(state.data, f.data, f.size, collect, NULL));
+  ASSERT_EQ_INT(0, event_count);
+  d->reset(state.data);
+  f = lm_scale_packet(12, (const uint8_t[]){12,5,0x3a,7,0,0,2,1,7,1,2,3}, 12);
+  f.data[f.size - 1] ^= 1;
+  ASSERT_FALSE(d->feed(state.data, f.data, f.size, collect, NULL));
+  ASSERT_EQ_INT(0, event_count);
+  lm_scale_source_diagnostics_t info;
+  d->diagnostics(state.data, &info);
+  ASSERT_TRUE(info.complete && !info.checksum_valid);
+  ASSERT_EQ_INT(f.size, info.failure_frame->size);
+  ASSERT_TRUE(!memcmp(f.data, info.failure_frame->data, f.size));
+  d->reset(state.data);
+  f = lm_scale_packet(12, (const uint8_t[]){10,5,0x3a,7,0,0,2,1,7,1}, 10);
+  ASSERT_FALSE(d->feed(state.data, f.data, f.size, collect, NULL));
+  ASSERT_EQ_INT(0, event_count); /* Valid weight must not escape a truncated timer. */
+  return 0;
+}
 static int test_recorded_source_fragmentation_and_driver_contract(void) {
   const lm_scale_driver_t *driver = lm_scale_driver_find("acaia_legacy");
   ASSERT_TRUE(driver != NULL);
@@ -491,6 +634,10 @@ static int test_control_timeout_snapshot_distinguishes_operation_ack_and_post_ta
 }
 
 int run_scale_adapter_tests(void) {
+  RUN_TEST(test_lunar_2021_profile_and_published_command_bytes);
+  RUN_TEST(test_lunar_2021_compound_measurements_at_every_fragment_boundary);
+  RUN_TEST(test_lunar_2021_control_ack_and_tare_measurement_gate);
+  RUN_TEST(test_lunar_2021_rejects_non_grams_bad_checksum_and_malformed_compound);
   RUN_TEST(test_captured_startup_body_waits_for_gram_handshake_across_fragment_boundaries);
   RUN_TEST(test_short_settings_require_grams_and_unknown_live_settings_fail_closed);
   RUN_TEST(test_source_failure_diagnostics_keep_full_bad_frame_and_partial_prefix);

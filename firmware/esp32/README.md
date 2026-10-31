@@ -18,10 +18,15 @@ hardware test, see the [scale adapter guide](../../docs/controller/SCALE_ADAPTER
 The controller can act as a BLE central for a physical scale and as a virtual
 Acaia-compatible peripheral for the La Marzocco gateway at the same time. The
 first source driver is `acaia_legacy`, for the owner's Mini-USB Lunar. Experimental
-`bookoo_mini` and `bookoo_ultra` drivers also enable the machine bridge for beta
+`acaia_2021` (Lunar 2021 / USB-C with standard Acaia firmware), `bookoo_mini` and
+`bookoo_ultra` drivers also enable the machine bridge for beta
 testing. Additional BLE scale protocols belong behind `scale_driver.h`; they must provide gram
 measurements, session/battery information and confirmed tare/timer operations.
-Newer Acaia transports and other brands are not implemented yet.
+Lunar 2021 support uses the transparent UART service with separate command and
+notification characteristics, a generation-specific identity and the shared
+Acaia frame decoder. It is **untested on hardware**; see the
+[Lunar 2021 beta guide](../../docs/controller/LUNAR_2021_BETA_TEST.md) for protocol
+references, setup and validation. Other Acaia protocols still need drivers.
 
 BOOKOO has **not been tested on hardware**. Select Mini or Ultra explicitly in
 the portal; the BLE name alone cannot distinguish them. The shared FFE service,

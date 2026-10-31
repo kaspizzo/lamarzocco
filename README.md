@@ -28,9 +28,10 @@ handles source reconnection and retries missing machine registrations.
 | Scale | Driver | Current validation |
 | --- | --- | --- |
 | Legacy Mini-USB Acaia Lunar | `acaia_legacy` | Weight reception, the Mini scale link and one off/on reconnection tested on hardware; initialization and control-confirmation failures remain under investigation. |
+| Acaia Lunar 2021 / USB-C, standard Acaia firmware | `acaia_2021` | Experimental; published BLE transport and commands covered by synthetic host tests. No hardware test yet. See the [Lunar 2021 beta guide](docs/controller/LUNAR_2021_BETA_TEST.md). |
 | BOOKOO Mini | `bookoo_mini` | Experimental beta; protocol tests use synthetic fixtures, with no hardware validation yet. |
 | BOOKOO Ultra | `bookoo_ultra` | Experimental beta; protocol tests use synthetic fixtures, with no hardware validation yet. |
-| Other scales / newer Acaia transports | Additional driver required | The shared driver interface supports extending the adapter; each protocol needs implementation and hardware validation. |
+| Other scales / other Acaia protocols | Additional driver required | The shared driver interface supports extending the adapter; each protocol needs implementation and hardware validation. |
 
 The adapter translates tare/timer operations and forwards fresh weight and
 battery data. A dimmed scale icon shows the physical-scale connection; full
@@ -80,7 +81,7 @@ The current ESP32 firmware supports:
 - machine selection via La Marzocco cloud account
 - connectivity-aware status icons for BLE fallback versus cloud machine reachability
 - conditional USB and low-battery/charging indicators on the on-device status bar
-- an experimental BLE scale adapter with legacy Acaia Lunar and BOOKOO Mini/Ultra beta drivers
+- an experimental BLE scale adapter with legacy Acaia Lunar, Lunar 2021 / USB-C beta and BOOKOO Mini/Ultra beta drivers
 - separate dimmed/bright scale indicators for physical-scale and machine scale connections
 - opt-in persistent connection diagnostics with NTP time and portal download
 - BLE control for:
