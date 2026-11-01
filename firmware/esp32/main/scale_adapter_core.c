@@ -45,6 +45,11 @@ bool lm_scale_core_event(lm_scale_adapter_core_t *s, const lm_scale_event_t *e, 
     s->has_weight = true;
     s->updated = now;
     s->weights++;
+    if (s->control_count) {
+      lm_scale_transaction_t *c = &s->controls[0];
+      if (c->sent && !c->delivering && c->command == LM_SCALE_TARE && s->weights == c->weights_before + 1)
+        c->first_weight_at = now;
+    }
     if (s->streaming && !tare_pending(s)) s->weight_pending = true;
   } else if (e->kind == LM_SCALE_ACK) {
     s->last_ack_at = now;
@@ -136,7 +141,14 @@ bool lm_scale_core_tick(lm_scale_adapter_core_t *s, uint64_t now, lm_scale_send_
   if (c->delivering) return true;
   if (!lm_scale_core_fresh(s, now)) return fail(s, "Source unavailable for control");
   if (c->sent) {
-    if (now - c->started > s->control_timeout_ms) return fail(s, "Real scale control confirmation timed out");
+    /* Judge completion by when evidence arrived, not a delayed worker tick.
+     * Tare still needs both its ACK and a post-command sample by the deadline;
+     * later samples must not overwrite the first sample's arrival time. */
+    bool completed = c->acknowledged && (c->command != LM_SCALE_TARE || s->weights > c->weights_before);
+    uint64_t completion_at = c->acknowledged_at;
+    if (c->command == LM_SCALE_TARE && c->first_weight_at > completion_at) completion_at = c->first_weight_at;
+    if ((completed ? completion_at : now) - c->started > s->control_timeout_ms)
+      return fail(s, "Real scale control confirmation timed out");
     if (!c->acknowledged) return true;
     if (c->reset_before_start) {
       c->reset_before_start = c->sent = c->acknowledged = false;

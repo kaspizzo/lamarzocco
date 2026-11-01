@@ -57,16 +57,10 @@ static bool source_frame(void *ctx, const lm_scale_frame_t *frame) {
   for (unsigned pass = 0; pass < 2; ++pass) {
     for (size_t pos = 1; pos < size;) {
       uint8_t kind = p[pos];
-      if (kind == 8) {
-        /* A physical key may be followed by an ACK before its weight/timer
-         * record (captured on legacy Lunar after tare). Validate those records
-         * normally; the key itself never acknowledges a queued control. */
-        if (pos + 2 >= size || (p[pos + 2] != 5 && p[pos + 2] != 7 && p[pos + 2] != 11))
-          return reject(s, "Invalid source button event");
-        pos += 2;
-        continue;
-      }
-      size_t n = kind == 5 ? 7 : kind == 6 ? 2 : kind == 7 ? 4 : kind == 11 ? 3 : 0;
+      /* Known records have independent lengths; a physical key does not
+       * constrain the next record, and may also be the final/only record.
+       * Unknown tags still fail closed because their length is not known. */
+      size_t n = kind == 5 ? 7 : kind == 6 ? 2 : kind == 7 ? 4 : kind == 8 ? 2 : kind == 11 ? 3 : 0;
       if (!n) {
         if (!s->ready) return note_once(s, frame, "Unknown startup event; awaiting validated grams");
         return reject(s, "Unknown source event after gram handshake");
@@ -98,7 +92,7 @@ static bool source_frame(void *ctx, const lm_scale_frame_t *frame) {
           case 0x40: case 0x41: e.control = LM_SCALE_TIMER_RESET; break;
           default: e.control = LM_SCALE_CONTROL_UNKNOWN; break;
         }
-      } else emit_event = false; /* Timer readings are independent of weight. */
+      } else emit_event = false; /* Timer/key records are neither weight nor command ACKs. */
       if (pass && emit_event) {
         if (e.kind == LM_SCALE_ACK) s->last_ack_frame = *frame;
         if (!s->emit(s->ctx, &e)) return reject(s, "Source event rejected by adapter");

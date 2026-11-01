@@ -293,7 +293,7 @@ static int test_recorded_tare_button_ack_weight_at_all_fragment_boundaries(void)
 static int test_button_ack_compounds_still_reject_corruption_and_truncated_tails(void) {
   const char *ids[] = {"acaia_legacy", "acaia_2021"};
   const uint8_t payloads[][14] = {
-    {3,8,0}, /* Dangling button prefix. */
+    {2,8}, /* Missing button action byte. */
     {5,8,0,11,0}, /* Incomplete ACK. */
     {12,8,0,11,0,0xe0,5,0,0,0,0,2}, /* Missing weight flags. */
     {14,8,0,11,0,0xe0,5,0,0,0,0,2,0,7}, /* Missing timer payload after valid weight. */
@@ -324,6 +324,182 @@ static int test_button_ack_compounds_still_reject_corruption_and_truncated_tails
     ASSERT_TRUE(info.complete && !info.checksum_valid);
     ASSERT_EQ_INT(sizeof(bad), info.failure_frame->size);
   }
+  return 0;
+}
+static bool next_source_event_order(uint8_t order[5]) {
+  int i = 3;
+  while (i >= 0 && order[i] > order[i + 1]) --i;
+  if (i < 0) return false;
+  int j = 4;
+  while (order[j] < order[i]) --j;
+  uint8_t tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+  for (int a = i + 1, b = 4; a < b; ++a, --b) {
+    tmp = order[a]; order[a] = order[b]; order[b] = tmp;
+  }
+  return true;
+}
+static int test_all_source_button_actions_and_compound_event_orders(void) {
+  const char *ids[] = {"acaia_legacy", "acaia_2021"};
+  const uint8_t keys[] = {0,8,10,9,0xff}; /* Tare, start, stop, reset, unrecognized key. */
+  const uint8_t records[][7] = {
+    {8,0}, {6,82}, {7,1,2,3}, {11,0,0xe0}, {5,0x3a,7,0,0,2,0},
+  };
+  const size_t lengths[] = {2,2,4,3,7};
+  const size_t strides[] = {1,2,3,7,LM_SCALE_FRAME_MAX};
+  for (size_t profile = 0; profile < sizeof(ids) / sizeof(ids[0]); ++profile) {
+    const lm_scale_driver_t *d = lm_scale_driver_find(ids[profile]);
+    for (size_t key = 0; key < sizeof(keys); ++key) {
+      uint8_t order[] = {0,1,2,3,4};
+      unsigned permutations = 0;
+      do {
+        ++permutations;
+        uint8_t payload[19] = {sizeof(payload)};
+        size_t used = 1;
+        for (size_t i = 0; i < 5; ++i) {
+          uint8_t record = order[i];
+          memcpy(payload + used, records[record], lengths[record]);
+          if (record == 0) payload[used + 1] = keys[key];
+          used += lengths[record];
+        }
+        ASSERT_EQ_INT(sizeof(payload), used);
+        lm_scale_frame_t frame = lm_scale_packet(12, payload, used);
+        for (size_t stride = 0; stride < sizeof(strides) / sizeof(strides[0]); ++stride) {
+          union { uint64_t alignment; uint8_t data[512]; } state;
+          d->reset(state.data);
+          event_count = 0;
+          ASSERT_TRUE(d->feed(state.data, pair_reply, sizeof(pair_reply), collect, NULL));
+          event_count = 0;
+          for (size_t pos = 0; pos < frame.size; pos += strides[stride]) {
+            size_t n = frame.size - pos;
+            if (n > strides[stride]) n = strides[stride];
+            ASSERT_TRUE(d->feed(state.data, frame.data + pos, n, collect, NULL));
+          }
+          ASSERT_EQ_INT(3, event_count);
+          unsigned weights = 0, batteries = 0, acknowledgments = 0;
+          for (size_t i = 0; i < event_count; ++i) {
+            if (events[i].kind == LM_SCALE_WEIGHT) {
+              ++weights; ASSERT_FLOAT_EQ(18.50, events[i].grams, .00001);
+            } else if (events[i].kind == LM_SCALE_BATTERY) {
+              ++batteries; ASSERT_EQ_INT(82, events[i].battery);
+            } else if (events[i].kind == LM_SCALE_ACK) {
+              ++acknowledgments; ASSERT_EQ_INT(LM_SCALE_CONTROL_UNKNOWN, events[i].control);
+            } else ASSERT_TRUE(false);
+          }
+          ASSERT_EQ_INT(1, weights);
+          ASSERT_EQ_INT(1, batteries);
+          ASSERT_EQ_INT(1, acknowledgments);
+        }
+      } while (next_source_event_order(order));
+      ASSERT_EQ_INT(120, permutations);
+    }
+  }
+  return 0;
+}
+static int test_source_button_only_events_do_not_ack_or_refresh_weight(void) {
+  const char *ids[] = {"acaia_legacy", "acaia_2021"};
+  const uint8_t keys[] = {0,8,10,9,0xff};
+  for (size_t profile = 0; profile < sizeof(ids) / sizeof(ids[0]); ++profile) {
+    const lm_scale_driver_t *d = lm_scale_driver_find(ids[profile]);
+    union { uint64_t alignment; uint8_t data[512]; } state;
+    d->reset(state.data);
+    event_count = 0;
+    ASSERT_TRUE(d->feed(state.data, pair_reply, sizeof(pair_reply), collect, NULL));
+    lm_scale_adapter_core_t core;
+    make_ready(&core);
+    ASSERT_TRUE(control(&core, 0, 100));
+    ASSERT_TRUE(lm_scale_core_tick(&core, 100, send, NULL));
+    for (size_t key = 0; key < sizeof(keys); ++key) {
+      lm_scale_frame_t f = lm_scale_packet(12, (const uint8_t[]){3,8,keys[key]}, 3);
+      event_count = 0;
+      ASSERT_TRUE(d->feed(state.data, f.data, f.size, collect, NULL));
+      ASSERT_EQ_INT(0, event_count);
+    }
+    ASSERT_FALSE(core.controls[0].acknowledged);
+    ASSERT_EQ_I64(100, core.updated);
+    ASSERT_FALSE(lm_scale_core_fresh(&core, 1101));
+  }
+  return 0;
+}
+static int test_each_truncated_source_record_rejects_the_whole_compound(void) {
+  const char *ids[] = {"acaia_legacy", "acaia_2021"};
+  const uint8_t records[][7] = {
+    {8,0}, {6,82}, {7,1,2,3}, {11,0,0xe0}, {5,0x3a,7,0,0,2,0},
+  };
+  const size_t lengths[] = {2,2,4,3,7};
+  for (size_t profile = 0; profile < sizeof(ids) / sizeof(ids[0]); ++profile) {
+    const lm_scale_driver_t *d = lm_scale_driver_find(ids[profile]);
+    for (size_t record = 0; record < 5; ++record) {
+      for (size_t prefix = 1; prefix < lengths[record]; ++prefix) {
+        union { uint64_t alignment; uint8_t data[512]; } state;
+        d->reset(state.data);
+        event_count = 0;
+        ASSERT_TRUE(d->feed(state.data, pair_reply, sizeof(pair_reply), collect, NULL));
+        uint8_t payload[18] = {0,11,0,0x80,5,0,0,0,0,2,0};
+        memcpy(payload + 11, records[record], prefix);
+        payload[0] = 11 + prefix;
+        lm_scale_frame_t f = lm_scale_packet(12, payload, payload[0]);
+        event_count = 0;
+        ASSERT_FALSE(d->feed(state.data, f.data, f.size, collect, NULL));
+        ASSERT_EQ_INT(0, event_count); /* Even the preceding valid ACK stays uncommitted. */
+      }
+    }
+  }
+  return 0;
+}
+static int test_timely_control_ack_survives_delayed_processing(void) {
+  lm_scale_adapter_core_t s;
+  make_ready(&s);
+  ASSERT_TRUE(control(&s, 1, 100));
+  ASSERT_TRUE(lm_scale_core_tick(&s, 100, send, NULL));
+  acknowledge(&s, LM_SCALE_TIMER_STOP, 500); /* Received within the 450 ms deadline. */
+  ASSERT_TRUE(lm_scale_core_tick(&s, 600, send, NULL));
+  ASSERT_EQ_INT(1, s.reply_count);
+  make_ready(&s);
+  ASSERT_TRUE(control(&s, 0, 100));
+  ASSERT_TRUE(lm_scale_core_tick(&s, 100, send, NULL));
+  acknowledge(&s, LM_SCALE_TIMER_RESET, 500);
+  ASSERT_TRUE(lm_scale_core_tick(&s, 600, send, NULL));
+  ASSERT_EQ_INT(LM_SCALE_TIMER_START, sent[1]);
+  acknowledge(&s, LM_SCALE_TIMER_START, 650);
+  ASSERT_TRUE(lm_scale_core_tick(&s, 1100, send, NULL));
+  ASSERT_EQ_INT(1, s.reply_count);
+  return 0;
+}
+static int test_timely_tare_ack_and_sample_survive_later_samples_and_delayed_tick(void) {
+  lm_scale_adapter_core_t s;
+  make_ready(&s);
+  ASSERT_TRUE(command(&s, 4, (const uint8_t[]){0}, 1, 100));
+  ASSERT_TRUE(lm_scale_core_tick(&s, 100, send, NULL));
+  acknowledge(&s, LM_SCALE_TARE, 200);
+  lm_scale_event_t sample = {.kind = LM_SCALE_WEIGHT, .grams = .22};
+  ASSERT_TRUE(lm_scale_core_event(&s, &sample, 300));
+  sample.grams = 1.42; /* Water can continue flowing while the worker is delayed. */
+  ASSERT_TRUE(lm_scale_core_event(&s, &sample, 600));
+  ASSERT_TRUE(lm_scale_core_tick(&s, 700, send, NULL));
+  ASSERT_EQ_INT(1, s.reply_count);
+  ASSERT_FLOAT_EQ(1.42, s.grams, .00001);
+  return 0;
+}
+static int test_control_deadlines_still_reject_late_ack_or_first_tare_sample(void) {
+  lm_scale_adapter_core_t s;
+  make_ready(&s);
+  ASSERT_TRUE(control(&s, 1, 100));
+  ASSERT_TRUE(lm_scale_core_tick(&s, 100, send, NULL));
+  acknowledge(&s, LM_SCALE_TIMER_STOP, 551);
+  ASSERT_FALSE(lm_scale_core_tick(&s, 551, send, NULL));
+  make_ready(&s);
+  ASSERT_TRUE(command(&s, 4, (const uint8_t[]){0}, 1, 100));
+  ASSERT_TRUE(lm_scale_core_tick(&s, 100, send, NULL));
+  acknowledge(&s, LM_SCALE_TARE, 200);
+  const lm_scale_event_t sample = {.kind = LM_SCALE_WEIGHT};
+  ASSERT_TRUE(lm_scale_core_event(&s, &sample, 551));
+  ASSERT_FALSE(lm_scale_core_tick(&s, 551, send, NULL));
+  make_ready(&s);
+  ASSERT_TRUE(command(&s, 4, (const uint8_t[]){0}, 1, 100));
+  ASSERT_TRUE(lm_scale_core_tick(&s, 100, send, NULL));
+  acknowledge(&s, LM_SCALE_TARE, 550);
+  ASSERT_TRUE(lm_scale_core_event(&s, &sample, 550));
+  ASSERT_TRUE(lm_scale_core_tick(&s, 700, send, NULL)); /* Exactly at the deadline is valid. */
   return 0;
 }
 static int test_source_checksum_and_gram_unit_are_required(void) {
@@ -717,6 +893,12 @@ static int test_control_timeout_snapshot_distinguishes_operation_ack_and_post_ta
 }
 
 int run_scale_adapter_tests(void) {
+  RUN_TEST(test_timely_control_ack_survives_delayed_processing);
+  RUN_TEST(test_timely_tare_ack_and_sample_survive_later_samples_and_delayed_tick);
+  RUN_TEST(test_control_deadlines_still_reject_late_ack_or_first_tare_sample);
+  RUN_TEST(test_all_source_button_actions_and_compound_event_orders);
+  RUN_TEST(test_source_button_only_events_do_not_ack_or_refresh_weight);
+  RUN_TEST(test_each_truncated_source_record_rejects_the_whole_compound);
   RUN_TEST(test_recorded_tare_button_ack_weight_at_all_fragment_boundaries);
   RUN_TEST(test_button_ack_compounds_still_reject_corruption_and_truncated_tails);
   RUN_TEST(test_lunar_2021_profile_and_published_command_bytes);
