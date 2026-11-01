@@ -53,11 +53,13 @@ across notifications, including weight-plus-timer and heartbeat-plus-weight.
 Seven-/nine-byte settings require an explicit gram unit and a valid battery.
 New or unrecognized firmware layouts are not assumed compatible.
 
-The existing Acaia control-confirmation path is retained: a matching protocol
-ACK is required, and tare also requires a new weight sample. ATT write success,
-button events and unknown ACK codes do not complete commands. The 450 ms control
-timeout and one-second measurement freshness limit are unchanged. Actual ACK
-behavior and timing on the Lunar 2021 remain part of hardware validation.
+Timer commands require a matching protocol ACK. Tare accepts that ACK plus a
+new weight sample, or the shared driver's experimental post-write zero-state
+confirmation described in the [adapter guide](SCALE_ADAPTER.md). ATT write
+success, a button event alone and unknown ACK codes do not complete commands.
+The 450 ms control timeout and one-second measurement freshness limit are
+unchanged. Actual ACK behavior, observed-state confirmation and timing on the
+Lunar 2021 remain part of hardware validation.
 
 Protocol references inspected on 2026-10-31:
 
@@ -79,8 +81,9 @@ Acaia parser; no external BLE library or runtime dependency is added.
 - Confirm the machine connects to `LUNAR-C` and reports the real battery.
   Verify source-only and full-link icon states separately.
 - Request tare before flow, timer reset/start/stop and a repeated start. Compare
-  the physical display with logged command results. Unknown/missing ACKs must
-  fail rather than be reported as completed.
+  the physical display with logged command results. Unknown ACKs must not
+  complete commands. When tare lacks a wire ACK, check that only the documented
+  fresh zero-state evidence can complete it; missing evidence must fail.
 - Power the scale off/on, then restart the controller and machine separately.
   Check automatic source reconnect, fresh data and the machine link. Verify
   location calibration persistence separately from simple reconnection.

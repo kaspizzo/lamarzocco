@@ -10,6 +10,9 @@ typedef struct {
   const char *error;
   bool ready;
   uint8_t noted_opcodes[32];
+  bool have_weight, tare_pending, tare_zero_seen, tare_button_seen;
+  bool batch_has_weight, batch_is_zero, skip_partial;
+  uint64_t tare_written_at, tare_zero_at;
 } acaia_t;
 _Static_assert(sizeof(acaia_t) <= 512, "Acaia state must fit the BLE runtime buffer");
 
@@ -28,6 +31,9 @@ static bool note_once(acaia_t *s, const lm_scale_frame_t *frame, const char *rea
 
 static bool source_frame(void *ctx, const lm_scale_frame_t *frame) {
   acaia_t *s = ctx;
+  /* A frame already partly buffered before a write cannot prove completion. */
+  bool eligible = !s->skip_partial;
+  s->skip_partial = false;
   const uint8_t *p = frame->data + 3;
   size_t size = frame->size - 5;
   if (p[0] != size) return reject(s, "Source payload length mismatch");
@@ -93,9 +99,20 @@ static bool source_frame(void *ctx, const lm_scale_frame_t *frame) {
           default: e.control = LM_SCALE_CONTROL_UNKNOWN; break;
         }
       } else emit_event = false; /* Timer/key records are neither weight nor command ACKs. */
+      if (pass && eligible && s->tare_pending && kind == 8 && p[pos + 1] == 0)
+        s->tare_button_seen = true;
       if (pass && emit_event) {
         if (e.kind == LM_SCALE_ACK) s->last_ack_frame = *frame;
         if (!s->emit(s->ctx, &e)) return reject(s, "Source event rejected by adapter");
+        if (e.kind == LM_SCALE_WEIGHT) {
+          s->have_weight = true;
+          if (eligible && s->tare_pending) {
+            s->batch_has_weight = true;
+            if (fabs(e.grams) > .05) s->batch_is_zero = false;
+          }
+        } else if (e.kind == LM_SCALE_ACK && e.control == LM_SCALE_TARE) {
+          s->tare_pending = false; /* Explicit wire confirmation keeps its existing path. */
+        }
       }
       pos += n;
     }
@@ -108,7 +125,39 @@ static bool feed(void *state, const uint8_t *data, size_t size, lm_scale_event_c
   s->error = NULL;
   s->emit = cb;
   s->ctx = ctx;
+  s->batch_has_weight = false;
+  s->batch_is_zero = true;
   return lm_scale_decode(&s->decoder, data, size, source_frame, s);
+}
+static bool control_written(void *state, lm_scale_control_t control, uint64_t now) {
+  acaia_t *s = state;
+  if (control > LM_SCALE_TIMER_RESET || !s->ready || !s->have_weight || s->tare_pending) return false;
+  if (control != LM_SCALE_TARE) return true;
+  s->tare_pending = true;
+  s->tare_zero_seen = s->tare_button_seen = s->batch_has_weight = false;
+  s->skip_partial = s->decoder.used != 0;
+  s->tare_written_at = now;
+  return true;
+}
+static bool observe_control(void *state, uint64_t now, lm_scale_event_cb callback, void *ctx) {
+  acaia_t *s = state;
+  if (!s->tare_pending || !s->batch_has_weight || now < s->tare_written_at) return true;
+  s->batch_has_weight = false; /* Repeated observation without a new notification proves nothing. */
+  if (!s->batch_is_zero) { s->tare_zero_seen = false; return true; }
+  bool settled = s->tare_zero_seen && now >= s->tare_zero_at && now - s->tare_zero_at >= 50;
+  if (!s->tare_button_seen && !settled) {
+    if (!s->tare_zero_seen) s->tare_zero_at = now;
+    s->tare_zero_seen = true;
+    return true;
+  }
+  s->tare_pending = false;
+  /* This confirms the requested zero state, not receipt of a wire ACK. An
+   * already-zero scale can qualify, but only with fresh post-write evidence.
+   * The core still enforces its original per-operation deadline. */
+  const lm_scale_event_t event = {.kind = LM_SCALE_ACK, .control = LM_SCALE_TARE,
+    .note = s->tare_button_seen ? "Tare confirmed by fresh zero and source key event" :
+                                "Tare confirmed by separate fresh zero measurements"};
+  return callback(ctx, &event) || reject(s, "Observed tare completion rejected by adapter");
 }
 static void diagnostics(void *state, lm_scale_source_diagnostics_t *out) {
   acaia_t *s = state;
@@ -152,6 +201,7 @@ const lm_scale_driver_t lm_scale_acaia_legacy_driver = {
   .write_uuid = "00002a80-0000-1000-8000-00805f9b34fb",
   .state_size = sizeof(acaia_t), .reset = reset, .feed = feed,
   .identify = identify, .subscribe = subscribe, .heartbeat = heartbeat, .control = control,
+  .control_written = control_written, .observe_control = observe_control,
   .diagnostics = diagnostics,
 };
 /* Experimental: the wire protocol is shared with the legacy driver, while
@@ -163,5 +213,6 @@ const lm_scale_driver_t lm_scale_acaia_2021_driver = {
   .write_uuid = "49535343-8841-43f4-a8d4-ecbe34729bb3",
   .state_size = sizeof(acaia_t), .reset = reset, .feed = feed,
   .identify = identify_2021, .subscribe = subscribe, .heartbeat = heartbeat, .control = control,
+  .control_written = control_written, .observe_control = observe_control,
   .diagnostics = diagnostics,
 };

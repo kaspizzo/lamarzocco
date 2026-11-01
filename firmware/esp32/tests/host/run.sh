@@ -28,6 +28,7 @@ mkdir -p "${BUILD_DIR}"
   -I"${CJSON_DIR}" \
   "${HOST_DIR}/src/test_runner.c" \
   "${HOST_DIR}/src/test_scale_adapter.c" \
+  "${HOST_DIR}/src/test_scale_acaia_tare.c" \
   "${HOST_DIR}/src/test_scale_bookoo.c" \
   "${HOST_DIR}/src/test_scale_debug_store.c" \
   "${HOST_DIR}/src/test_idf_stubs.c" \
