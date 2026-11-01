@@ -219,6 +219,31 @@ stop the adapter. Bad checksums and malformed known records remain errors.
 The exact header/meaning of the captured startup body still needs confirmation
 from the next hardware run; tests use explicitly reconstructed header variants.
 
+The 2026-11-01 log captured a separate live-session parser fault after the
+physical Lunar's tare button was pressed. The complete checksum-valid frame
+`efdd0c0d08000b00e00500000000020012f5` contains a button prefix, an ACK record
+with code `e0`, and a zero weight. Known button, ACK, battery, timer and weight
+records are now validated independently of their order. A complete button
+record can also be the last or only record; it does not establish readiness,
+refresh measurement freshness or confirm a queued command. Unknown key codes
+are ignored as non-measuring key records; unknown record tags/layouts still
+fail closed. Full-frame validation remains atomic: malformed tails and bad
+checksums emit neither partial ACKs nor measurements. The captured packet is
+covered at every fragment stride for both Acaia profiles. Synthetic tests also
+cover tare/start/stop/reset key codes and an unknown key across all 120 orders
+of the five known record types, with five notification strides and both drivers
+(6,000 cases). An updated controller hardware replay remains pending.
+
+Control deadlines use the callback-observed ACK arrival time and, for tare,
+the first post-command sample time. A delayed worker tick does not turn an
+already completed operation into a timeout. The existing per-operation limits
+remain 450 ms for Acaia and two seconds for BOOKOO. Both required pieces of
+tare evidence must arrive by the deadline; later samples do not replace the
+first sample timestamp or its latest live weight value. The timeout log also
+reports `tare_sample_delay_ms` alongside the ACK delay and sample count. Missing
+or late evidence still stops the adapter, as do stale weight or non-gram Acaia
+settings. A change to ounces is not treated as a harmless button press.
+
 For a report, include controller revision, scale model/firmware/mode, machine
 model/firmware, both link statuses, session counts and relevant `lm_scale` USB
 lines. Keep account credentials, machine tokens, raw account exports and flash

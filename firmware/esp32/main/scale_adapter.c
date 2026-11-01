@@ -207,9 +207,11 @@ static void log_pending_control(void) {
     (unsigned long)c->id, lm_scale_control_name(c->command), lm_scale_control_name(c->operation),
     (unsigned long long)info.elapsed_ms, (unsigned long)info.timeout_ms,
     c->sent, c->acknowledged, c->reset_before_start, c->delivering);
-  lm_scale_debug_record("control id=%lu ack_delay_ms=%llu weights_after=%llu ack_count=%llu",
+  lm_scale_debug_record("control id=%lu ack_delay_ms=%llu weights_after=%llu tare_sample_delay_ms=%llu ack_count=%llu",
     (unsigned long)c->id, (unsigned long long)info.ack_delay_ms,
-    (unsigned long long)info.weights_after, (unsigned long long)info.ack_count);
+    (unsigned long long)info.weights_after,
+    (unsigned long long)(c->first_weight_at >= c->started ? c->first_weight_at - c->started : 0),
+    (unsigned long long)info.ack_count);
   lm_scale_debug_record("control id=%lu last_ack=%s age_ms=%llu matched=%u wire=%u raw_id=%02x raw_code=%02x",
     (unsigned long)c->id, info.ack_count ? lm_scale_control_name(info.last_ack_control) : "none",
     (unsigned long long)info.last_ack_age_ms, info.last_ack_matched, info.last_ack_wire_valid,

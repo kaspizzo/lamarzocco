@@ -14,6 +14,7 @@ typedef struct {
   uint64_t started;
   uint64_t acknowledged_at;
   uint64_t weights_before;
+  uint64_t first_weight_at; /* First post-command tare sample; later samples cannot replace it. */
   bool sent, acknowledged, delivering, reset_before_start;
 } lm_scale_transaction_t;
 typedef struct {
