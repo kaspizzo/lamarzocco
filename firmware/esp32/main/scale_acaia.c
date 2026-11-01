@@ -58,7 +58,10 @@ static bool source_frame(void *ctx, const lm_scale_frame_t *frame) {
     for (size_t pos = 1; pos < size;) {
       uint8_t kind = p[pos];
       if (kind == 8) {
-        if (pos + 2 >= size || (p[pos + 2] != 5 && p[pos + 2] != 7))
+        /* A physical key may be followed by an ACK before its weight/timer
+         * record (captured on legacy Lunar after tare). Validate those records
+         * normally; the key itself never acknowledges a queued control. */
+        if (pos + 2 >= size || (p[pos + 2] != 5 && p[pos + 2] != 7 && p[pos + 2] != 11))
           return reject(s, "Invalid source button event");
         pos += 2;
         continue;

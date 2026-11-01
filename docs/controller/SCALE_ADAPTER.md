@@ -219,6 +219,17 @@ stop the adapter. Bad checksums and malformed known records remain errors.
 The exact header/meaning of the captured startup body still needs confirmation
 from the next hardware run; tests use explicitly reconstructed header variants.
 
+The 2026-11-01 log captured a separate live-session parser fault after the
+physical Lunar's tare button was pressed. The complete checksum-valid frame
+`efdd0c0d08000b00e00500000000020012f5` contains a button prefix, an ACK record
+with code `e0`, and a zero weight. The button parser now accepts an intervening
+ACK before the measurement; it previously allowed only a direct weight/timer
+record. The button and unknown ACK still cannot confirm a queued tare/timer
+command. Full-frame validation remains atomic: malformed tails and bad
+checksums emit neither partial ACKs nor measurements. The captured packet is
+covered at every fragment stride for both Acaia profiles; an updated controller
+hardware replay remains pending.
+
 For a report, include controller revision, scale model/firmware/mode, machine
 model/firmware, both link statuses, session counts and relevant `lm_scale` USB
 lines. Keep account credentials, machine tokens, raw account exports and flash

@@ -243,6 +243,89 @@ static int test_compound_source_ack_weight_buttons_and_malformed_tail(void) {
   ASSERT_EQ_INT(3, event_count); /* No partial weight emitted from a malformed frame. */
   return 0;
 }
+static const uint8_t recorded_tare_button_ack_weight[] = {
+  /* scale-connection-log (2).txt, 2026-11-01 06:51:42 UTC, seq=283.
+   * Physical tare button, unknown/keepalive ACK, then a zero weight. */
+  0xef,0xdd,0x0c,0x0d,0x08,0x00,0x0b,0x00,0xe0,0x05,0,0,0,0,2,0,0x12,0xf5,
+};
+static int test_recorded_tare_button_ack_weight_at_all_fragment_boundaries(void) {
+  const char *ids[] = {"acaia_legacy", "acaia_2021"};
+  for (size_t profile = 0; profile < sizeof(ids) / sizeof(ids[0]); ++profile) {
+    const lm_scale_driver_t *d = lm_scale_driver_find(ids[profile]);
+    for (size_t stride = 1; stride <= sizeof(recorded_tare_button_ack_weight); ++stride) {
+      union { uint64_t alignment; uint8_t data[512]; } state;
+      d->reset(state.data);
+      event_count = 0;
+      ASSERT_TRUE(d->feed(state.data, pair_reply, sizeof(pair_reply), collect, NULL));
+      event_count = 0;
+      for (size_t pos = 0; pos < sizeof(recorded_tare_button_ack_weight); pos += stride) {
+        size_t n = sizeof(recorded_tare_button_ack_weight) - pos;
+        if (n > stride) n = stride;
+        ASSERT_TRUE(d->feed(state.data, recorded_tare_button_ack_weight + pos, n, collect, NULL));
+      }
+      ASSERT_EQ_INT(2, event_count);
+      ASSERT_EQ_INT(LM_SCALE_ACK, events[0].kind);
+      ASSERT_EQ_INT(LM_SCALE_CONTROL_UNKNOWN, events[0].control);
+      ASSERT_TRUE(events[0].ack_wire_valid);
+      ASSERT_EQ_INT(0xe0, events[0].ack_code);
+      ASSERT_EQ_INT(LM_SCALE_WEIGHT, events[1].kind);
+      ASSERT_FLOAT_EQ(0.0, events[1].grams, .00001);
+      lm_scale_adapter_core_t core;
+      make_ready(&core);
+      ASSERT_TRUE(command(&core, 4, (const uint8_t[]){0}, 1, 100));
+      ASSERT_TRUE(lm_scale_core_tick(&core, 100, send, NULL));
+      ASSERT_TRUE(lm_scale_core_event(&core, &events[0], 200));
+      ASSERT_TRUE(lm_scale_core_event(&core, &events[1], 200));
+      ASSERT_TRUE(lm_scale_core_fresh(&core, 200));
+      ASSERT_FALSE(core.controls[0].acknowledged); /* A physical key is not a command ACK. */
+      ASSERT_TRUE(lm_scale_core_tick(&core, 200, send, NULL));
+      ASSERT_EQ_INT(0, core.reply_count);
+      lm_scale_source_diagnostics_t info;
+      d->diagnostics(state.data, &info);
+      ASSERT_TRUE(info.last_ack_frame != NULL);
+      ASSERT_EQ_INT(sizeof(recorded_tare_button_ack_weight), info.last_ack_frame->size);
+      ASSERT_TRUE(!memcmp(recorded_tare_button_ack_weight, info.last_ack_frame->data,
+                          sizeof(recorded_tare_button_ack_weight)));
+    }
+  }
+  return 0;
+}
+static int test_button_ack_compounds_still_reject_corruption_and_truncated_tails(void) {
+  const char *ids[] = {"acaia_legacy", "acaia_2021"};
+  const uint8_t payloads[][14] = {
+    {3,8,0}, /* Dangling button prefix. */
+    {5,8,0,11,0}, /* Incomplete ACK. */
+    {12,8,0,11,0,0xe0,5,0,0,0,0,2}, /* Missing weight flags. */
+    {14,8,0,11,0,0xe0,5,0,0,0,0,2,0,7}, /* Missing timer payload after valid weight. */
+    {5,8,0,99,0}, /* Unknown event after button. */
+  };
+  for (size_t profile = 0; profile < sizeof(ids) / sizeof(ids[0]); ++profile) {
+    const lm_scale_driver_t *d = lm_scale_driver_find(ids[profile]);
+    for (size_t i = 0; i < sizeof(payloads) / sizeof(payloads[0]); ++i) {
+      union { uint64_t alignment; uint8_t data[512]; } state;
+      d->reset(state.data);
+      event_count = 0;
+      ASSERT_TRUE(d->feed(state.data, pair_reply, sizeof(pair_reply), collect, NULL));
+      event_count = 0;
+      lm_scale_frame_t f = lm_scale_packet(12, payloads[i], payloads[i][0]);
+      ASSERT_FALSE(d->feed(state.data, f.data, f.size, collect, NULL));
+      ASSERT_EQ_INT(0, event_count); /* No partial ACK or weight escapes validation. */
+    }
+    union { uint64_t alignment; uint8_t data[512]; } state;
+    d->reset(state.data);
+    uint8_t bad[sizeof(recorded_tare_button_ack_weight)];
+    memcpy(bad, recorded_tare_button_ack_weight, sizeof(bad));
+    bad[sizeof(bad) - 1] ^= 1;
+    event_count = 0;
+    ASSERT_FALSE(d->feed(state.data, bad, sizeof(bad), collect, NULL));
+    ASSERT_EQ_INT(0, event_count);
+    lm_scale_source_diagnostics_t info;
+    d->diagnostics(state.data, &info);
+    ASSERT_TRUE(info.complete && !info.checksum_valid);
+    ASSERT_EQ_INT(sizeof(bad), info.failure_frame->size);
+  }
+  return 0;
+}
 static int test_source_checksum_and_gram_unit_are_required(void) {
   const lm_scale_driver_t *d = lm_scale_driver_find("acaia_legacy");
   union { uint64_t alignment; uint8_t data[512]; } state;
@@ -634,6 +717,8 @@ static int test_control_timeout_snapshot_distinguishes_operation_ack_and_post_ta
 }
 
 int run_scale_adapter_tests(void) {
+  RUN_TEST(test_recorded_tare_button_ack_weight_at_all_fragment_boundaries);
+  RUN_TEST(test_button_ack_compounds_still_reject_corruption_and_truncated_tails);
   RUN_TEST(test_lunar_2021_profile_and_published_command_bytes);
   RUN_TEST(test_lunar_2021_compound_measurements_at_every_fragment_boundary);
   RUN_TEST(test_lunar_2021_control_ack_and_tare_measurement_gate);
