@@ -57,8 +57,14 @@ not proof that a specific command executed. An already-zero state can satisfy
 tare/reset; already-running/stopped states and timer quantization can also
 affect detection. Tare during inflow may never reach zero and will time out.
 BOOKOO gets a two-second control timeout, with the same one-second stale-data
-limit. Acaia retains its protocol ACKs and 450 ms control timeout. Missing
-completion stops the adapter without fabricating an ACK. Real hardware must
+limit. Acaia retains its 450 ms control timeout. Timer operations require their
+protocol ACKs. Tare accepts its explicit ACK plus a new sample, or a verified
+post-write zero state when the dedicated ACK is missing: a fresh source tare-key
+event plus near-zero weight, or separate near-zero measurement notifications at
+least 50 ms apart. This state observation is experimental and can also confirm
+an already-zero scale; it is not a wire ACK. See the
+[adapter guide](../../docs/controller/SCALE_ADAPTER.md) for bounds and validation.
+Missing completion stops the adapter. Real hardware must
 still validate radio behavior, command timing and brew-by-weight accuracy.
 See the [BOOKOO beta test guide](../../docs/controller/BOOKOO_BETA_TEST.md).
 

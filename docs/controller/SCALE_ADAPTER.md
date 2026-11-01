@@ -224,7 +224,7 @@ physical Lunar's tare button was pressed. The complete checksum-valid frame
 `efdd0c0d08000b00e00500000000020012f5` contains a button prefix, an ACK record
 with code `e0`, and a zero weight. Known button, ACK, battery, timer and weight
 records are now validated independently of their order. A complete button
-record can also be the last or only record; it does not establish readiness,
+record can also be the last or only record; alone it does not establish readiness,
 refresh measurement freshness or confirm a queued command. Unknown key codes
 are ignored as non-measuring key records; unknown record tags/layouts still
 fail closed. Full-frame validation remains atomic: malformed tails and bad
@@ -234,7 +234,8 @@ cover tare/start/stop/reset key codes and an unknown key across all 120 orders
 of the five known record types, with five notification strides and both drivers
 (6,000 cases). An updated controller hardware replay remains pending.
 
-Control deadlines use the callback-observed ACK arrival time and, for tare,
+Control deadlines use the callback-observed completion time (wire ACK or
+observed state) and, for tare,
 the first post-command sample time. A delayed worker tick does not turn an
 already completed operation into a timeout. The existing per-operation limits
 remain 450 ms for Acaia and two seconds for BOOKOO. Both required pieces of
@@ -243,6 +244,42 @@ first sample timestamp or its latest live weight value. The timeout log also
 reports `tare_sample_delay_ms` alongside the ACK delay and sample count. Missing
 or late evidence still stops the adapter, as do stale weight or non-gram Acaia
 settings. A change to ounces is not treated as a harmless button press.
+
+### Tare completed without a dedicated ACK on a repeated start
+
+The later 2026-11-01 log confirms the revised firmware (`elf=ce343ef29643`). At
+15:39:36 CET, a native tare request expired after 473 ms with no matching ACK,
+despite five post-command samples and a last measurement only 53 ms old. The
+last stored wire ACK was for timer start and preceded the tare write by 330 ms;
+its `matched=1` described the earlier transaction. No source frame was rejected.
+The operator reported that the first shot stopped correctly at its target and
+that a second start, after correcting the target, physically tared the scale.
+This is a user-reported functional stop, not a measured stop-accuracy result.
+
+Both Acaia profiles now support an experimental, bounded tare-state fallback
+after a successful command enqueue. A dedicated tare ACK still uses the normal
+ACK-plus-new-sample path. Without that ACK, completion requires fresh gram
+measurements within ±0.05 g of zero, plus either:
+
+- a source tare-key event received after the write; or
+- zero measurements in separate notification batches at least 50 ms apart,
+  with no intervening nonzero measurement.
+
+Pre-write cached zero, a frame already partially buffered before the write,
+multiple zero frames in one notification, button-only messages and unknown ACKs
+cannot provide that confirmation. The original 450 ms core deadline still
+applies to the observed completion. Timer commands keep their wire-ACK path.
+No virtual zero is invented: subsequent real weights, including water arriving
+after tare, are retained. Resetting the source session clears pending evidence.
+
+This verifies a zero state, not that a particular command produced it; an
+already-zero scale can qualify with fresh post-write evidence. Tare during
+inflow may never expose enough near-zero evidence and can still time out. A
+successful state fallback is marked `observed completion` in the connection
+log, distinct from a wire ACK; timeout context includes the current `weight_g`.
+Tests model the repeated-start sequence with synthetic values and captured
+timing, plus stale/corrupt/late evidence guards. Hardware replay of this fallback
+remains pending, especially on the Lunar 2021.
 
 For a report, include controller revision, scale model/firmware/mode, machine
 model/firmware, both link statuses, session counts and relevant `lm_scale` USB
