@@ -165,6 +165,40 @@ contain hex chunks with byte offsets. Concatenate chunks with the same ID in
 offset order. `complete=0` explicitly marks an incomplete framing prefix.
 Unrecognized startup replies are also captured once per opcode/source session.
 
+On shutdown, `source-rx` records show the notification/byte counts, age of the
+last notification and weight, and largest observed gap between notifications
+in that source session. `source-heartbeat` records show attempt/queue counts,
+ages and the last NimBLE queue result. A queued write is not proof that the
+scale received or executed it. When writes use ATT responses, the latest
+completion kind/status/age is included separately; writes without a response
+have no such completion evidence.
+
+While capture is enabled, the controller reads connected-link RSSI at most once
+every five seconds for the source and machine-facing scale link. These samples
+stay in RAM; failure/disconnect `radio` records export the last valid value,
+its age and the last read result. `rssi_valid=0` means no valid sample was
+obtained in that link session; `127` is an unavailable marker, not a signal
+measurement. A failed read can leave an older valid sample, so inspect its age
+and `read_rc` together. Connection parameters are included when the descriptor
+still exists: interval in 1.25 ms units, peripheral latency in connection events
+and supervision timeout in 10 ms units. `params_rc` is nonzero after a link is
+already gone. RSSI polling stops when capture is disabled; it does not generate
+periodic flash records.
+
+`machine-ble` records distinguish machine scan, connection, MTU, characteristic
+discovery, authentication-write and registration-read/write failures. They
+include an ESP error name/code, raw NimBLE result when available (`-1` otherwise)
+and numeric connection state. `op_status` is the last GATT operation status and
+may belong to an earlier operation. Authentication logging describes the
+existing token-write path, not a new authentication check. No tokens, raw
+machine responses or account payloads are copied into these records.
+`registration-check` IDs bracket every scheduled check with its elapsed time,
+even when the displayed result is unchanged. Classification values are
+`0` unknown, `1` missing, `2` present and `3` another scale; these describe the
+runtime registration response, not proof of persistent location training.
+`releasing_owner=1` marks the intentional release of the controller's normal
+machine command connection so the Mini can connect to the virtual scale.
+
 When a control is pending at shutdown, `control` records identify the requested
 action and the current physical operation (for example, start versus its
 preceding reset), transaction ID, elapsed time, timeout, dispatch/ACK flags,
@@ -182,7 +216,7 @@ The last 1 MiB of the existing `storage` partition is reserved for the raw
 diagnostic journal. It holds up to 4,080 CRC-protected records; the oldest sector
 is reclaimed when full. Retention depends on event frequency, not a fixed
 number of days. Capture is limited to 60 queued events per minute, with a
-bounded RAM queue and overload counters. Flash writes run in a background task.
+bounded 32-record RAM queue and overload counters. Flash writes run in a background task.
 An interrupted record is ignored after restart; the final queued events may be
 lost on abrupt power removal. Existing nonblank data without the journal's
 header is preserved and prevents initialization.

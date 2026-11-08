@@ -145,7 +145,8 @@ esp_err_t lm_scale_debug_init(void) {
   s_boot_id = esp_random();
   s_generation = 1;
   s_store_lock = xSemaphoreCreateMutex();
-  s_queue = xQueueCreate(16, sizeof(lm_scale_debug_record_t));
+  /* Failure snapshots and connection-stage records can arrive in one burst. */
+  s_queue = xQueueCreate(32, sizeof(lm_scale_debug_record_t));
   if (!s_store_lock || !s_queue || xTaskCreate(debug_worker, "lm_scale_debug", 4096, NULL, 2, NULL) != pdPASS) {
     if (s_queue) vQueueDelete(s_queue);
     if (s_store_lock) vSemaphoreDelete(s_store_lock);

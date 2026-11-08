@@ -44,6 +44,22 @@ static uint64_t s_weight_log_at;
 static uint32_t s_frame_log_id;
 static bool s_stream_sent;
 static bool s_source_write_no_rsp;
+/* RAM-only observations, emitted on failure rather than on every sample. */
+static struct {
+  uint64_t rx_at, rx_count, rx_bytes, rx_max_gap;
+  uint64_t heartbeat_at, heartbeat_queued_at, heartbeat_attempts, heartbeat_queued;
+  uint64_t write_callback_at;
+  int heartbeat_rc, write_callback_status;
+  const char *write_callback_kind;
+} s_observation;
+typedef struct {
+  uint64_t value_at;
+  int8_t value;
+  int rc;
+  bool valid, attempted;
+} scale_radio_t;
+static scale_radio_t s_source_radio, s_gateway_radio;
+static uint64_t s_radio_poll_at;
 static ble_addr_t s_target;
 static lm_scale_adapter_config_t s_config;
 static lm_scale_adapter_core_t s_core;
@@ -57,6 +73,55 @@ static void tick(struct ble_npl_event *event);
 static void stop_links(const char *reason, bool fatal);
 
 static uint64_t now_ms(void) { return esp_timer_get_time() / 1000; }
+static long long observation_age(uint64_t now, uint64_t at) {
+  return at && now >= at ? (long long)(now - at) : -1;
+}
+static void poll_radio(uint16_t conn, scale_radio_t *radio, uint64_t now) {
+  if (conn == BLE_HS_CONN_HANDLE_NONE) return;
+  int8_t rssi = 127;
+  radio->rc = ble_gap_conn_rssi(conn, &rssi);
+  radio->attempted = true;
+  if (!radio->rc && rssi != 127) {
+    radio->value = rssi;
+    radio->value_at = now;
+    radio->valid = true;
+  }
+}
+static void poll_radios(uint64_t now) {
+  if (s_radio_poll_at && now - s_radio_poll_at < 5000) return;
+  s_radio_poll_at = now;
+  lm_scale_debug_info_t debug;
+  lm_scale_debug_get_info(&debug);
+  if (!debug.enabled) return;
+  poll_radio(s_source, &s_source_radio, now);
+  poll_radio(s_gateway, &s_gateway_radio, now);
+}
+static void log_radio(const char *link, uint16_t conn, const scale_radio_t *radio, uint64_t now) {
+  struct ble_gap_conn_desc desc;
+  int rc = conn == BLE_HS_CONN_HANDLE_NONE ? BLE_HS_ENOTCONN : ble_gap_conn_find(conn, &desc);
+  lm_scale_debug_record("radio link=%s rssi_valid=%u rssi=%d rssi_age_ms=%lld read_attempted=%u read_rc=%d params_rc=%d itvl_1p25ms=%u latency=%u sup_10ms=%u",
+    link, radio->valid, radio->valid ? radio->value : 127,
+    radio->valid ? observation_age(now, radio->value_at) : -1,
+    radio->attempted, radio->rc, rc, rc ? 0 : desc.conn_itvl,
+    rc ? 0 : desc.conn_latency, rc ? 0 : desc.supervision_timeout);
+}
+static void log_link_observations(void) {
+  uint64_t now = now_ms();
+  lm_scale_debug_record("source-rx notifications=%llu bytes=%llu last_age_ms=%lld max_gap_ms=%llu weight_age_ms=%lld",
+    (unsigned long long)s_observation.rx_count, (unsigned long long)s_observation.rx_bytes,
+    observation_age(now, s_observation.rx_at), (unsigned long long)s_observation.rx_max_gap,
+    s_core.has_weight ? observation_age(now, s_core.updated) : -1);
+  lm_scale_debug_record("source-heartbeat attempts=%llu queued=%llu attempt_age_ms=%lld queued_age_ms=%lld rc=%d write_no_rsp=%u",
+    (unsigned long long)s_observation.heartbeat_attempts, (unsigned long long)s_observation.heartbeat_queued,
+    observation_age(now, s_observation.heartbeat_at), observation_age(now, s_observation.heartbeat_queued_at),
+    s_observation.heartbeat_rc, s_source_write_no_rsp);
+  if (s_observation.write_callback_kind)
+    lm_scale_debug_record("source-write-completion kind=%s status=%d age_ms=%lld",
+      s_observation.write_callback_kind, s_observation.write_callback_status,
+      observation_age(now, s_observation.write_callback_at));
+  log_radio("source", s_source, &s_source_radio, now);
+  if (s_gateway != BLE_HS_CONN_HANDLE_NONE) log_radio("machine-scale", s_gateway, &s_gateway_radio, now);
+}
 static void status(const char *text) {
   bool changed;
   portENTER_CRITICAL(&s_lock);
@@ -166,20 +231,36 @@ void lm_scale_adapter_registration_result(const char *text, bool attempted) {
 }
 static int source_written(uint16_t conn, const struct ble_gatt_error *error,
                           struct ble_gatt_attr *attr, void *arg) {
-  (void)attr; (void)arg;
+  (void)attr;
+  if (conn == s_source) {
+    s_observation.write_callback_at = now_ms();
+    s_observation.write_callback_kind = arg;
+    s_observation.write_callback_status = error ? error->status : BLE_HS_EAPP;
+  }
   if (conn == s_source && lm_scale_link_allows_io(&s_lifecycle) && (!error || error->status))
     stop_links("Source scale rejected control write", true);
   return 0;
 }
-static bool source_write(lm_scale_frame_t frame) {
+static bool source_write(lm_scale_frame_t frame, const char *kind) {
   if (!frame.size || s_source == BLE_HS_CONN_HANDLE_NONE || !s_source_write) return false;
-  if (s_source_write_no_rsp)
-    return ble_gattc_write_no_rsp_flat(s_source, s_source_write, frame.data, frame.size) == 0;
-  return ble_gattc_write_flat(s_source, s_source_write, frame.data, frame.size, source_written, NULL) == 0;
+  int rc = s_source_write_no_rsp ?
+    ble_gattc_write_no_rsp_flat(s_source, s_source_write, frame.data, frame.size) :
+    ble_gattc_write_flat(s_source, s_source_write, frame.data, frame.size, source_written, (void *)kind);
+  if (!strcmp(kind, "heartbeat")) {
+    s_observation.heartbeat_at = now_ms();
+    ++s_observation.heartbeat_attempts;
+    s_observation.heartbeat_rc = rc;
+    if (!rc) {
+      s_observation.heartbeat_queued_at = s_observation.heartbeat_at;
+      ++s_observation.heartbeat_queued;
+    }
+  }
+  if (rc) lm_scale_debug_record("source-write failed kind=%s rc=%d write_no_rsp=%u", kind, rc, s_source_write_no_rsp);
+  return rc == 0;
 }
 static bool send_control(void *ctx, lm_scale_control_t control) {
   (void)ctx;
-  if (!lm_scale_driver_can_bridge(s_driver) || !source_write(s_driver->control(control))) return false;
+  if (!lm_scale_driver_can_bridge(s_driver) || !source_write(s_driver->control(control), "control")) return false;
   if (s_driver->control_written && !s_driver->control_written(s_driver_state.bytes, control, now_ms())) return false;
   ESP_LOGI(TAG, "Source control queued: driver=%s control=%u", s_driver->id, (unsigned)control);
   return true;
@@ -231,6 +312,7 @@ static void log_pending_control(void) {
 }
 static void stop_links(const char *reason, bool fatal) {
   if (!lm_scale_link_begin_stop(&s_lifecycle, now_ms(), s_gateway != BLE_HS_CONN_HANDLE_NONE)) return;
+  log_link_observations();
   log_pending_control();
   lm_scale_debug_record("stop fatal=%u src=%u gw=%u ready=%u samples=%llu age_ms=%llu controls=%u replies=%u: %.72s",
     fatal, s_source != BLE_HS_CONN_HANDLE_NONE, s_gateway != BLE_HS_CONN_HANDLE_NONE, s_core.ready,
@@ -295,7 +377,7 @@ static bool source_event(void *ctx, const lm_scale_event_t *event) {
 static int subscribed(uint16_t conn, const struct ble_gatt_error *error, struct ble_gatt_attr *attr, void *arg) {
   (void)attr; (void)arg;
   if (conn != s_source || !lm_scale_link_allows_io(&s_lifecycle)) return 0;
-  if (!error || error->status || (s_driver->identify && !source_write(s_driver->identify()))) {
+  if (!error || error->status || (s_driver->identify && !source_write(s_driver->identify(), "identify"))) {
     stop_links("Scale notification subscription failed", false);
     return 0;
   }
@@ -399,6 +481,9 @@ static int source_gap(struct ble_gap_event *event, void *arg) {
       lm_scale_debug_record("source connect result=%d", event->connect.status);
       if (!event->connect.status) {
         s_source = event->connect.conn_handle;
+        memset(&s_observation, 0, sizeof(s_observation));
+        memset(&s_source_radio, 0, sizeof(s_source_radio));
+        s_radio_poll_at = 0;
         lm_scale_core_init(&s_core);
         s_driver->reset(s_driver_state.bytes);
         s_source_notify = s_source_write = s_cccd = s_service_start = s_service_end = s_dsc_end = 0;
@@ -432,6 +517,12 @@ static int source_gap(struct ble_gap_event *event, void *arg) {
       if (event->notify_rx.conn_handle == s_source && event->notify_rx.attr_handle == s_source_notify && lm_scale_link_allows_io(&s_lifecycle)) {
         uint8_t data[256];
         size_t size = OS_MBUF_PKTLEN(event->notify_rx.om);
+        uint64_t now = now_ms();
+        uint64_t gap = s_observation.rx_at ? now - s_observation.rx_at : 0;
+        if (gap > s_observation.rx_max_gap) s_observation.rx_max_gap = gap;
+        s_observation.rx_at = now;
+        ++s_observation.rx_count;
+        s_observation.rx_bytes += size;
         if (size > sizeof(data) || os_mbuf_copydata(event->notify_rx.om, 0, size, data)) {
           stop_links("Invalid source notification length", true);
         } else if (!s_driver->feed(s_driver_state.bytes, data, size, source_event, NULL) ||
@@ -502,6 +593,7 @@ static int gateway_gap(struct ble_gap_event *event, void *arg) {
           break;
         }
         s_gateway = event->connect.conn_handle;
+        memset(&s_gateway_radio, 0, sizeof(s_gateway_radio));
         lm_scale_core_end_gateway(&s_core);
         s_subscribed = false;
         s_deadline = now_ms() + 10000;
@@ -527,7 +619,10 @@ static int gateway_gap(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_DISCONNECT:
       if (event->disconnect.conn.conn_handle == s_gateway) {
         lm_scale_debug_record("machine scale disconnected reason=%d", event->disconnect.reason);
+        /* The descriptor is gone at DISCONNECT; retain the final cached RSSI. */
         bool pending = s_core.control_count != 0;
+        if (!pending && lm_scale_link_allows_io(&s_lifecycle)) log_link_observations();
+        else log_radio("machine-scale", BLE_HS_CONN_HANDLE_NONE, &s_gateway_radio, now_ms());
         s_gateway = BLE_HS_CONN_HANDLE_NONE;
         s_subscribed = false;
         lm_scale_core_end_gateway(&s_core);
@@ -597,10 +692,11 @@ static void tick(struct ble_npl_event *event) {
   if (s_lifecycle.gateway_close_at && now >= s_lifecycle.gateway_close_at && s_gateway != BLE_HS_CONN_HANDLE_NONE)
     (void)ble_gap_terminate(s_gateway, BLE_ERR_REM_USER_CONN_TERM);
   if (!lm_scale_link_allows_io(&s_lifecycle)) goto publish;
+  poll_radios(now);
   if (revision == s_applied_revision && s_config.enabled && !s_faulted) {
     if (s_source != BLE_HS_CONN_HANDLE_NONE) {
       if (s_driver->subscribe && s_identified && !s_stream_sent && now - s_identified >= 500) {
-        s_stream_sent = source_write(s_driver->subscribe());
+        s_stream_sent = source_write(s_driver->subscribe(), "subscribe");
         if (!s_stream_sent) { stop_links("Source streaming command failed", false); goto publish; }
       }
       if ((!s_core.ready || !s_core.has_weight) && now >= s_deadline) {
@@ -616,7 +712,7 @@ static void tick(struct ble_npl_event *event) {
         } else {
           if (s_driver->heartbeat && (!s_heartbeat || now - s_heartbeat >= 2000)) {
             s_heartbeat = now;
-            if (!source_write(s_driver->heartbeat())) {
+            if (!source_write(s_driver->heartbeat(), "heartbeat")) {
               stop_links("Source heartbeat write failed", false);
               goto publish;
             }
