@@ -4,6 +4,7 @@
 #include "machine_link_internal.h"
 #include "scale_adapter.h"
 #include "scale_registration_policy.h"
+#include "scale_debug.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -24,6 +25,31 @@ typedef enum {
 } lm_ctrl_adv_match_t;
 
 static const char *TAG = "lm_ble";
+/* Only fixed stage names and numeric transport state enter the scale journal.
+ * Never copy status/response buffers: they may contain authentication payloads. */
+static void record_scale_machine_ble(const char *stage, esp_err_t err, int raw_rc) {
+  lm_scale_adapter_info_t scale;
+  lm_scale_adapter_get_info(&scale);
+  if (!scale.config.enabled) return;
+  bool host, scanning, connecting, connected, handles, authenticated;
+  int op_status;
+  portENTER_CRITICAL(&s_link_lock);
+  host = s_link.host_ready;
+  scanning = s_link.scanning;
+  connecting = s_link.connect_in_progress;
+  connected = s_link.connected;
+  handles = s_link.handles_ready;
+  authenticated = s_link.authenticated;
+  op_status = s_link.op_status;
+  portEXIT_CRITICAL(&s_link_lock);
+  lm_scale_debug_record("machine-ble stage=%s err=%s code=%d raw_rc=%d op_status=%d host=%u scan=%u connecting=%u connected=%u handles=%u auth=%u",
+    stage, esp_err_to_name(err), (int)err, raw_rc, op_status,
+    host, scanning, connecting, connected, handles, authenticated);
+}
+static esp_err_t scale_machine_ble_checked(const char *stage, esp_err_t err) {
+  if (err != ESP_OK) record_scale_machine_ble(stage, err, -1);
+  return err;
+}
 #if LM_CTRL_BLE_VERBOSE_DIAGNOSTICS
 static uint8_t s_scan_log_budget = 0;
 #endif
@@ -1341,17 +1367,17 @@ static esp_err_t ensure_ble_handles(void) {
   }
 
   ESP_RETURN_ON_ERROR(
-    discover_characteristic_handle(&s_link.read_uuid.u, LM_CTRL_DISCOVERY_READ, &read_handle, &read_properties),
+    scale_machine_ble_checked("discover-read", discover_characteristic_handle(&s_link.read_uuid.u, LM_CTRL_DISCOVERY_READ, &read_handle, &read_properties)),
     TAG,
     "Read characteristic discovery failed"
   );
   ESP_RETURN_ON_ERROR(
-    discover_characteristic_handle(&s_link.write_uuid.u, LM_CTRL_DISCOVERY_WRITE, &write_handle, &write_properties),
+    scale_machine_ble_checked("discover-write", discover_characteristic_handle(&s_link.write_uuid.u, LM_CTRL_DISCOVERY_WRITE, &write_handle, &write_properties)),
     TAG,
     "Write characteristic discovery failed"
   );
   ESP_RETURN_ON_ERROR(
-    discover_characteristic_handle(&s_link.auth_uuid.u, LM_CTRL_DISCOVERY_AUTH, &auth_handle, &auth_properties),
+    scale_machine_ble_checked("discover-auth", discover_characteristic_handle(&s_link.auth_uuid.u, LM_CTRL_DISCOVERY_AUTH, &auth_handle, &auth_properties)),
     TAG,
     "Auth characteristic discovery failed"
   );
@@ -1377,7 +1403,7 @@ static esp_err_t authenticate_with_machine(const char *token) {
 
   if (token == NULL || token[0] == '\0') {
     set_statusf("BLE auth token missing.");
-    return ESP_ERR_INVALID_STATE;
+    return scale_machine_ble_checked("auth-token-missing", ESP_ERR_INVALID_STATE);
   }
 
   portENTER_CRITICAL(&s_link_lock);
@@ -1390,7 +1416,7 @@ static esp_err_t authenticate_with_machine(const char *token) {
   }
 
   ESP_RETURN_ON_ERROR(
-    run_write_operation(auth_handle, token, strlen(token), false, 0, NULL, 0),
+    scale_machine_ble_checked("auth-write", run_write_operation(auth_handle, token, strlen(token), false, 0, NULL, 0)),
     TAG,
     "BLE auth write failed"
   );
@@ -1416,7 +1442,8 @@ static esp_err_t start_scan(void) {
   int rc;
 
   /* Another central procedure may belong to the source-scale adapter. */
-  if (ble_gap_disc_active() || ble_gap_conn_active()) return ESP_ERR_NOT_FINISHED;
+  if (ble_gap_disc_active() || ble_gap_conn_active())
+    return scale_machine_ble_checked("central-busy", ESP_ERR_NOT_FINISHED);
 
   portENTER_CRITICAL(&s_link_lock);
   if (s_link.scanning || s_link.connect_in_progress || s_link.connected) {
@@ -1439,6 +1466,7 @@ static esp_err_t start_scan(void) {
     s_link.scanning = false;
     portEXIT_CRITICAL(&s_link_lock);
     set_statusf("BLE address inference failed (rc=%d).", rc);
+    record_scale_machine_ble("scan-address", ESP_FAIL, rc);
     return ESP_FAIL;
   }
 
@@ -1451,10 +1479,12 @@ static esp_err_t start_scan(void) {
     s_link.scanning = false;
     portEXIT_CRITICAL(&s_link_lock);
     set_statusf("BLE scan start failed (rc=%d).", rc);
+    record_scale_machine_ble("scan-start", ESP_FAIL, rc);
     return ESP_FAIL;
   }
 
   set_statusf("Scanning BLE for %s...", target_serial);
+  record_scale_machine_ble("scan-start", ESP_OK, 0);
   return ESP_OK;
 }
 
@@ -1469,12 +1499,14 @@ static esp_err_t start_connect_to_addr(const ble_addr_t *addr) {
   rc = ble_gap_disc_cancel();
   if (rc != 0 && rc != BLE_HS_EALREADY) {
     set_statusf("BLE scan cancel failed (rc=%d).", rc);
+    record_scale_machine_ble("scan-cancel", ESP_FAIL, rc);
     return ESP_FAIL;
   }
 
   rc = ble_hs_id_infer_auto(0, &own_addr_type);
   if (rc != 0) {
     set_statusf("BLE connect address inference failed (rc=%d).", rc);
+    record_scale_machine_ble("connect-address", ESP_FAIL, rc);
     return ESP_FAIL;
   }
 
@@ -1490,6 +1522,7 @@ static esp_err_t start_connect_to_addr(const ble_addr_t *addr) {
     s_link.connect_in_progress = false;
     portEXIT_CRITICAL(&s_link_lock);
     set_statusf("BLE connect start failed (rc=%d).", rc);
+    record_scale_machine_ble("connect-start", ESP_FAIL, rc);
     return ESP_FAIL;
   }
 
@@ -1550,16 +1583,16 @@ esp_err_t ensure_connected_and_authenticated(const lm_ctrl_machine_binding_t *bi
   bool connected;
 
   if (!machine_link_ble_transport_enabled()) {
-    return ESP_ERR_NOT_SUPPORTED;
+    return scale_machine_ble_checked("transport-disabled", ESP_ERR_NOT_SUPPORTED);
   }
   lm_scale_adapter_info_t scale;
   lm_scale_adapter_get_info(&scale);
   /* The gateway already has a link to this controller's BLE identity. A
    * second connection to the same peer in the opposite role is rejected. */
-  if (scale.gateway_connected) return ESP_ERR_NOT_SUPPORTED;
+  if (scale.gateway_connected) return scale_machine_ble_checked("gateway-active", ESP_ERR_NOT_SUPPORTED);
 
   if (!refresh_binding(binding)) {
-    return ESP_ERR_INVALID_STATE;
+    return scale_machine_ble_checked("binding-switch", ESP_ERR_INVALID_STATE);
   }
 
   portENTER_CRITICAL(&s_link_lock);
@@ -1569,7 +1602,7 @@ esp_err_t ensure_connected_and_authenticated(const lm_ctrl_machine_binding_t *bi
 
   if (!host_ready) {
     set_statusf("BLE host not ready yet.");
-    return ESP_ERR_INVALID_STATE;
+    return scale_machine_ble_checked("host-not-ready", ESP_ERR_INVALID_STATE);
   }
 
   if (!connected) {
@@ -1579,10 +1612,10 @@ esp_err_t ensure_connected_and_authenticated(const lm_ctrl_machine_binding_t *bi
   ESP_RETURN_ON_ERROR(start_scan(), TAG, "BLE scan start failed");
 
   ESP_RETURN_ON_ERROR(
-      wait_for_conn_sem_interruptible(
+      scale_machine_ble_checked("scan-connect-wait", wait_for_conn_sem_interruptible(
         pdMS_TO_TICKS(LM_CTRL_MACHINE_SCAN_TIMEOUT_MS + LM_CTRL_MACHINE_CONNECT_TIMEOUT_MS),
         "BLE machine discovery/connect timed out."
-      ),
+      )),
       TAG,
       "BLE connect wait failed"
     );
@@ -1592,14 +1625,15 @@ esp_err_t ensure_connected_and_authenticated(const lm_ctrl_machine_binding_t *bi
     portEXIT_CRITICAL(&s_link_lock);
     if (!connected) {
       set_statusf("BLE machine %s not found.", binding->serial);
-      return ESP_FAIL;
+      return scale_machine_ble_checked("not-connected", ESP_FAIL);
     }
   }
 
-  ESP_RETURN_ON_ERROR(ensure_ble_mtu(), TAG, "BLE MTU exchange failed");
+  ESP_RETURN_ON_ERROR(scale_machine_ble_checked("mtu", ensure_ble_mtu()), TAG, "BLE MTU exchange failed");
   ESP_RETURN_ON_ERROR(ensure_ble_handles(), TAG, "BLE handle discovery failed");
   ESP_RETURN_ON_ERROR(authenticate_with_machine(binding->communication_key), TAG, "BLE auth failed");
   clear_ble_failure();
+  record_scale_machine_ble("ready", ESP_OK, 0);
   return ESP_OK;
 }
 
@@ -1612,6 +1646,7 @@ void machine_link_host_task(void *param) {
 }
 
 void machine_link_on_reset(int reason) {
+  record_scale_machine_ble("host-reset", ESP_FAIL, reason);
   lm_scale_adapter_on_reset();
   portENTER_CRITICAL(&s_link_lock);
   s_link.host_ready = false;
@@ -1650,6 +1685,9 @@ int ble_gap_event(struct ble_gap_event *event, void *arg) {
       match_type = advertisement_match_type(&event->disc, matched_name, sizeof(matched_name));
       log_scan_observation(&event->disc, match_type);
       if (match_type == LM_CTRL_ADV_MATCH_EXACT) {
+        lm_scale_adapter_info_t scale;
+        lm_scale_adapter_get_info(&scale);
+        if (scale.config.enabled) lm_scale_debug_record("machine-ble advertisement match=exact rssi=%d", event->disc.rssi);
         ESP_LOGI(
           TAG,
           "Found matching machine %s at %02x:%02x:%02x:%02x:%02x:%02x",
@@ -1724,6 +1762,7 @@ int ble_gap_event(struct ble_gap_event *event, void *arg) {
       portEXIT_CRITICAL(&s_link_lock);
 
       if (!should_connect) {
+        record_scale_machine_ble(fallback_matches > 1 ? "scan-ambiguous" : "scan-no-match", ESP_ERR_NOT_FOUND, event->disc_complete.reason);
         if (fallback_matches > 1) {
           set_statusf("Multiple BLE machines found; no unique match for %s.", s_link.target_serial);
         }
@@ -1736,6 +1775,7 @@ int ble_gap_event(struct ble_gap_event *event, void *arg) {
       rc = ble_hs_id_infer_auto(0, &own_addr_type);
       if (rc != 0) {
         set_statusf("BLE connect address inference failed (rc=%d).", rc);
+        record_scale_machine_ble("connect-address", ESP_FAIL, rc);
         if (s_link.conn_sem != NULL) {
           xSemaphoreGive(s_link.conn_sem);
         }
@@ -1753,6 +1793,7 @@ int ble_gap_event(struct ble_gap_event *event, void *arg) {
         s_link.connect_in_progress = false;
         portEXIT_CRITICAL(&s_link_lock);
         set_statusf("BLE connect start failed (rc=%d).", rc);
+        record_scale_machine_ble("connect-start", ESP_FAIL, rc);
         if (s_link.conn_sem != NULL) {
           xSemaphoreGive(s_link.conn_sem);
         }
@@ -1779,6 +1820,7 @@ int ble_gap_event(struct ble_gap_event *event, void *arg) {
         portEXIT_CRITICAL(&s_link_lock);
         set_statusf("BLE connect failed (status=%d).", event->connect.status);
       }
+      record_scale_machine_ble("connect-result", event->connect.status ? ESP_FAIL : ESP_OK, event->connect.status);
       if (s_link.conn_sem != NULL) {
         xSemaphoreGive(s_link.conn_sem);
       }
@@ -1786,6 +1828,8 @@ int ble_gap_event(struct ble_gap_event *event, void *arg) {
 
     case BLE_GAP_EVENT_DISCONNECT: {
       bool has_pending = false;
+
+      record_scale_machine_ble("disconnect", ESP_OK, event->disconnect.reason);
 
       portENTER_CRITICAL(&s_link_lock);
       has_pending = s_link.pending_mask != 0;
@@ -1835,25 +1879,33 @@ void maybe_restore_scale_registration(void) {
     if (lm_scale_adapter_source_active()) release_machine_owner_connection();
     return;
   }
+  static uint32_t check_id;
+  uint32_t id = ++check_id;
+  int64_t started = esp_timer_get_time();
+  lm_scale_debug_record("registration-check id=%lu begin", (unsigned long)id);
   if (!s_deps.get_machine_binding || !s_deps.get_machine_binding(&binding) ||
       !binding.configured || !binding.serial[0] || !binding.communication_key[0]) {
     lm_scale_adapter_registration_result("Waiting for a local machine binding", false);
     goto release_owner;
   }
-  if (ensure_connected_and_authenticated(&binding) != ESP_OK) {
+  esp_err_t err = ensure_connected_and_authenticated(&binding);
+  if (err != ESP_OK) {
+    record_scale_machine_ble("registration-connect", err, -1);
     lm_scale_adapter_registration_result("Machine BLE unavailable; registration check will retry", false);
     goto release_owner;
   }
-  if (request_machine_read_value(LM_CTRL_MACHINE_READ_MACHINE_MODE, response, sizeof(response)) != ESP_OK ||
-      !response_matches_machine_mode(response, LM_CTRL_MACHINE_MODE_BREWING)) {
+  err = scale_machine_ble_checked("registration-mode-read", request_machine_read_value(LM_CTRL_MACHINE_READ_MACHINE_MODE, response, sizeof(response)));
+  if (err != ESP_OK || !response_matches_machine_mode(response, LM_CTRL_MACHINE_MODE_BREWING)) {
+    if (err == ESP_OK) record_scale_machine_ble("registration-not-brewing", ESP_ERR_INVALID_STATE, -1);
     lm_scale_adapter_registration_result("Waiting for machine BrewingMode", false);
     goto release_owner;
   }
-  if (request_machine_read_value("scales", response, sizeof(response)) != ESP_OK) {
+  if (scale_machine_ble_checked("registration-scales-read", request_machine_read_value("scales", response, sizeof(response))) != ESP_OK) {
     lm_scale_adapter_registration_result("Could not read scale registrations; retrying later", false);
     goto release_owner;
   }
   lm_scale_registration_t registration = lm_scale_registration_classify(response, name);
+  lm_scale_debug_record("registration-check id=%lu classification=%d", (unsigned long)id, (int)registration);
   if (registration != LM_SCALE_REGISTRATION_MISSING) {
     lm_scale_adapter_registration_result(registration == LM_SCALE_REGISTRATION_PRESENT ?
       "Registration present; waiting for machine scale connection" : registration == LM_SCALE_REGISTRATION_OTHER ?
@@ -1872,10 +1924,12 @@ void maybe_restore_scale_registration(void) {
     (long long)esp_timer_get_time(), name);
   /* Read-back cannot be used as a persistence claim. Release this owner link
    * after delivery so it does not obstruct the gateway's scale connection. */
-  esp_err_t err = run_write_operation(s_link.write_handle, command, strlen(command) + 1, false, 0, NULL, 0);
+  err = scale_machine_ble_checked("registration-write", run_write_operation(s_link.write_handle, command, strlen(command) + 1, false, 0, NULL, 0));
   lm_scale_adapter_registration_result(err == ESP_OK ?
     "Registration requested; calibration completion and persistence unverified" :
     "Registration delivery failed; retrying with backoff", true);
 release_owner:
+  lm_scale_debug_record("registration-check id=%lu end elapsed_ms=%lld releasing_owner=1", (unsigned long)id,
+    (long long)((esp_timer_get_time() - started) / 1000));
   release_machine_owner_connection();
 }
