@@ -512,7 +512,7 @@ static void render_scale_section(httpd_req_t *req, const lm_ctrl_setup_portal_vi
   send_chunk_if_not_empty(req, escaped);
   httpd_resp_sendstr_chunk(req, "</pre><p>Records connection setup, registration, disconnects and protocol failures locally, without a computer. No continuous weight or normal tare/timer logs. Capture survives restarts until stopped. The bounded ring overwrites its oldest events. NTP supplies UTC timestamps; boot IDs and uptime remain available without network time.</p><form method=\"post\" action=\"/scale-debug\">");
   send_csrf_hidden_input(req, view);
-  httpd_resp_sendstr_chunk(req, "<div class=\"button-row\"><button name=\"action\" value=\"start\" type=\"submit\">Start Connection Log</button><button class=\"secondary\" name=\"action\" value=\"stop\" type=\"submit\">Stop Log</button><a href=\"/scale-debug.txt\">Download Log</a><button class=\"danger\" name=\"action\" value=\"clear\" type=\"submit\" onclick=\"return confirm('Stop capture and delete the stored connection log?');\">Clear Log</button></div></form></section>");
+  httpd_resp_sendstr_chunk(req, "<div class=\"button-row\"><button name=\"action\" value=\"start\" type=\"submit\">Start Connection Log</button><button class=\"secondary\" name=\"action\" value=\"stop\" type=\"submit\">Stop Log</button><button class=\"secondary\" type=\"button\" onclick=\"window.location.href='/scale-debug.txt'\">Download Log</button><button class=\"danger\" name=\"action\" value=\"clear\" type=\"submit\" onclick=\"return confirm('Stop capture and delete the stored connection log?');\">Clear Log</button></div></form></section>");
 }
 
 static void render_diagnostics_section(httpd_req_t *req, const lm_ctrl_setup_portal_view_t *view) {
