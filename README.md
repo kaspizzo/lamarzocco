@@ -5,7 +5,9 @@
 
 This repository contains a standalone ESP32-S3 firmware project for a round external La Marzocco controller.
 
-The aim is a dedicated hardware controller with BLE/cloud control, an on-device UI, recipe presets, and a local setup portal. It can also bridge supported BLE scales to a Linea Mini through an experimental controller-hosted scale adapter.
+The aim is a dedicated hardware controller with BLE/cloud control, an on-device UI, recipe presets, and a local setup portal with Wi-Fi firmware updates. It can also bridge supported BLE scales to a Linea Mini through an experimental controller-hosted scale adapter.
+
+Recent changes are listed in the [changelog](CHANGELOG.md).
 
 ## Project status
 
@@ -36,18 +38,36 @@ handles source reconnection and retries missing machine registrations.
 The adapter translates tare/timer operations and forwards fresh weight and
 battery data. A dimmed scale icon shows the physical-scale connection; full
 brightness requires fresh readings and a subscribed machine scale link.
+A small gold `∞`, `1` or `2` at the bright icon's lower-right corner shows the
+selected BBW mode when that mode is known.
 An optional persistent connection log records initialization and failures with
 NTP timestamps for diagnosis without USB. BBW-capable machines also expose
 mode and both dose targets in the controller UI and recipe presets.
 
 Scale support is **experimental and disabled by default**. Persistent location
 calibration and automatic weight-stop precision still need validation. The
-latest Acaia parser/diagnostic fixes are awaiting their next controller hardware
-test. The scale bridge depends on the machine's native BBW capability.
+current firmware has been installed and a fresh legacy Lunar/Mini scale link
+verified. Longer reconnect and tare/timer regression tests remain pending.
+The scale bridge depends on the machine's native BBW capability.
 
 Start with the [scale setup and troubleshooting guide](docs/controller/SCALE_ADAPTER.md),
 the [BOOKOO beta test guide](docs/controller/BOOKOO_BETA_TEST.md), or the
 [firmware implementation notes](firmware/esp32/README.md#experimental-ble-scale-adapter).
+
+## Firmware updates over Wi-Fi
+
+Install a controller application `.bin` from **Firmware → Install Firmware**
+in the local portal. The page shows upload progress, validates the image and
+restarts the controller. An update uses the inactive firmware slot, retaining
+the current image until validation finishes. Startup confirmation and rollback
+allow a failed new image to return to the previous working version.
+
+Existing controllers need a **one-time USB migration** before wireless updates
+are available. The migration helper backs up the complete flash, preserves the
+settings and log regions, and verifies them after writing. See the
+[firmware update and migration guide](docs/controller/FIRMWARE_UPDATES.md).
+The first migration and startup have been tested on hardware; an actual Wi-Fi
+upload and rollback on the controller still need validation.
 
 ## Support development
 
@@ -75,7 +95,8 @@ The current ESP32 firmware supports:
 - physical outer ring input
 - local haptic and LED-ring feedback
 - local Wi-Fi/cloud setup portal with Wi-Fi scan
-- setup portal sections for overview, controller settings, network, cloud, recipes, scale adapter, advanced settings, and diagnostics
+- setup portal sections for overview, controller settings, network, cloud, recipes, scale adapter, advanced settings, firmware updates, and diagnostics
+- firmware upload over Wi-Fi with progress, validation, restart and startup rollback after the one-time USB migration
 - optional local SVG upload for a custom controller header logo
 - setup AP QR code and captive-portal style onboarding
 - machine selection via La Marzocco cloud account
@@ -83,6 +104,7 @@ The current ESP32 firmware supports:
 - conditional USB and low-battery/charging indicators on the on-device status bar
 - an experimental BLE scale adapter with legacy Acaia Lunar, Lunar 2021 / USB-C beta and BOOKOO Mini/Ultra beta drivers
 - separate dimmed/bright scale indicators for physical-scale and machine scale connections
+- a gold `∞`, `1` or `2` beside the connected scale icon for the selected BBW mode
 - opt-in persistent connection diagnostics with NTP time and portal download
 - BLE control for:
   - coffee boiler temperature
@@ -111,7 +133,7 @@ The currently targeted hardware is a JC3636K718-style ESP32-S3 round controller 
 Representative controller UI screenshots are published as PNG files under `docs/controller/images/`.
 The full gallery is in [`docs/controller/SCREENSHOTS.md`](docs/controller/SCREENSHOTS.md).
 The published defaults intentionally show the text header, not an official La Marzocco logo.
-The current published examples intentionally show the local fallback state with BLE active and a crossed Wi-Fi icon while the selected machine is not yet reachable through cloud.
+The main examples below show the local fallback state with BLE active and a crossed Wi-Fi icon while the selected machine is not yet reachable through cloud. The gallery also includes connected scale and BBW-mode examples.
 
 | Coffee Boiler | Presets | Setup |
 | --- | --- | --- |
@@ -131,6 +153,7 @@ If you want to flash the controller:
 4. For firmware-specific notes, see [`firmware/esp32/README.md`](firmware/esp32/README.md)
 5. For scale selection, reconnect behavior and connection logging, see [`docs/controller/SCALE_ADAPTER.md`](docs/controller/SCALE_ADAPTER.md)
 6. For controller UI screenshots, see [`docs/controller/SCREENSHOTS.md`](docs/controller/SCREENSHOTS.md)
+7. For Wi-Fi firmware updates and the required one-time USB migration, see [`docs/controller/FIRMWARE_UPDATES.md`](docs/controller/FIRMWARE_UPDATES.md)
 
 ## Setup notes
 
@@ -138,7 +161,7 @@ If you want to flash the controller:
 - In that state the setup screen shows a QR code for the controller AP plus the AP name, password, and local setup IP so onboarding can start directly on a phone.
 - After home Wi-Fi is saved, the controller immediately tries to join that network. Once connected, the setup portal stays available again via the on-device setup gesture and the configured `http://<hostname>.local/` address.
 - On later boots with stored Wi-Fi, the controller retries the saved network automatically. If the STA link drops repeatedly, reconnect uses exponential backoff and the setup AP is brought back as a recovery path while background retries continue.
-- The browser setup portal is currently split into `Overview`, `Controller`, `Network`, `Cloud`, `Recipes`, `Scale Adapter`, `Advanced`, and `Diagnostics`.
+- The browser setup portal is currently split into `Overview`, `Controller`, `Network`, `Cloud`, `Recipes`, `Scale Adapter`, `Advanced`, `Firmware`, and `Diagnostics`.
 - A crossed Wi-Fi icon means the controller has account/network context but the selected machine is not currently reachable through cloud. BLE control can still stay active in that state.
 - BBW mode and dose-target settings use the cloud. The scale adapter's measurement stream uses BLE between the physical scale, controller and machine. While the machine scale link is established, controller commands use cloud fallback because the normal owner BLE link is released.
 - The cloud login path expects a direct La Marzocco account email/password. Accounts created only through Apple or Google sign-in are not expected to work with the current controller login flow.

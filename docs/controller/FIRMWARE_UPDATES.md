@@ -73,11 +73,12 @@ Prepare a plan without connecting to or writing the controller:
 ```sh
 python tools/controller_ota_migrate.py \
   --build-dir /absolute/path/to/build \
-  --expected-mac ac:a7:04:ef:76:c0 \
+  --expected-mac AA:BB:CC:DD:EE:FF \
   --backup-dir /absolute/private/path/to/new-backup
 ```
 
-At the next agreed USB flash, add `--port /dev/cu.usbmodem... --execute` using
+Replace the example MAC with the target controller's MAC reported by esptool.
+For the one-time USB migration, add `--port /dev/cu.usbmodem... --execute` using
 the same ESP-IDF Python environment that provides `esptool`. The helper:
 
 1. Reads a complete 16 MiB flash backup into a new private directory before any
@@ -104,5 +105,22 @@ python -m esptool --chip esp32s3 --port /dev/cu.usbmodem... write_flash \
 After USB migration, verify the boot version/slot and startup confirmation,
 Wi-Fi settings, presets, custom logo and downloaded connection log. Then test
 a normal Wi-Fi update, interrupted upload, and a deliberately unconfirmed
-test build returning to the previous version. Those hardware tests are still
-pending; no controller was flashed while preparing this feature.
+test build returning to the previous version.
+
+## Validation status (2026-11-10)
+
+The legacy-to-OTA USB migration was completed on the targeted ESP32-S3 controller.
+The bootloader, partition table, metadata and application matched their prepared
+images exactly. Complete before/after reads confirmed byte-identical NVS, PHY
+and storage regions, including the connection journal. Slot 0 passed startup
+confirmation, the Wi-Fi portal responded, and the log-download button worked.
+The legacy Acaia source and Mini scale link also reconnected after the controller
+returned to its normal position.
+
+143 C host tests passed normally and under AddressSanitizer/UndefinedBehaviorSanitizer,
+including fragmented uploads, rejected images, interrupted writes, failed image
+validation, access/CSRF guards and the pending-image startup deadline. Five Python
+migration tests passed. Browser checks covered upload/progress/confirmation and
+desktop/mobile layout with a simulated controller endpoint. Actual wireless
+installation and rollback on the controller remain pending; the startup check
+does not establish end-to-end OTA or brew-by-weight accuracy.
