@@ -90,6 +90,8 @@ struct lm_ctrl_ui_s {
   lv_obj_t *water_icon;
   lv_obj_t *ble_icon;
   lv_obj_t *scale_icon;
+  lv_obj_t *scale_mode_badge;
+  lv_obj_t *scale_mode_label;
   lv_obj_t *heat_arc;
   lv_obj_t *page_label;
   lv_obj_t *page_dots[LM_CTRL_UI_MAIN_PAGE_COUNT];

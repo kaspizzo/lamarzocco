@@ -228,6 +228,26 @@ static bool render_to_bmp(const char *path, const ctrl_state_t *state, const hos
       return false;
     }
   }
+  if (!lv_obj_has_flag(ui.scale_mode_badge, LV_OBJ_FLAG_HIDDEN)) {
+    lv_area_t badge, label;
+    lv_obj_get_coords(ui.scale_mode_badge, &badge);
+    lv_obj_get_coords(ui.scale_mode_label, &label);
+    if (label.x1 < badge.x1 || label.x2 > badge.x2 || label.y1 < badge.y1 || label.y2 > badge.y2) {
+      fprintf(stderr, "Scale mode glyph does not fit its badge: %s badge=%d,%d,%d,%d label=%d,%d,%d,%d\n", path,
+        badge.x1, badge.y1, badge.x2, badge.y2, label.x1, label.y1, label.x2, label.y2);
+      return false;
+    }
+    lv_obj_t *neighbors[] = {ui.wifi_icon, ui.ble_icon, ui.usb_icon, ui.battery_icon, ui.heat_icon, ui.water_icon};
+    for (unsigned i = 0; i < sizeof(neighbors) / sizeof(neighbors[0]); ++i) {
+      if (lv_obj_has_flag(neighbors[i], LV_OBJ_FLAG_HIDDEN)) continue;
+      lv_area_t other;
+      lv_obj_get_coords(neighbors[i], &other);
+      if (badge.x1 <= other.x2 && badge.x2 >= other.x1 && badge.y1 <= other.y2 && badge.y2 >= other.y1) {
+        fprintf(stderr, "Scale mode badge overlaps another status icon: %s\n", path);
+        return false;
+      }
+    }
+  }
   if (env->all_status_icons) {
     lv_obj_t *icons[] = {ui.wifi_icon, ui.ble_icon, ui.scale_icon, ui.usb_icon,
                         ui.battery_icon, ui.heat_icon, ui.water_icon};
@@ -448,9 +468,23 @@ static int generate_scale_screens(const char *output_dir) {
   snprintf(path, sizeof(path), "%s/scale-disconnected.bmp", output_dir);
   if (!render_to_bmp(path, &state, &env, NULL)) return 1;
   env.scale_indicator = LM_CTRL_SCALE_MACHINE_CONNECTED;
+  state.feature_mask = CTRL_FEATURE_BBW;
+  state.loaded_mask |= LM_CTRL_MACHINE_FIELD_BBW_MODE;
+  state.values.bbw_mode = CTRL_BBW_MODE_DOSE_2;
   env.all_status_icons = true;
   snprintf(path, sizeof(path), "%s/scale-all-icons.bmp", output_dir);
-  return render_to_bmp(path, &state, &env, NULL) ? 0 : 1;
+  if (!render_to_bmp(path, &state, &env, NULL)) return 1;
+
+  env.all_status_icons = false;
+  env.wifi_info.cloud_connected = env.wifi_info.machine_cloud_online = true;
+  const ctrl_bbw_mode_t modes[] = {CTRL_BBW_MODE_CONTINUOUS, CTRL_BBW_MODE_DOSE_1, CTRL_BBW_MODE_DOSE_2};
+  const char *names[] = {"continuous", "dose-1", "dose-2"};
+  for (unsigned i = 0; i < 3; ++i) {
+    state.values.bbw_mode = modes[i];
+    snprintf(path, sizeof(path), "%s/scale-mode-%s.bmp", output_dir, names[i]);
+    if (!render_to_bmp(path, &state, &env, NULL)) return 1;
+  }
+  return 0;
 }
 
 static int generate_preset_layout_screens(const char *output_dir) {

@@ -22,6 +22,7 @@ idf_component_register(
     "controller_shot_timer.c"
     "fonts/lm_ctrl_font_montserrat_14.c"
     "fonts/lm_ctrl_font_scale_14.c"
+    "fonts/lm_ctrl_font_scale_mode_10.c"
     "fonts/lm_ctrl_font_montserrat_16.c"
     "fonts/lm_ctrl_font_montserrat_20.c"
     "fonts/lm_ctrl_font_montserrat_28.c"
