@@ -68,3 +68,10 @@ mkdir -p "${BUILD_DIR}"
   -o "${OUTPUT}"
 
 "${OUTPUT}" "$@"
+
+"${CC_BIN}" -std=c11 -Wall -Wextra -Werror -Wno-unused-function -Wno-unused-parameter \
+  -DCONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=1 \
+  -I"${ROOT_DIR}/tests/ota/include" -I"${HOST_DIR}/include" -I"${ROOT_DIR}/main" -I"${CJSON_DIR}" \
+  "${ROOT_DIR}/tests/ota/test_firmware_update.c" "${HOST_DIR}/src/test_httpd.c" \
+  "${ROOT_DIR}/main/setup_portal_http.c" "${CJSON_DIR}/cJSON.c" -o "${BUILD_DIR}/ota_tests"
+"${BUILD_DIR}/ota_tests"

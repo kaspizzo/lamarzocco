@@ -80,6 +80,7 @@ static void send_nav(httpd_req_t *req) {
     "<a href=\"#recipes-section\">Recipes</a>"
     "<a href=\"#scale-section\">Scale Adapter</a>"
     "<a href=\"#advanced-section\">Advanced</a>"
+    "<a href=\"#firmware-section\">Firmware</a>"
     "<a href=\"#diagnostics-section\">Diagnostics</a>"
     "</nav>"
   );
@@ -520,6 +521,16 @@ static void render_diagnostics_section(httpd_req_t *req, const lm_ctrl_setup_por
   httpd_resp_sendstr_chunk(req, "</pre></section></section>");
 }
 
+static void render_firmware_section(httpd_req_t *req) {
+  httpd_resp_sendstr_chunk(req,
+    "<section id=\"firmware-section\" class=\"stack preset-anchor\"><div class=\"section-head\"><h2>Firmware Update</h2>"
+    "<p>Install a controller application .bin file over Wi-Fi.</p></div><div class=\"section-card\">"
+    "<label for=\"firmware-file\">Firmware file</label><input id=\"firmware-file\" type=\"file\" accept=\".bin,application/octet-stream\">"
+    "<p class=\"section-note\">Install while the machine is idle. Keep controller power connected until the restart has finished. Settings and recipes are retained.</p>"
+    "<button id=\"firmware-upload\" type=\"button\">Install Firmware</button>"
+    "<progress id=\"firmware-progress\" max=\"100\" value=\"0\" aria-label=\"Firmware upload progress\" hidden></progress>"
+    "<p id=\"firmware-status\" role=\"status\" aria-live=\"polite\"></p></div></section>");
+}
 static void send_page_script(httpd_req_t *req, const lm_ctrl_setup_portal_view_t *view, const char *history_target) {
   httpd_resp_sendstr_chunk(req, "<script>const csrfToken='");
   if (view != NULL) {
@@ -551,6 +562,13 @@ static void send_page_script(httpd_req_t *req, const lm_ctrl_setup_portal_view_t
     "if(scanButton&&networkList&&ssidInput){scanButton.addEventListener('click',async()=>{scanButton.disabled=true;scanButton.textContent='Scanning...';try{const response=await fetch('/wifi-scan',{headers:buildHeaders(),credentials:'same-origin'});const data=await response.json();networkList.innerHTML='<option value=\"\">Select from scan results</option>';(data.ssids||[]).forEach((ssid)=>{const option=document.createElement('option');option.value=ssid;option.textContent=ssid;networkList.appendChild(option);});scanButton.textContent=(data.ssids||[]).length?'Scan Again':'No Networks Found';}catch(error){scanButton.textContent='Scan Failed';}finally{scanButton.disabled=false;}});networkList.addEventListener('change',()=>{if(networkList.value){ssidInput.value=networkList.value;}});}"
     "if(logoUploadButton&&logoFileInput){logoUploadButton.addEventListener('click',async()=>{const file=logoFileInput&&logoFileInput.files?logoFileInput.files[0]:null;if(!file){setLogoStatus('Choose an SVG file first.',true);return;}if(!/\\.svg$/i.test(file.name)&&file.type!=='image/svg+xml'){setLogoStatus('Only SVG uploads are supported.',true);return;}logoUploadButton.disabled=true;logoUploadButton.textContent='Uploading...';setLogoStatus('',false);try{const svgText=await readSvgText(file);const image=await loadSvgImage(svgText);const logoBytes=rasterizeSvgToLvgl(image);const response=await fetch('/controller-logo',{method:'POST',headers:buildHeaders('application/json'),credentials:'same-origin',body:JSON.stringify({version:LOGO_VERSION,width:LOGO_WIDTH,height:LOGO_HEIGHT,data:bytesToBase64(logoBytes)})});const payload=await response.json().catch(()=>({ok:false,message:'Unexpected response from controller.'}));if(!response.ok||!payload.ok){throw new Error(payload.message||'Upload failed.');}if(logoState){logoState.textContent='Custom logo installed';}setLogoStatus(payload.message||'Custom logo saved.',false);logoFileInput.value='';}catch(error){setLogoStatus(error&&error.message?error.message:'Upload failed.',true);}finally{logoUploadButton.disabled=false;logoUploadButton.textContent='Upload Logo';}});}"
     "if(advancedForm&&presetCountSelect&&presetReduceConfirm){advancedForm.addEventListener('submit',(event)=>{const currentCount=Number(advancedForm.dataset.currentPresetCount||'0');const nextCount=Number(presetCountSelect.value||'0');presetReduceConfirm.value='';if(!currentCount||nextCount>=currentCount){return;}const deleted=[];for(let index=nextCount+1;index<=currentCount;index+=1){deleted.push(`Preset ${index}`);}const message=`Reducing the preset count from ${currentCount} to ${nextCount} permanently deletes ${deleted.join(' and ')}. Continue?`;if(!window.confirm(message)){event.preventDefault();return;}presetReduceConfirm.value='1';});}"
+    "const fwButton=document.getElementById('firmware-upload'),fwFile=document.getElementById('firmware-file'),fwProgress=document.getElementById('firmware-progress'),fwStatus=document.getElementById('firmware-status');"
+    "if(fwButton){fetch('/firmware-status',{headers:buildHeaders(),credentials:'same-origin',cache:'no-store'}).then(response=>response.ok?response.json():null).then(state=>{if(state&&!fwStatus.textContent){fwStatus.textContent='Current firmware: '+state.version+' ('+state.slot+')'+(state.ready?'':'. Startup check pending.');}}).catch(()=>{});fwButton.addEventListener('click',()=>{const file=fwFile.files[0];if(!file||!file.name.toLowerCase().endsWith('.bin')){fwStatus.textContent='Choose a controller application .bin file.';return;}"
+    "fwButton.disabled=true;fwFile.disabled=true;fwProgress.hidden=false;fwProgress.value=0;fwStatus.textContent='Uploading firmware...';const xhr=new XMLHttpRequest();xhr.open('POST','/firmware');xhr.timeout=150000;xhr.setRequestHeader('Content-Type','application/octet-stream');if(csrfToken){xhr.setRequestHeader('X-CSRF-Token',csrfToken);}"
+    "const unlock=()=>{fwButton.disabled=false;fwFile.disabled=false;};xhr.upload.onprogress=(event)=>{if(event.lengthComputable){fwProgress.value=event.loaded/event.total*100;if(event.loaded===event.total){fwStatus.textContent='Upload received. Validating firmware...';}}};"
+    "xhr.onerror=xhr.ontimeout=()=>{fwStatus.textContent='Connection lost. Reconnect to the controller and check its running firmware before retrying.';unlock();};"
+    "xhr.onload=async()=>{let result;try{result=JSON.parse(xhr.responseText);}catch(error){fwStatus.textContent='Unexpected response. Sign in again and check controller status.';unlock();return;}if(xhr.status!==200||!result.ok){fwStatus.textContent=result.message||'Firmware upload failed.';unlock();return;}fwStatus.textContent=result.message;if(!result.restarting){unlock();return;}"
+    "for(let attempt=0;attempt<60;attempt++){await new Promise(resolve=>setTimeout(resolve,2000));try{const response=await fetch('/firmware-status',{headers:buildHeaders(),credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(2000)});if(response.status===401||response.status===403){fwStatus.textContent='Controller is back. Sign in again to check the installed firmware version.';const link=document.createElement('a');link.href='/login';link.textContent=' Sign in';fwStatus.appendChild(link);unlock();return;}if(!response.ok){continue;}const running=await response.json();if(!running.ready){continue;}fwStatus.textContent=running.image===result.image?'Update complete. Firmware startup check passed.':'The new firmware was not confirmed. The previous firmware is running.';unlock();return;}catch(error){}}fwStatus.textContent='Controller has not confirmed the update yet. Reconnect and check its status.';unlock();};xhr.send(file);});}"
     "</script>"
   );
 
@@ -665,6 +683,7 @@ esp_err_t lm_ctrl_setup_portal_send_page(
   render_scale_section(req, view);
   httpd_resp_sendstr_chunk(req, "<script>{const address=document.getElementById('scale-address');const type=document.getElementById('scale-address-type');const candidates=document.getElementById('scale-candidates');address.addEventListener('input',()=>{const option=Array.from(candidates.options).find(o=>o.value===address.value);if(option){type.value=option.dataset.addressType;}});}</script>");
   render_advanced_section(req, view);
+  render_firmware_section(req);
   render_diagnostics_section(req, view);
   send_page_script(req, view, history_target);
 

@@ -401,6 +401,12 @@ Additional module notes:
 
 ## Build & flash quickstart
 
+The local portal supports application firmware uploads over Wi-Fi with two OTA
+slots and startup rollback. Existing controllers need the one-time, backed-up
+USB migration described in [Firmware updates](../../docs/controller/FIRMWARE_UPDATES.md).
+Do not use an app-only flash for that transition. Rollback must be enabled in
+existing sdkconfigs as well as the bootloader; new repository defaults enable it.
+
 `dev.sh` is the local Bash helper for macOS/Linux. Native Windows flashing is documented through the standard ESP-IDF terminal flow in `docs/controller/FLASHING_CONTROLLER.md`.
 
 The firmware requires ESP-IDF 5.5 or newer. ESP-IDF 5.4 is no longer supported
@@ -446,7 +452,9 @@ The hook runs `./firmware/esp32/dev.sh test` from the repository root. On a fres
 
 The `quick` command uses `idf.py app-flash monitor`, so only the app partition is reflashed after the initial full flash.
 
-If `partitions.csv` changes, run `./dev.sh full` once again instead of `quick`.
+For the legacy factory-to-OTA transition, use the migration helper in the guide
+above. For other `partitions.csv` changes, review preservation requirements
+before a full flash; never assume an app-only update can change the layout.
 Partition-layout changes can move the app offset, so reflashing only the app is
 not sufficient for that transition.
 

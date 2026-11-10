@@ -147,7 +147,9 @@ If you want to flash the controller:
 
 ## Security model and known limitations
 
-- There is currently no OTA update path. Firmware updates still require local USB flashing.
+- Firmware updates can be installed over Wi-Fi from the local portal after the
+  one-time USB migration to the two-slot OTA layout. See the
+  [firmware update and migration guide](docs/controller/FIRMWARE_UPDATES.md).
 - The setup AP and captive portal are local onboarding/recovery tools, not hardened hostile-network services.
 - The home-network portal assumes a trusted LAN unless you enable the optional portal admin password.
 - If you deliberately keep the LAN portal open, anyone on that same LAN can use it to change controller settings.

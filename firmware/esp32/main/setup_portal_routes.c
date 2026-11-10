@@ -17,6 +17,7 @@
 #include "machine_link.h"
 #include "scale_adapter.h"
 #include "scale_debug.h"
+#include "firmware_update.h"
 #include "setup_portal_http.h"
 #include "setup_portal_presenter.h"
 #include "wifi_setup_internal.h"
@@ -1184,6 +1185,15 @@ static esp_err_t handle_wifi_post(httpd_req_t *req) {
   return lm_ctrl_setup_portal_send_response(req, "Saved. The controller is now trying to join the configured Wi-Fi.", csrf_token);
 }
 
+static esp_err_t handle_firmware_post(httpd_req_t *req) {
+  httpd_resp_set_hdr(req, "Connection", "close");
+  if (!ensure_portal_api_access(req, true)) return ESP_FAIL;
+  return lm_ctrl_firmware_upload(req);
+}
+static esp_err_t handle_firmware_status_get(httpd_req_t *req) {
+  if (!ensure_portal_api_access(req, false)) return ESP_OK;
+  return lm_ctrl_firmware_status(req);
+}
 static esp_err_t handle_reboot_post(httpd_req_t *req) {
   char body[128];
   char csrf_token[LM_CTRL_RANDOM_TOKEN_HEX_LEN] = {0};
@@ -2018,10 +2028,14 @@ esp_err_t lm_ctrl_setup_portal_start_http_server(void) {
     return ESP_OK;
   }
 
-  config.max_uri_handlers = 38;
+  httpd_uri_t firmware_uri = {.uri = "/firmware", .method = HTTP_POST, .handler = handle_firmware_post};
+  httpd_uri_t firmware_status_uri = {.uri = "/firmware-status", .method = HTTP_GET, .handler = handle_firmware_status_get};
+  config.max_uri_handlers = 40;
   config.stack_size = LM_CTRL_SETUP_PORTAL_HTTPD_STACK_SIZE;
   config.uri_match_fn = httpd_uri_match_wildcard;
   ESP_RETURN_ON_ERROR(httpd_start(&s_state.http_server, &config), TAG, "Failed to start setup web server");
+  ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &firmware_uri), TAG, "Failed to register firmware upload");
+  ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &firmware_status_uri), TAG, "Failed to register firmware status");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &scale_adapter_uri), TAG, "Failed to register scale adapter handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &scale_debug_post_uri), TAG, "Failed to register scale debug handler");
   ESP_RETURN_ON_ERROR(httpd_register_uri_handler(s_state.http_server, &scale_debug_get_uri), TAG, "Failed to register scale debug download");

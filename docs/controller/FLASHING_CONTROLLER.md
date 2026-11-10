@@ -1,5 +1,11 @@
 # Flashing The Controller Firmware (ESP32 / ESP-IDF)
 
+**Existing controllers moving from the old single factory app to OTA:** use
+the [one-time USB migration guide](FIRMWARE_UPDATES.md) before the normal
+commands below. It backs up the chip and preserves settings, presets, logo and
+the debug journal. An app-only flash cannot install the OTA partition table
+or rollback-enabled bootloader. Later app updates can use the local portal.
+
 This is the shortest working path for building and flashing the round controller firmware in `firmware/esp32`.
 
 No vendor package is required.

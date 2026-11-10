@@ -16,6 +16,7 @@
 #include "board_leds.h"
 #include "board_power.h"
 #include "controller_runtime.h"
+#include "firmware_update.h"
 #include "controller_ui.h"
 #include "input.h"
 #include "machine_link.h"
@@ -125,11 +126,12 @@ void app_main(void) {
     .fetch_dashboard_values = machine_link_fetch_dashboard_values,
   };
   ESP_LOGI(TAG, "La Marzocco controller firmware starting");
+  ESP_ERROR_CHECK(lm_ctrl_firmware_boot_begin());
 
   input_queue = xQueueCreate(32, sizeof(lm_ctrl_input_event_t));
   if (input_queue == NULL) {
     ESP_LOGE(TAG, "Failed to allocate input queue");
-    return;
+    ESP_ERROR_CHECK(ESP_ERR_NO_MEM);
   }
 
   ESP_ERROR_CHECK(lm_ctrl_display_init(&display));
@@ -174,6 +176,7 @@ void app_main(void) {
    * a small internal tick event so async status-version checks, time-based UI
    * state, and LED updates stay responsive without a coarse poll loop.
    */
+  lm_ctrl_firmware_boot_ready();
   while (1) {
     lm_ctrl_input_event_t event;
     bool needs_render = false;
@@ -191,6 +194,7 @@ void app_main(void) {
     lm_ctrl_runtime_handle_machine_status_change(&runtime, &needs_render);
     lm_ctrl_runtime_handle_preset_change(&runtime, &needs_render);
     lm_ctrl_runtime_tick(&runtime, &needs_render);
+    lm_ctrl_firmware_boot_tick();
 
     if (needs_render && esp_lv_adapter_lock(-1) == ESP_OK) {
       lm_ctrl_runtime_build_ui_view(&runtime, &ui_view);
