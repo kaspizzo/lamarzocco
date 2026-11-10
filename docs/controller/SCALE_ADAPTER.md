@@ -89,6 +89,7 @@ connects to the controller's virtual scale. Both connections must work.
 | --- | --- |
 | Dimmed balance-scale header icon | The physical scale is connected; the machine scale link or fresh measurements are still pending. |
 | Bright balance-scale header icon | Fresh physical-scale measurements and a subscribed machine scale link are both present. |
+| Small `∞`, `1` or `2` at the bright scale icon's lower-right corner | Current BBW selection: Continuous, Dose 1 or Dose 2. The mark uses the same gold color as the scale icon. It is hidden while the icon is dimmed, or BBW support/the mode value is unavailable. |
 | No balance-scale header icon | The physical scale is disconnected, the adapter is disabled or a protocol fault stopped it. |
 | `Source: connected, awaiting data` | BLE connected, but setup or the fresh measurement stream is incomplete. |
 | `Source: fresh` | Validated measurements are at most one second old. |

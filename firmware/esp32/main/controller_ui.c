@@ -27,6 +27,7 @@ static const lv_color_t COLOR_BUTTON = LV_COLOR_MAKE(0x3A, 0x2A, 0x21);
 static const char *BATTERY_CHARGING_SYMBOL = LV_SYMBOL_BATTERY_FULL LV_SYMBOL_CHARGE;
 static const char *ICON_SLASH_SYMBOL = "/";
 static const char *ICON_SCALE_SYMBOL = "\xef\x89\x8e"; /* Font Awesome balance-scale, U+F24E. */
+static const char *ICON_INFINITY_SYMBOL = "\xef\x94\xb4"; /* Font Awesome infinity, U+F534. */
 
 #define UI_FONT_14 (&lm_ctrl_font_montserrat_14)
 #define UI_FONT_16 (&lm_ctrl_font_montserrat_16)
@@ -729,7 +730,7 @@ static void render_shot_timer_screen(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *
   set_label_text(ui->shot_timer_value, view->shot_timer_text, COLOR_TEXT);
 }
 
-static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *view) {
+static void render_connection_icons(lm_ctrl_ui_t *ui, const ctrl_state_t *state, const lm_ctrl_ui_view_t *view) {
   typedef struct {
     lv_obj_t *obj;
     const char *symbol;
@@ -742,7 +743,7 @@ static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *v
   const int step = 28;
   const int y = 48;
 
-  if (ui == NULL || view == NULL) {
+  if (ui == NULL || state == NULL || view == NULL) {
     return;
   }
 
@@ -756,6 +757,7 @@ static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *v
   set_hidden(ui->water_icon, true);
   set_hidden(ui->ble_icon, true);
   set_hidden(ui->scale_icon, true);
+  set_hidden(ui->scale_mode_badge, true);
 
   switch (wifi_indicator) {
     case LM_CTRL_INDICATOR_CROSSED:
@@ -837,6 +839,23 @@ static void render_connection_icons(lm_ctrl_ui_t *ui, const lm_ctrl_ui_view_t *v
       set_hidden(ui->wifi_slash_icon, false);
       set_label_text(ui->wifi_slash_icon, ICON_SLASH_SYMBOL, COLOR_MUTED);
       lv_obj_align(ui->wifi_slash_icon, LV_ALIGN_TOP_MID, x + 1, y - 1);
+    }
+  }
+  /* A remembered/default dose must not look like a known machine mode. */
+  if (view->scale_indicator == LM_CTRL_SCALE_MACHINE_CONNECTED &&
+      (state->feature_mask & CTRL_FEATURE_BBW) != 0 &&
+      (state->loaded_mask & LM_CTRL_MACHINE_FIELD_BBW_MODE) != 0) {
+    const char *mode = NULL;
+    switch (state->values.bbw_mode) {
+      case CTRL_BBW_MODE_DOSE_1: mode = "1"; break;
+      case CTRL_BBW_MODE_DOSE_2: mode = "2"; break;
+      case CTRL_BBW_MODE_CONTINUOUS: mode = ICON_INFINITY_SYMBOL; break;
+      default: break;
+    }
+    if (mode != NULL) {
+      set_label_text(ui->scale_mode_label, mode, COLOR_ACTIVE);
+      lv_obj_align_to(ui->scale_mode_badge, ui->scale_icon, LV_ALIGN_BOTTOM_RIGHT, 5, 7);
+      set_hidden(ui->scale_mode_badge, false);
     }
   }
 }
@@ -1082,6 +1101,17 @@ esp_err_t lm_ctrl_ui_init(
   lv_obj_align(ui->scale_icon, LV_ALIGN_TOP_MID, 0, 48);
   set_hidden(ui->scale_icon, true);
 
+  ui->scale_mode_badge = lv_obj_create(ui->screen);
+  lv_obj_remove_style_all(ui->scale_mode_badge);
+  lv_obj_set_size(ui->scale_mode_badge, 14, 12);
+  lv_obj_set_style_bg_color(ui->scale_mode_badge, COLOR_BG, 0);
+  lv_obj_set_style_bg_opa(ui->scale_mode_badge, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(ui->scale_mode_badge, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+  ui->scale_mode_label = lv_label_create(ui->scale_mode_badge);
+  lv_obj_set_style_text_font(ui->scale_mode_label, &lm_ctrl_font_scale_mode_10, 0);
+  lv_obj_center(ui->scale_mode_label);
+  set_hidden(ui->scale_mode_badge, true);
+
   ui->page_label = lv_label_create(ui->screen);
   lv_obj_set_style_text_font(ui->page_label, UI_FONT_14, 0);
   lv_obj_align(ui->page_label, LV_ALIGN_TOP_MID, 0, 46);
@@ -1298,7 +1328,7 @@ void lm_ctrl_ui_render(lm_ctrl_ui_t *ui, const ctrl_state_t *state, const lm_ctr
 
   if (ui->rendered_shot_timer_visible) {
     render_shot_timer_screen(ui, view);
-    render_connection_icons(ui, view);
+    render_connection_icons(ui, state, view);
     return;
   }
 
@@ -1317,5 +1347,5 @@ void lm_ctrl_ui_render(lm_ctrl_ui_t *ui, const ctrl_state_t *state, const lm_ctr
       break;
   }
 
-  render_connection_icons(ui, view);
+  render_connection_icons(ui, state, view);
 }

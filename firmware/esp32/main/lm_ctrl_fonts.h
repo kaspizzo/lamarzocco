@@ -4,6 +4,7 @@
 
 LV_FONT_DECLARE(lm_ctrl_font_montserrat_14)
 LV_FONT_DECLARE(lm_ctrl_font_scale_14)
+LV_FONT_DECLARE(lm_ctrl_font_scale_mode_10)
 LV_FONT_DECLARE(lm_ctrl_font_montserrat_16)
 LV_FONT_DECLARE(lm_ctrl_font_montserrat_20)
 LV_FONT_DECLARE(lm_ctrl_font_montserrat_28)

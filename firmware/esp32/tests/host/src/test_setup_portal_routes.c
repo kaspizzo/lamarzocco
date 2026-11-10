@@ -20,6 +20,15 @@ static esp_err_t s_stub_cloud_refresh_ret;
 
 #include "../../../main/setup_portal_routes.c"
 
+static unsigned s_firmware_upload_calls;
+esp_err_t lm_ctrl_firmware_upload(httpd_req_t *req) {
+  ++s_firmware_upload_calls;
+  return lm_ctrl_setup_portal_send_json_result(req, "200 OK", true, "test upload");
+}
+esp_err_t lm_ctrl_firmware_status(httpd_req_t *req) {
+  return lm_ctrl_setup_portal_send_json_result(req, "200 OK", true, "test status");
+}
+
 static lm_scale_adapter_config_t s_stub_scale_config;
 static unsigned s_stub_scale_saves;
 static unsigned s_stub_debug_saves, s_stub_debug_exports, s_stub_debug_clears;
@@ -695,7 +704,7 @@ static int test_http_server_start_uses_explicit_stack_budget(void) {
   ASSERT_EQ_INT(ESP_OK, lm_ctrl_setup_portal_start_http_server());
   config = test_httpd_last_config();
   ASSERT_TRUE(config != NULL);
-  ASSERT_EQ_INT(38, config->max_uri_handlers);
+  ASSERT_EQ_INT(40, config->max_uri_handlers);
   ASSERT_EQ_INT(LM_CTRL_SETUP_PORTAL_HTTPD_STACK_SIZE, config->stack_size);
   ASSERT_TRUE(config->uri_match_fn != NULL);
 
@@ -703,6 +712,30 @@ static int test_http_server_start_uses_explicit_stack_budget(void) {
   return 0;
 }
 
+static int test_firmware_upload_requires_session_and_header_csrf(void) {
+  httpd_req_t *login = test_httpd_request_create(), *req = test_httpd_request_create();
+  ASSERT_TRUE(login && req);
+  reset_route_test_state();
+  s_firmware_upload_calls = 0;
+  strcpy(s_stub_web_password, "secret123");
+  s_state.web_auth_mode = LM_CTRL_WEB_AUTH_ENABLED;
+  test_httpd_request_set_uri(req, "/firmware");
+  ASSERT_EQ_INT(ESP_FAIL, handle_firmware_post(req));
+  ASSERT_EQ_INT(0, s_firmware_upload_calls);
+  test_httpd_request_set_uri(login, "/login");
+  test_httpd_request_set_body(login, "password=secret123");
+  ASSERT_EQ_INT(ESP_OK, handle_login_post(login));
+  test_httpd_request_set_cookie(req, test_httpd_response_header(login, "Set-Cookie"));
+  ASSERT_EQ_INT(ESP_FAIL, handle_firmware_post(req));
+  ASSERT_EQ_INT(0, s_firmware_upload_calls);
+  char csrf[LM_CTRL_RANDOM_TOKEN_HEX_LEN];
+  extract_csrf_token(test_httpd_request_body(login), csrf, sizeof(csrf));
+  test_httpd_request_set_header(req, "X-CSRF-Token", csrf);
+  ASSERT_EQ_INT(ESP_OK, handle_firmware_post(req));
+  ASSERT_EQ_INT(1, s_firmware_upload_calls);
+  test_httpd_request_destroy(req); test_httpd_request_destroy(login);
+  return 0;
+}
 static int test_scale_adapter_post_requires_auth_and_csrf_and_keeps_binding(void) {
   httpd_req_t *login = test_httpd_request_create();
   httpd_req_t *req = test_httpd_request_create();
@@ -779,6 +812,7 @@ static int test_scale_debug_capture_and_download_require_portal_access(void) {
 }
 
 int run_setup_portal_route_tests(void) {
+  RUN_TEST(test_firmware_upload_requires_session_and_header_csrf);
   RUN_TEST(test_scale_debug_capture_and_download_require_portal_access);
   RUN_TEST(test_scale_adapter_post_requires_auth_and_csrf_and_keeps_binding);
   RUN_TEST(test_parse_advanced_form_reads_supported_values);

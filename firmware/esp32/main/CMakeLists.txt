@@ -20,8 +20,10 @@ idf_component_register(
     "controller_connectivity.c"
     "controller_ui.c"
     "controller_shot_timer.c"
+    "firmware_update.c"
     "fonts/lm_ctrl_font_montserrat_14.c"
     "fonts/lm_ctrl_font_scale_14.c"
+    "fonts/lm_ctrl_font_scale_mode_10.c"
     "fonts/lm_ctrl_font_montserrat_16.c"
     "fonts/lm_ctrl_font_montserrat_20.c"
     "fonts/lm_ctrl_font_montserrat_28.c"
@@ -52,6 +54,7 @@ idf_component_register(
     "."
   REQUIRES
     bt
+    app_update
     esp_app_format
     esp_partition
     mdns
@@ -69,3 +72,6 @@ idf_component_register(
     nvs_flash
     nvs_sec_provider
 )
+
+# Retain the OTA layout ABI even if the compiler inlines its header comparison.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-u lm_ctrl_firmware_update_abi")

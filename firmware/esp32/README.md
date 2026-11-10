@@ -86,6 +86,9 @@ scale is connected. It reaches full brightness only with fresh source readings
 and a subscribed machine scale link. It is hidden when the source disconnects,
 the adapter is disabled or a protocol fault stops the adapter. Losing only the
 machine link dims the icon again. Both links also remain visible in the portal.
+A small gold `∞`, `1` or `2` marks Continuous, Dose 1 or Dose 2 at the bright
+icon's lower-right corner. It follows the icon as the status row changes and
+is hidden while the scale is dimmed/disconnected or the BBW mode is unknown.
 
 The portal's **Connection Debug Log** optionally records initialization,
 registration, link failures and recovery in a persistent 1 MiB flash ring.
@@ -401,6 +404,12 @@ Additional module notes:
 
 ## Build & flash quickstart
 
+The local portal supports application firmware uploads over Wi-Fi with two OTA
+slots and startup rollback. Existing controllers need the one-time, backed-up
+USB migration described in [Firmware updates](../../docs/controller/FIRMWARE_UPDATES.md).
+Do not use an app-only flash for that transition. Rollback must be enabled in
+existing sdkconfigs as well as the bootloader; new repository defaults enable it.
+
 `dev.sh` is the local Bash helper for macOS/Linux. Native Windows flashing is documented through the standard ESP-IDF terminal flow in `docs/controller/FLASHING_CONTROLLER.md`.
 
 The firmware requires ESP-IDF 5.5 or newer. ESP-IDF 5.4 is no longer supported
@@ -445,8 +454,13 @@ If you want the host-side firmware tests to run automatically before every local
 The hook runs `./firmware/esp32/dev.sh test` from the repository root. On a fresh checkout, build the firmware once first so `managed_components/` is available for the host test runner.
 
 The `quick` command uses `idf.py app-flash monitor`, so only the app partition is reflashed after the initial full flash.
+With the OTA layout, this writes slot 0 and does not automatically select it
+for boot. After a wireless update has switched the running slot, use the portal
+for normal application updates rather than assuming `quick` updates that slot.
 
-If `partitions.csv` changes, run `./dev.sh full` once again instead of `quick`.
+For the legacy factory-to-OTA transition, use the migration helper in the guide
+above. For other `partitions.csv` changes, review preservation requirements
+before a full flash; never assume an app-only update can change the layout.
 Partition-layout changes can move the app offset, so reflashing only the app is
 not sufficient for that transition.
 

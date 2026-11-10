@@ -4,7 +4,7 @@ OBJDIR := $(CURDIR)/build
 OUT_DIR := $(CURDIR)/out
 DOCS_DIR := $(ROOT_DIR)/docs/controller/images
 PORTAL_PREVIEW := $(CURDIR)/controller_setup_portal_preview.html
-DEVICE_SHOTS := boiler prebrew-on-time prebrew-off-time steam-boiler status preset-view preset-bbw-en scale-source-connected scale-connected first-setup setup-with-wlan-connected
+DEVICE_SHOTS := boiler prebrew-on-time prebrew-off-time steam-boiler status preset-view preset-bbw-en scale-source-connected scale-connected scale-mode-continuous scale-mode-dose-1 scale-mode-dose-2 first-setup setup-with-wlan-connected
 
 include $(LVGL_DIR)/src/core/lv_core.mk
 include $(LVGL_DIR)/src/draw/lv_draw.mk
@@ -20,6 +20,7 @@ CSRCS += $(ROOT_DIR)/firmware/esp32/main/controller_state.c
 CSRCS += $(ROOT_DIR)/firmware/esp32/tests/host/src/test_nvs.c
 CSRCS += $(ROOT_DIR)/firmware/esp32/main/fonts/lm_ctrl_font_montserrat_14.c
 CSRCS += $(ROOT_DIR)/firmware/esp32/main/fonts/lm_ctrl_font_scale_14.c
+CSRCS += $(ROOT_DIR)/firmware/esp32/main/fonts/lm_ctrl_font_scale_mode_10.c
 CSRCS += $(ROOT_DIR)/firmware/esp32/main/fonts/lm_ctrl_font_montserrat_16.c
 CSRCS += $(ROOT_DIR)/firmware/esp32/main/fonts/lm_ctrl_font_montserrat_20.c
 CSRCS += $(ROOT_DIR)/firmware/esp32/main/fonts/lm_ctrl_font_montserrat_28.c

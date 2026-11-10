@@ -35,6 +35,15 @@ to show that distinction.
 | --- | --- |
 | ![Dimmed scale icon](./images/scale-source-connected.png) | ![Bright scale icon](./images/scale-connected.png) |
 
+When the scale icon is bright and the BBW mode is known, a small gold `∞`, `1`
+or `2` marks the current selection at its lower-right corner. It follows the
+scale icon when the status row changes and disappears with a dimmed/hidden
+scale icon. Renderer checks also cover the badge with all seven status icons.
+
+| Continuous | Dose 1 | Dose 2 |
+| --- | --- | --- |
+| ![Continuous scale mode](./images/scale-mode-continuous.png) | ![Scale mode Dose 1](./images/scale-mode-dose-1.png) | ![Scale mode Dose 2](./images/scale-mode-dose-2.png) |
+
 ## Setup screens
 
 | First setup AP | Setup with Wi-Fi connected |
